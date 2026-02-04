@@ -69,6 +69,7 @@ async fn main() -> Result<()> {
         config.server.socket_path.clone(),
         memory.clone(),
         task_manager.clone(),
+        trigger_registry.clone(),
     );
     tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {

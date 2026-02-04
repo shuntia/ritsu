@@ -3,6 +3,7 @@
 #![allow(clippy::missing_const_for_fn)]
 #![allow(clippy::uninlined_format_args)]
 #![allow(clippy::match_same_arms)]
+#![allow(clippy::format_push_string)]
 
 use anyhow::Result;
 use ritsu_common::protocol::{ClientRequest, ServerResponse};
@@ -13,11 +14,13 @@ use tracing::{error, info, warn};
 
 use crate::memory::MemoryManager;
 use crate::tasks::TaskManager;
+use crate::trigger::TriggerRegistry;
 
 pub struct IpcServer {
     socket_path: String,
     memory: Arc<MemoryManager>,
     task_manager: Arc<TaskManager>,
+    trigger_registry: Arc<TriggerRegistry>,
 }
 
 impl IpcServer {
@@ -25,11 +28,13 @@ impl IpcServer {
         socket_path: String,
         memory: Arc<MemoryManager>,
         task_manager: Arc<TaskManager>,
+        trigger_registry: Arc<TriggerRegistry>,
     ) -> Self {
         Self {
             socket_path,
             memory,
             task_manager,
+            trigger_registry,
         }
     }
 
@@ -47,9 +52,10 @@ impl IpcServer {
                 Ok((stream, _)) => {
                     let memory = self.memory.clone();
                     let task_manager = self.task_manager.clone();
+                    let trigger_registry = self.trigger_registry.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, memory, task_manager).await {
+                        if let Err(e) = handle_client(stream, memory, task_manager, trigger_registry).await {
                             error!("Client handler error: {}", e);
                         }
                     });
@@ -66,6 +72,7 @@ async fn handle_client(
     mut stream: UnixStream,
     memory: Arc<MemoryManager>,
     task_manager: Arc<TaskManager>,
+    trigger_registry: Arc<TriggerRegistry>,
 ) -> Result<()> {
     loop {
         // Read message length (4 bytes)
@@ -95,7 +102,7 @@ async fn handle_client(
         info!("Received request: {:?}", request);
 
         // Handle request
-        let response = handle_request(request, &memory, &task_manager).await;
+        let response = handle_request(request, &memory, &task_manager, &trigger_registry).await;
 
         // Serialize response
         let response_data = bincode::serialize(&response)?;
@@ -114,6 +121,7 @@ async fn handle_request(
     request: ClientRequest,
     memory: &MemoryManager,
     task_manager: &TaskManager,
+    trigger_registry: &TriggerRegistry,
 ) -> ServerResponse {
     match request {
         ClientRequest::Ping => ServerResponse::Pong,
@@ -134,9 +142,58 @@ async fn handle_request(
         }
 
         ClientRequest::ListTriggers => {
-            // TODO: Get triggers from TriggerRegistry
+            let triggers = trigger_registry.get_all_triggers().await;
+            let trigger_infos = triggers
+                .into_iter()
+                .map(|t| {
+                    let (trigger_type_str, schedule_str) = match &t.trigger_type {
+                        crate::trigger::TriggerType::Time(time) => ("time".to_string(), time.clone()),
+                        crate::trigger::TriggerType::Interval(secs) => ("interval".to_string(), secs.to_string()),
+                        crate::trigger::TriggerType::Inactivity(secs) => ("inactivity".to_string(), secs.to_string()),
+                        crate::trigger::TriggerType::Dynamic => ("dynamic".to_string(), String::new()),
+                    };
+                    ritsu_common::protocol::TriggerInfo {
+                        id: t.id,
+                        name: t.name,
+                        trigger_type: trigger_type_str,
+                        schedule: schedule_str,
+                        enabled: t.enabled,
+                    }
+                })
+                .collect();
             ServerResponse::Triggers {
-                triggers: Vec::new(),
+                triggers: trigger_infos,
+            }
+        }
+
+        ClientRequest::CreateTrigger {
+            name,
+            trigger_type,
+            schedule,
+        } => {
+            match trigger_registry.create_trigger(&name, &trigger_type, &schedule).await {
+                Ok(()) => ServerResponse::Ok,
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to create trigger: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::DeleteTrigger { name } => {
+            match trigger_registry.delete_trigger(&name).await {
+                Ok(()) => ServerResponse::Ok,
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to delete trigger: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::DisableTrigger { name } => {
+            match trigger_registry.disable_trigger(&name).await {
+                Ok(()) => ServerResponse::Ok,
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to disable trigger: {}", e),
+                },
             }
         }
 
@@ -227,9 +284,79 @@ async fn handle_request(
         }
 
         ClientRequest::QueryMemory { query_type, date_range: _ } => {
-            // TODO: Implement actual memory queries based on query_type
-            let content = format!("Memory query result for {:?}", query_type);
-            ServerResponse::Memory { content }
+            use ritsu_common::protocol::MemoryQueryType;
+            
+            // Default to 7 days for queries (date_range could be used for more specific filtering in future)
+            let days = 7;
+            
+            let result = match query_type {
+                MemoryQueryType::Recent => {
+                    match memory.query_recent_conversations(days).await {
+                        Ok(conversations) => {
+                            if conversations.is_empty() {
+                                "No recent conversations found.".to_string()
+                            } else {
+                                let mut output = format!("Recent conversations (last {days} days):\n\n");
+                                for (date, role, content) in conversations {
+                                    output.push_str(&format!("[{date}] {role}: {content}\n"));
+                                }
+                                output
+                            }
+                        }
+                        Err(e) => format!("Error querying conversations: {e}"),
+                    }
+                }
+                MemoryQueryType::Daily => {
+                    match memory.query_daily_summaries(days).await {
+                        Ok(summaries) => {
+                            if summaries.is_empty() {
+                                "No daily summaries found.".to_string()
+                            } else {
+                                let mut output = format!("Daily summaries (last {days} days):\n\n");
+                                for (date, summary) in summaries {
+                                    output.push_str(&format!("[{date}]\n{summary}\n\n"));
+                                }
+                                output
+                            }
+                        }
+                        Err(e) => format!("Error querying daily summaries: {e}"),
+                    }
+                }
+                MemoryQueryType::Monthly => {
+                    match memory.query_monthly_summaries(12).await {
+                        Ok(summaries) => {
+                            if summaries.is_empty() {
+                                "No monthly summaries found.".to_string()
+                            } else {
+                                let mut output = "Monthly summaries:\n\n".to_string();
+                                for (year_month, summary, days_count) in summaries {
+                                    output.push_str(&format!("[{year_month}] ({days_count} days)\n{summary}\n\n"));
+                                }
+                                output
+                            }
+                        }
+                        Err(e) => format!("Error querying monthly summaries: {e}"),
+                    }
+                }
+                MemoryQueryType::Notes => {
+                    match memory.query_notes(50).await {
+                        Ok(notes) => {
+                            if notes.is_empty() {
+                                "No notes found.".to_string()
+                            } else {
+                                let mut output = "Notes:\n\n".to_string();
+                                for (id, content, _tags) in notes {
+                                    output.push_str(&format!("#{id}: {content}\n\n"));
+                                }
+                                output
+                            }
+                        }
+                        Err(e) => format!("Error querying notes: {e}"),
+                    }
+                }
+            };
+            
+            ServerResponse::Memory { content: result }
         }
     }
 }

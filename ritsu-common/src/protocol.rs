@@ -13,6 +13,16 @@ pub enum ClientRequest {
     Shutdown,
     /// List all triggers
     ListTriggers,
+    /// Create a new trigger
+    CreateTrigger {
+        name: String,
+        trigger_type: String,
+        schedule: String,
+    },
+    /// Delete a trigger
+    DeleteTrigger { name: String },
+    /// Disable a trigger
+    DisableTrigger { name: String },
     /// List tasks with optional filters
     ListTasks { filter: Option<TaskFilter> },
     /// Create a new task

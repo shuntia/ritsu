@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 #![allow(clippy::match_same_arms)]
 #![allow(clippy::option_if_let_else)]
+#![allow(clippy::uninlined_format_args)]
 
 use anyhow::Result;
 use chrono::{Datelike, Days, Local, NaiveTime, TimeZone};
@@ -56,39 +57,42 @@ impl TriggerRegistry {
 
     pub async fn load_from_database(&self) -> Result<()> {
         let conn = Connection::open(&self.db_path)?;
-        let mut stmt = conn.prepare("SELECT id, name, trigger_type, schedule, enabled, created_by, metadata FROM triggers WHERE enabled = 1")?;
         
-        let triggers_iter = stmt.query_map([], |row| {
-            let id: i64 = row.get(0)?;
-            let name: String = row.get(1)?;
-            let trigger_type_str: String = row.get(2)?;
-            let schedule: String = row.get(3)?;
-            let enabled: bool = row.get(4)?;
-            let created_by: String = row.get(5)?;
-            let metadata_json: String = row.get(6)?;
+        let loaded_triggers: Vec<Trigger> = {
+            let mut stmt = conn.prepare("SELECT id, name, trigger_type, schedule, enabled, created_by, metadata FROM triggers WHERE enabled = 1")?;
+            
+            let triggers_iter = stmt.query_map([], |row| {
+                let id: i64 = row.get(0)?;
+                let name: String = row.get(1)?;
+                let trigger_type_str: String = row.get(2)?;
+                let schedule: String = row.get(3)?;
+                let enabled: bool = row.get(4)?;
+                let created_by: String = row.get(5)?;
+                let metadata_json: String = row.get(6)?;
 
-            let trigger_type = match trigger_type_str.as_str() {
-                "time" => TriggerType::Time(schedule),
-                "interval" => TriggerType::Interval(schedule.parse().unwrap_or(3600)),
-                "inactivity" => TriggerType::Inactivity(schedule.parse().unwrap_or(1800)),
-                "dynamic" => TriggerType::Dynamic,
-                _ => TriggerType::Dynamic,
-            };
+                let trigger_type = match trigger_type_str.as_str() {
+                    "time" => TriggerType::Time(schedule),
+                    "interval" => TriggerType::Interval(schedule.parse().unwrap_or(3600)),
+                    "inactivity" => TriggerType::Inactivity(schedule.parse().unwrap_or(1800)),
+                    "dynamic" => TriggerType::Dynamic,
+                    _ => TriggerType::Dynamic,
+                };
 
-            let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
-                .unwrap_or_default();
+                let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
+                    .unwrap_or_default();
 
-            Ok(Trigger {
-                id,
-                name,
-                trigger_type,
-                enabled,
-                created_by,
-                metadata,
-            })
-        })?;
+                Ok(Trigger {
+                    id,
+                    name,
+                    trigger_type,
+                    enabled,
+                    created_by,
+                    metadata,
+                })
+            })?;
 
-        let loaded_triggers: Vec<Trigger> = triggers_iter.filter_map(Result::ok).collect();
+            triggers_iter.filter_map(Result::ok).collect()
+        };
 
         let mut triggers = self.triggers.write().await;
         triggers.clear();
@@ -173,6 +177,53 @@ impl TriggerRegistry {
 
     pub async fn get_all_triggers(&self) -> Vec<Trigger> {
         self.triggers.read().await.clone()
+    }
+
+    pub async fn create_trigger(
+        &self,
+        name: &str,
+        trigger_type: &str,
+        schedule: &str,
+    ) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        
+        conn.execute(
+            "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
+             VALUES (?1, ?2, ?3, 1, 'user', '{}', datetime('now'))",
+            (name, trigger_type, schedule),
+        )?;
+
+        self.load_from_database().await?;
+        Ok(())
+    }
+
+    pub async fn delete_trigger(&self, name: &str) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        
+        let rows = conn.execute("DELETE FROM triggers WHERE name = ?1", [name])?;
+        
+        if rows == 0 {
+            anyhow::bail!("Trigger not found: {}", name);
+        }
+
+        self.load_from_database().await?;
+        Ok(())
+    }
+
+    pub async fn disable_trigger(&self, name: &str) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        
+        let rows = conn.execute(
+            "UPDATE triggers SET enabled = 0 WHERE name = ?1",
+            [name],
+        )?;
+        
+        if rows == 0 {
+            anyhow::bail!("Trigger not found: {}", name);
+        }
+
+        self.load_from_database().await?;
+        Ok(())
     }
 }
 

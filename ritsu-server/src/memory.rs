@@ -277,4 +277,78 @@ impl MemoryManager {
         info!("Stored {analysis_type} idle analysis");
         Ok(())
     }
+
+    /// Query recent conversations
+    pub async fn query_recent_conversations(&self, days: u32) -> Result<Vec<(String, String, String)>> {
+        let cutoff_date = chrono::Utc::now()
+            .date_naive()
+            .checked_sub_days(chrono::Days::new(u64::from(days)))
+            .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
+
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT date, role, content FROM daily_conversations 
+             WHERE date >= ?1 ORDER BY date DESC, id DESC LIMIT 100"
+        )?;
+        
+        let rows = stmt.query_map([cutoff_date.to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+
+        let results: Vec<(String, String, String)> = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
+
+    /// Query daily summaries
+    pub async fn query_daily_summaries(&self, days: u32) -> Result<Vec<(String, String)>> {
+        let cutoff_date = chrono::Utc::now()
+            .date_naive()
+            .checked_sub_days(chrono::Days::new(u64::from(days)))
+            .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
+
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT date, summary FROM daily_summaries 
+             WHERE date >= ?1 ORDER BY date DESC"
+        )?;
+        
+        let rows = stmt.query_map([cutoff_date.to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+
+        let results: Vec<(String, String)> = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
+
+    /// Query monthly summaries
+    pub async fn query_monthly_summaries(&self, months: u32) -> Result<Vec<(String, String, i32)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT year_month, summary, days_included FROM monthly_summaries 
+             ORDER BY year_month DESC LIMIT ?1"
+        )?;
+        
+        let rows = stmt.query_map([months], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+
+        let results: Vec<(String, String, i32)> = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
+
+    /// Query notes
+    pub async fn query_notes(&self, limit: u32) -> Result<Vec<(i64, String, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, content, tags FROM notes 
+             ORDER BY created_at DESC LIMIT ?1"
+        )?;
+        
+        let rows = stmt.query_map([limit], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+
+        let results: Vec<(i64, String, String)> = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
 }

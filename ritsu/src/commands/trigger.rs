@@ -38,17 +38,70 @@ async fn list_triggers() -> Result<()> {
     }
 }
 
-async fn create_trigger(_name: &str, _time: &str) -> Result<()> {
-    println!("TODO: Implement trigger creation");
-    Ok(())
+async fn create_trigger(name: &str, time: &str) -> Result<()> {
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    
+    let response = client
+        .send_request(ritsu_common::protocol::ClientRequest::CreateTrigger {
+            name: name.to_string(),
+            trigger_type: "time".to_string(),
+            schedule: time.to_string(),
+        })
+        .await?;
+
+    match response {
+        ritsu_common::protocol::ServerResponse::Ok => {
+            println!("✓ Trigger created: {name}");
+            Ok(())
+        }
+        ritsu_common::protocol::ServerResponse::Error { message } => {
+            eprintln!("Error: {message}");
+            anyhow::bail!(message)
+        }
+        _ => anyhow::bail!("Unexpected response"),
+    }
 }
 
-async fn disable_trigger(_name: &str) -> Result<()> {
-    println!("TODO: Implement trigger disable");
-    Ok(())
+async fn disable_trigger(name: &str) -> Result<()> {
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    
+    let response = client
+        .send_request(ritsu_common::protocol::ClientRequest::DisableTrigger {
+            name: name.to_string(),
+        })
+        .await?;
+
+    match response {
+        ritsu_common::protocol::ServerResponse::Ok => {
+            println!("✓ Trigger disabled: {name}");
+            Ok(())
+        }
+        ritsu_common::protocol::ServerResponse::Error { message } => {
+            eprintln!("Error: {message}");
+            anyhow::bail!(message)
+        }
+        _ => anyhow::bail!("Unexpected response"),
+    }
 }
 
-async fn delete_trigger(_name: &str) -> Result<()> {
-    println!("TODO: Implement trigger deletion");
-    Ok(())
+async fn delete_trigger(name: &str) -> Result<()> {
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    
+    let response = client
+        .send_request(ritsu_common::protocol::ClientRequest::DeleteTrigger {
+            name: name.to_string(),
+        })
+        .await?;
+
+    match response {
+        ritsu_common::protocol::ServerResponse::Ok => {
+            println!("✓ Trigger deleted: {name}");
+            Ok(())
+        }
+        ritsu_common::protocol::ServerResponse::Error { message } => {
+            eprintln!("Error: {message}");
+            anyhow::bail!(message)
+        }
+        _ => anyhow::bail!("Unexpected response"),
+    }
 }
