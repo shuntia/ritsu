@@ -8,6 +8,7 @@ mod database;
 mod ipc;
 mod llm;
 mod memory;
+mod state;
 mod tasks;
 mod tools;
 mod trigger;
@@ -45,11 +46,15 @@ async fn main() -> Result<()> {
     trigger_registry.register_builtin_triggers().await?;
     info!("Trigger registry initialized with {} triggers", trigger_registry.get_all_triggers().await.len());
 
-    // Initialize tool registry (needs memory, task_manager, trigger_registry, database)
+    // Initialize server state
+    let server_state = std::sync::Arc::new(state::ServerState::new());
+    info!("Server state initialized");
+
+    // Initialize tool registry (needs memory, task_manager, trigger_registry, database, server_state)
     let tool_registry = std::sync::Arc::new(
         tools::ToolRegistry::new().with_database(db.connection.clone())
     );
-    tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone()).await;
+    tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone(), server_state.clone()).await;
     info!("Tool registry initialized with usage tracking");
 
     // Initialize LLM client (needs tool registry for tool calling)
@@ -61,8 +66,9 @@ async fn main() -> Result<()> {
     let memory_clone = memory.clone();
     let task_manager_clone = task_manager.clone();
     let llm_client_clone = llm_client.clone();
+    let server_state_clone = server_state.clone();
     tokio::spawn(async move {
-        if let Err(e) = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, task_manager_clone, llm_client_clone).await {
+        if let Err(e) = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, task_manager_clone, llm_client_clone, server_state_clone).await {
             tracing::error!("Trigger loop error: {}", e);
         }
     });
@@ -74,6 +80,7 @@ async fn main() -> Result<()> {
         task_manager.clone(),
         trigger_registry.clone(),
         llm_client.clone(),
+        server_state.clone(),
     );
     tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {

@@ -176,7 +176,7 @@ mod tool_impls {
     use super::{Tool, ToolParameter};
     use ritsu_common::ToolResult;
 
-    pub fn notify_client() -> Tool {
+    pub fn notify_client(state: Arc<super::super::state::ServerState>) -> Tool {
         Tool {
             name: "notify_client".to_string(),
             description: "Send a notification to the user's desktop/client".to_string(),
@@ -196,19 +196,31 @@ mod tool_impls {
                 },
                 ToolParameter {
                     name: "urgency".to_string(),
-                    description: "Urgency level: low, normal, high".to_string(),
+                    description: "Urgency level: low, normal, urgent".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let state = state.clone();
                 Box::pin(async move {
                     let title = args.get("title").cloned().unwrap_or_default();
                     let message = args.get("message").cloned().unwrap_or_default();
-                    let urgency = args.get("urgency").cloned().unwrap_or_else(|| "normal".to_string());
+                    let urgency_str = args.get("urgency").cloned().unwrap_or_else(|| "normal".to_string());
 
-                    // TODO: Send notification via IPC to connected clients
-                    info!("Notification: [{urgency}] {title}: {message}");
+                    let urgency = match urgency_str.as_str() {
+                        "low" => ritsu_common::protocol::NotificationUrgency::Low,
+                        "urgent" => ritsu_common::protocol::NotificationUrgency::Urgent,
+                        _ => ritsu_common::protocol::NotificationUrgency::Normal,
+                    };
+
+                    state.broadcast_push(ritsu_common::protocol::ServerPush::Notification {
+                        title: title.clone(),
+                        message: message.clone(),
+                        urgency,
+                    }).await;
+
+                    info!("Notification sent: [{urgency_str}] {title}: {message}");
                     
                     ToolResult::success(format!("Notification sent: {title}"))
                 })
@@ -466,7 +478,7 @@ mod tool_impls {
         }
     }
 
-    pub fn analyze_now() -> Tool {
+    pub fn analyze_now(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "analyze_now".to_string(),
             description: "Trigger an immediate analysis or compaction".to_string(),
@@ -474,25 +486,39 @@ mod tool_impls {
             parameters: vec![
                 ToolParameter {
                     name: "type".to_string(),
-                    description: "Analysis type: daily, pattern, reflection".to_string(),
+                    description: "Analysis type: conversation, pattern, reflection, tool_effectiveness".to_string(),
                     required: true,
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
-                    let analysis_type = args.get("type").cloned().unwrap_or_else(|| "dynamic".to_string());
+                    let analysis_type = args.get("type").cloned().unwrap_or_else(|| "conversation".to_string());
 
-                    // TODO: Trigger idle analysis
-                    info!("Triggering idle analysis: {analysis_type}");
+                    // Create an immediate dynamic trigger
+                    let trigger_name = format!("analyze_now_{}", chrono::Utc::now().timestamp());
+                    let metadata = HashMap::from([
+                        ("analysis_type".to_string(), analysis_type.clone()),
+                    ]);
                     
-                    ToolResult::success(format!("Analysis triggered: {analysis_type}"))
+                    if let Err(e) = trigger_registry.add_dynamic_trigger(
+                        trigger_name.clone(),
+                        "Immediate analysis".to_string(),
+                        vec!["analysis".to_string(), "immediate".to_string()],
+                        metadata,
+                    ).await {
+                        return ToolResult::error(format!("Failed to create analysis trigger: {}", e));
+                    }
+                    
+                    info!("Created immediate analysis trigger: {}", trigger_name);
+                    ToolResult::success(format!("Analysis scheduled: {}", analysis_type))
                 })
             }),
         }
     }
 
-    pub fn open_chat() -> Tool {
+    pub fn open_chat(state: Arc<super::super::state::ServerState>) -> Tool {
         Tool {
             name: "open_chat".to_string(),
             description: "Open the chat GUI window and request user attention".to_string(),
@@ -506,19 +532,30 @@ mod tool_impls {
                 },
                 ToolParameter {
                     name: "urgency".to_string(),
-                    description: "Urgency level: low, normal, high".to_string(),
+                    description: "Urgency level: low, normal, urgent".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let state = state.clone();
                 Box::pin(async move {
                     let message = args.get("message").cloned();
-                    let urgency = args.get("urgency").cloned().unwrap_or_else(|| "normal".to_string());
+                    let urgency_str = args.get("urgency").cloned().unwrap_or_else(|| "normal".to_string());
 
-                    // TODO: Launch GUI via `ritsu chat` command
-                    info!("Opening chat with urgency: {urgency}");
-                    if let Some(msg) = message {
+                    let urgency = match urgency_str.as_str() {
+                        "low" => ritsu_common::protocol::NotificationUrgency::Low,
+                        "urgent" => ritsu_common::protocol::NotificationUrgency::Urgent,
+                        _ => ritsu_common::protocol::NotificationUrgency::Normal,
+                    };
+
+                    state.broadcast_push(ritsu_common::protocol::ServerPush::OpenChat {
+                        message: message.clone(),
+                        urgency,
+                    }).await;
+
+                    info!("Opening chat with urgency: {urgency_str}");
+                    if let Some(msg) = &message {
                         info!("With message: {msg}");
                     }
                     
@@ -751,6 +788,7 @@ mod tool_impls {
 }
 
 use crate::memory::MemoryManager;
+use crate::state::ServerState;
 use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry as TriggerReg;
 
@@ -759,13 +797,14 @@ pub async fn register_all_tools(
     memory: Arc<MemoryManager>,
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerReg>,
+    state: Arc<ServerState>,
 ) {
-    registry.register(tool_impls::notify_client()).await;
+    registry.register(tool_impls::notify_client(state.clone())).await;
     registry.register(tool_impls::create_note(memory.clone())).await;
     registry.register(tool_impls::query_memory(memory.clone())).await;
     registry.register(tool_impls::create_trigger(trigger_registry.clone())).await;
-    registry.register(tool_impls::analyze_now()).await;
-    registry.register(tool_impls::open_chat()).await;
+    registry.register(tool_impls::analyze_now(trigger_registry.clone())).await;
+    registry.register(tool_impls::open_chat(state.clone())).await;
     registry.register(tool_impls::create_task(task_manager.clone())).await;
     registry.register(tool_impls::update_task(task_manager.clone())).await;
     registry.register(tool_impls::list_tasks(task_manager.clone())).await;

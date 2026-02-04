@@ -179,6 +179,38 @@ impl TriggerRegistry {
         self.triggers.read().await.clone()
     }
 
+    pub async fn add_dynamic_trigger(
+        &self,
+        name: String,
+        description: String,
+        tags: Vec<String>,
+        metadata: HashMap<String, String>,
+    ) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        
+        // Build full metadata with tags and description
+        let mut full_metadata = metadata;
+        full_metadata.insert("tags".to_string(), tags.join(","));
+        full_metadata.insert("description".to_string(), description);
+        let metadata_json = serde_json::to_string(&full_metadata)?;
+        
+        conn.execute(
+            "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
+             VALUES (?1, 'dynamic', '', 1, 'ai', ?2, datetime('now'))",
+            (&name, metadata_json),
+        )?;
+
+        self.load_from_database().await?;
+        Ok(())
+    }
+
+    pub async fn remove_trigger(&self, name: &str) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute("DELETE FROM triggers WHERE name = ?1", [name])?;
+        self.load_from_database().await?;
+        Ok(())
+    }
+
     pub async fn create_trigger(
         &self,
         name: &str,
@@ -530,6 +562,7 @@ pub async fn run_trigger_loop(
     memory: Arc<MemoryManager>,
     task_manager: Arc<crate::tasks::TaskManager>,
     llm_client: Arc<LlmClient>,
+    state: Arc<crate::state::ServerState>,
 ) -> Result<()> {
     info!("Starting trigger loop");
 
@@ -567,9 +600,21 @@ pub async fn run_trigger_loop(
                         next_trigger = Some((instant, trigger));
                     }
                 }
-                TriggerType::Inactivity(_) | TriggerType::Dynamic => {
-                    // Inactivity triggers handled separately by conversation system
-                    // Dynamic triggers handled by AI requests
+                TriggerType::Inactivity(threshold_secs) => {
+                    // Check if inactive for threshold duration
+                    if state.is_inactive_for(*threshold_secs).await {
+                        let instant = Instant::now();
+                        if next_trigger.as_ref().is_none_or(|(i, _)| instant < *i) {
+                            next_trigger = Some((instant, trigger));
+                        }
+                    }
+                }
+                TriggerType::Dynamic => {
+                    // Dynamic triggers execute immediately
+                    let instant = Instant::now();
+                    if next_trigger.as_ref().is_none_or(|(i, _)| instant < *i) {
+                        next_trigger = Some((instant, trigger));
+                    }
                 }
             }
         }
@@ -583,8 +628,15 @@ pub async fn run_trigger_loop(
             if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client).await {
                 error!("Failed to execute trigger {}: {}", trigger.name, e);
             }
+            
+            // Remove dynamic triggers after execution
+            if matches!(trigger.trigger_type, TriggerType::Dynamic) {
+                if let Err(e) = registry.remove_trigger(&trigger.name).await {
+                    error!("Failed to remove dynamic trigger {}: {}", trigger.name, e);
+                }
+            }
         } else {
-            // No triggers ready, check again in 60 seconds
+            // No triggers ready, check inactivity in 60 seconds
             sleep(Duration::from_secs(60)).await;
         }
     }

@@ -6,14 +6,16 @@
 #![allow(clippy::format_push_string)]
 
 use anyhow::Result;
-use ritsu_common::protocol::{ClientRequest, ServerResponse};
+use ritsu_common::protocol::{ClientRequest, ServerResponse, ServerPush};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::llm::LlmClient;
 use crate::memory::MemoryManager;
+use crate::state::ServerState;
 use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry;
 
@@ -23,6 +25,7 @@ pub struct IpcServer {
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerRegistry>,
     llm_client: Arc<LlmClient>,
+    state: Arc<ServerState>,
 }
 
 impl IpcServer {
@@ -32,6 +35,7 @@ impl IpcServer {
         task_manager: Arc<TaskManager>,
         trigger_registry: Arc<TriggerRegistry>,
         llm_client: Arc<LlmClient>,
+        state: Arc<ServerState>,
     ) -> Self {
         Self {
             socket_path,
@@ -39,6 +43,7 @@ impl IpcServer {
             task_manager,
             trigger_registry,
             llm_client,
+            state,
         }
     }
 
@@ -58,9 +63,10 @@ impl IpcServer {
                     let task_manager = self.task_manager.clone();
                     let trigger_registry = self.trigger_registry.clone();
                     let llm_client = self.llm_client.clone();
+                    let state = self.state.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, memory, task_manager, trigger_registry, llm_client).await {
+                        if let Err(e) = handle_client(stream, memory, task_manager, trigger_registry, llm_client, state).await {
                             error!("Client handler error: {}", e);
                         }
                     });
@@ -79,47 +85,80 @@ async fn handle_client(
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerRegistry>,
     llm_client: Arc<LlmClient>,
+    state: Arc<ServerState>,
 ) -> Result<()> {
+    // Register this client for push notifications
+    let (push_tx, mut push_rx) = mpsc::unbounded_channel();
+    state.register_client(push_tx).await;
+    
     loop {
-        // Read message length (4 bytes)
-        let mut len_buf = [0u8; 4];
-        match stream.read_exact(&mut len_buf).await {
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                // Client disconnected
-                return Ok(());
+        tokio::select! {
+            // Handle incoming requests from client
+            result = read_request(&mut stream) => {
+                match result {
+                    Ok(Some(request)) => {
+                        state.mark_activity().await;
+                        let response = handle_request(
+                            request,
+                            &memory,
+                            &task_manager,
+                            &trigger_registry,
+                            &llm_client,
+                        ).await;
+                        send_response(&mut stream, response).await?;
+                    }
+                    Ok(None) => return Ok(()), // Client disconnected
+                    Err(e) => return Err(e),
+                }
             }
-            Err(e) => return Err(e.into()),
+            // Handle outgoing push notifications to client
+            Some(push) = push_rx.recv() => {
+                send_push(&mut stream, push).await?;
+            }
         }
-
-        let len = u32::from_be_bytes(len_buf) as usize;
-        if len > 10 * 1024 * 1024 {
-            // 10MB limit
-            warn!("Message too large: {} bytes", len);
-            return Ok(());
-        }
-
-        // Read message data
-        let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).await?;
-
-        // Deserialize request
-        let request: ClientRequest = postcard::from_bytes(&data)?;
-        info!("Received request: {:?}", request);
-
-        // Handle request
-        let response = handle_request(request, &memory, &task_manager, &trigger_registry, &llm_client).await;
-
-        // Serialize response
-        let response_data = postcard::to_allocvec(&response)?;
-        #[allow(clippy::cast_possible_truncation)]
-        let response_len = (response_data.len() as u32).to_be_bytes();
-
-        // Send response
-        stream.write_all(&response_len).await?;
-        stream.write_all(&response_data).await?;
-        stream.flush().await?;
     }
+}
+
+async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> {
+    // Read message length (4 bytes)
+    let mut len_buf = [0u8; 4];
+    match stream.read_exact(&mut len_buf).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+            return Ok(None); // Client disconnected
+        }
+        Err(e) => return Err(e.into()),
+    }
+
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len > 10_000_000 {
+        anyhow::bail!("Message too large: {} bytes", len);
+    }
+
+    // Read message body
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+
+    let request: ClientRequest = postcard::from_bytes(&buf)?;
+    Ok(Some(request))
+}
+
+async fn send_response(stream: &mut UnixStream, response: ServerResponse) -> Result<()> {
+    let bytes = postcard::to_allocvec(&response)?;
+    let len = bytes.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await?;
+    stream.write_all(&bytes).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+async fn send_push(stream: &mut UnixStream, push: ServerPush) -> Result<()> {
+    let bytes = postcard::to_allocvec(&push)?;
+    let len = bytes.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await?;
+    stream.write_all(&bytes).await?;
+    stream.flush().await?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
