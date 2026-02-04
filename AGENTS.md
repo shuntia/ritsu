@@ -23,12 +23,14 @@
    - Connects to server via IPC
    - Displays conversation history
    - Handles system notifications from server
+   - Can be launched and focused by server on demand
 
 ### Communication
 - Server-client communication via IPC (Unix domain sockets or TCP)
 - CLI can send admin commands, query status, manage triggers
 - GUI connects to server for chat and receives push notifications
 - Server pushes system notifications to all connected clients
+- Server can launch GUI and request window focus for urgent interactions
 
 ## Core Technologies
 
@@ -295,6 +297,52 @@ pub struct ToolResult {
    - Args: `{"type": "conversation|pattern|tools|self_reflection|dynamic"}`
    - Allows AI to analyze current context and update its prompt during conversation
 
+6. **open_chat**: Open chat window and request focus
+   - Args: `{"message": "...", "urgency": "low|normal|urgent"}`
+   - Launches GUI if not running, brings window to focus
+   - Used in conjunction with notifications for important interactions
+
+### Timeouts and Error Handling
+
+All blocking operations have configurable timeouts:
+
+1. **User Response Timeout**: 5 minutes (default)
+   - When AI sends a message/notification and waits for response
+   - On timeout: AI is notified that user ignored the message
+   - AI decides next action (retry later, cancel, create reminder, etc.)
+   - Configurable per interaction via metadata
+
+2. **HTTP Request Timeout**: 30 seconds (default)
+   - For future HTTP tool calls (when Deno integration added)
+   - Prevents hanging on unresponsive endpoints
+   - Configurable per request
+
+3. **LLM Request Timeout**: 60 seconds (default)
+   - For LLM API calls
+   - Falls back to alternative backend on timeout
+
+```rust
+pub struct TimeoutConfig {
+    pub user_response: Duration,      // Default: 5 minutes
+    pub http_request: Duration,        // Default: 30 seconds
+    pub llm_request: Duration,         // Default: 60 seconds
+}
+
+async fn wait_for_user_response(
+    timeout: Duration,
+    llm: Arc<LLMClient>
+) -> Result<Option<String>> {
+    match tokio::time::timeout(timeout, receive_user_message()).await {
+        Ok(response) => Ok(Some(response?)),
+        Err(_) => {
+            // Timeout occurred - notify AI
+            llm.notify_timeout("User did not respond within timeout").await?;
+            Ok(None)
+        }
+    }
+}
+```
+
 ### Future Tools (post-v1)
 - HTTP requests (if Deno runtime added)
 - Screen time tracking integration
@@ -393,9 +441,15 @@ api_key_env = "OPENAI_API_KEY"
 [server]
 socket_path = "/tmp/ritsu.sock"
 database_path = "~/.local/share/ritsu/ritsu.db"
+gui_binary_path = "/usr/bin/ritsu-gui"  # For launching GUI
 
 [memory]
 daily_rotation_days = 40
+
+[timeouts]
+user_response_seconds = 300     # 5 minutes
+http_request_seconds = 30       # 30 seconds
+llm_request_seconds = 60        # 60 seconds
 ```
 
 ## Project Structure
@@ -412,7 +466,8 @@ ritsu-sonnet/
 │   │   ├── triggers.rs      # Trigger system
 │   │   ├── tools.rs         # Tool registry and execution
 │   │   ├── llm.rs           # LLM client wrapper
-│   │   └── ipc.rs           # Server-client communication
+│   │   ├── ipc.rs           # Server-client communication
+│   │   └── focus.rs         # GUI launch and focus control
 ├── ritsu-cli/
 │   ├── Cargo.toml
 │   ├── src/
@@ -461,6 +516,8 @@ ritsu-sonnet/
 - [ ] Implement `create_note` and `query_memory` tools
 - [ ] Implement `create_trigger` tool (AI self-triggering)
 - [ ] Implement `analyze_now` tool for dynamic idle analysis
+- [ ] Implement `open_chat` tool (launch GUI and request focus)
+- [ ] Add timeout handling for user responses
 
 ### Phase 5: Trigger System & Idle Analysis
 - [ ] Design trigger data structures and persistence
@@ -485,6 +542,8 @@ ritsu-sonnet/
 - [ ] Handle real-time message streaming from LLM
 - [ ] Implement system notification handling (notify-rust)
 - [ ] Add connection status indicator
+- [ ] Implement window focus and launch control
+- [ ] Handle focus requests from server
 
 ### Phase 8: Polish & Testing
 - [ ] Write integration tests for trigger execution
@@ -507,6 +566,8 @@ ritsu-sonnet/
 - **Configuration**: Load from `~/.config/ritsu/config.toml`, fall back to defaults
 - **Logging**: Use `tracing` crate with spans for debugging trigger execution and LLM calls
 - **Timestamps**: Always use UTC internally, convert to local time for display
+- **Timeouts**: All blocking operations (user input, HTTP, LLM) must have timeouts; on user timeout, notify AI to decide next action
+- **Focus Control**: Use platform-specific APIs (X11/Wayland on Linux) to launch and focus GUI windows
 
 ## References
 
