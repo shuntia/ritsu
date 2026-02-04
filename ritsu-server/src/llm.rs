@@ -1,8 +1,8 @@
 //! LLM client with tool calling support using the `llm` crate
 
 use anyhow::{Context, Result};
-use llm::chat::{ChatMessage, ChatRole, FunctionTool, ParameterProperty, ParametersSchema, Tool, ToolChoice};
-use llm::builder::{LLMBackend, LLMBuilder};
+use llm::builder::{FunctionBuilder, LLMBackend, LLMBuilder, ParamBuilder};
+use llm::chat::ChatMessage;
 use llm::LLMProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::config::{LlmBackend, LlmConfig, TimeoutConfig};
-use crate::tools::{ToolRegistry, ToolParameter};
+use crate::tools::ToolRegistry;
 
 /// Message in a conversation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,23 +19,23 @@ pub struct Message {
     pub content: String,
 }
 
-/// Tool call from LLM
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCall {
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
 /// LLM response with optional tool calls
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
     pub content: String,
-    pub tool_calls: Vec<ToolCall>,
+    pub tool_calls: Vec<ToolCallInfo>,
+}
+
+/// Tool call information
+#[derive(Debug, Clone)]
+pub struct ToolCallInfo {
+    pub name: String,
+    pub arguments: HashMap<String, String>,
 }
 
 /// Unified LLM client supporting multiple backends
 pub struct LlmClient {
-    provider: Arc<dyn LLMProvider>,
+    provider: Box<dyn LLMProvider>,
     tool_registry: Arc<ToolRegistry>,
 }
 
@@ -49,15 +49,18 @@ impl LlmClient {
         let backend = config.backends.first()
             .context("No LLM backends configured")?;
 
-        let provider = Self::create_provider(backend)?;
+        let provider = Self::create_provider(backend, &tool_registry)?;
 
         Ok(Self {
-            provider: Arc::new(provider),
+            provider,
             tool_registry,
         })
     }
 
-    fn create_provider(backend: &LlmBackend) -> Result<Box<dyn LLMProvider>> {
+    fn create_provider(
+        backend: &LlmBackend,
+        tool_registry: &Arc<ToolRegistry>,
+    ) -> Result<Box<dyn LLMProvider>> {
         // Detect provider from endpoint
         let provider_type = if backend.endpoint.contains("openai") || backend.endpoint.contains("api.openai.com") {
             LLMBackend::OpenAI
@@ -75,21 +78,50 @@ impl LlmClient {
 
         // Get API key from environment if specified
         let api_key = backend.api_key_env.as_ref()
-            .and_then(|env_var| std::env::var(env_var).ok());
+            .and_then(|env_var| std::env::var(env_var).ok())
+            .unwrap_or_default();
 
+        // Build LLM with all tools registered
+        let tools_info = futures::executor::block_on(tool_registry.get_tools_for_ai());
+        
         let mut builder = LLMBuilder::new()
             .backend(provider_type)
-            .model(&backend.model);
+            .model(&backend.model)
+            .max_tokens(2048)
+            .temperature(0.7);
 
-        if let Some(key) = api_key {
-            builder = builder.api_key(&key);
+        if !api_key.is_empty() {
+            builder = builder.api_key(api_key);
         }
 
-        if !backend.endpoint.is_empty() {
-            builder = builder.api_base(&backend.endpoint);
+        // Add all tools from registry
+        for tool in tools_info {
+            let mut func_builder = FunctionBuilder::new(&tool.name)
+                .description(&tool.description);
+
+            let mut required_params = Vec::new();
+            for param in tool.parameters {
+                func_builder = func_builder.param(
+                    ParamBuilder::new(&param.name)
+                        .type_of(&param.param_type)
+                        .description(&param.description)
+                );
+
+                if param.required {
+                    required_params.push(param.name);
+                }
+            }
+
+            if !required_params.is_empty() {
+                func_builder = func_builder.required(required_params);
+            }
+
+            builder = builder.function(func_builder);
         }
 
-        builder.build().context("Failed to build LLM provider")
+        let provider = builder.build().context("Failed to build LLM provider")?;
+        
+        Ok(provider)
     }
 
     /// Generate response with optional tool calling support
@@ -111,84 +143,66 @@ impl LlmClient {
         // Convert our messages to llm crate format
         let mut chat_messages = Vec::new();
         
-        // Add system prompt if provided
-        if let Some(system) = system_prompt {
-            chat_messages.push(
-                ChatMessage::new()
-                    .role(ChatRole::System)
-                    .content(system)
-                    .build()
-            );
-        }
-
         // Add conversation messages
-        for msg in messages {
-            let role = match msg.role.as_str() {
-                "system" => ChatRole::System,
-                "user" => ChatRole::User,
-                "assistant" => ChatRole::Assistant,
-                _ => {
-                    warn!("Unknown role '{}', defaulting to user", msg.role);
-                    ChatRole::User
+        for (i, msg) in messages.iter().enumerate() {
+            let message_builder = match msg.role.as_str() {
+                "user" => ChatMessage::user(),
+                "assistant" => ChatMessage::assistant(),
+                "system" | _ => {
+                    // System messages become user messages
+                    ChatMessage::user()
                 }
             };
 
-            chat_messages.push(
-                ChatMessage::new()
-                    .role(role)
-                    .content(&msg.content)
-                    .build()
-            );
-        }
+            // Prepend system prompt to first user message if provided
+            let content = if i == 0 && system_prompt.is_some() {
+                format!("{}\n\n{}", system_prompt.unwrap(), msg.content)
+            } else {
+                msg.content.clone()
+            };
 
-        // Prepare tools if enabled
-        let tools = if enable_tools {
-            Some(self.convert_tools_for_llm().await?)
-        } else {
-            None
-        };
+            chat_messages.push(message_builder.content(&content).build());
+        }
 
         debug!("Sending {} messages to LLM (tools: {})", 
             chat_messages.len(), 
-            tools.as_ref().map_or(0, |t| t.len())
+            enable_tools
         );
 
         // Make the chat request
-        let response = if let Some(tool_list) = tools {
-            self.provider.chat()
-                .messages(chat_messages)
-                .tools(tool_list)
-                .tool_choice(ToolChoice::Auto)
-                .send()
-                .await
+        let response = if enable_tools {
+            self.provider.chat_with_tools(&chat_messages, self.provider.tools()).await
                 .context("Failed to send chat request with tools")?
         } else {
-            self.provider.chat()
-                .messages(chat_messages)
-                .send()
-                .await
+            self.provider.chat(&chat_messages).await
                 .context("Failed to send chat request")?
         };
 
         // Extract content
-        let content = response.choices()
-            .first()
-            .and_then(|choice| choice.message())
-            .map(|msg| msg.content().to_string())
-            .unwrap_or_default();
+        let content = response.text().unwrap_or_default().to_string();
 
         // Extract tool calls
-        let tool_calls = response.choices()
-            .first()
-            .and_then(|choice| choice.message())
-            .and_then(|msg| msg.tool_calls())
+        let tool_calls: Vec<ToolCallInfo> = response.tool_calls()
             .map(|calls| {
                 calls.iter()
                     .filter_map(|call| {
-                        let function = call.function();
-                        Some(ToolCall {
-                            name: function.name().to_string(),
-                            arguments: serde_json::from_str(function.arguments()).ok()?,
+                        // Parse arguments from JSON string to HashMap
+                        let args_map = serde_json::from_str::<HashMap<String, serde_json::Value>>(&call.function.arguments)
+                            .ok()?;
+                        
+                        let args: HashMap<String, String> = args_map.into_iter()
+                            .map(|(k, v)| {
+                                let value = match v {
+                                    serde_json::Value::String(s) => s,
+                                    other => other.to_string(),
+                                };
+                                (k, value)
+                            })
+                            .collect();
+
+                        Some(ToolCallInfo {
+                            name: call.function.name.clone(),
+                            arguments: args,
                         })
                     })
                     .collect()
@@ -206,30 +220,14 @@ impl LlmClient {
     }
 
     /// Execute tool calls and return results
-    pub async fn execute_tool_calls(&self, tool_calls: &[ToolCall]) -> Vec<(String, String)> {
+    pub async fn execute_tool_calls(&self, tool_calls: &[ToolCallInfo]) -> Vec<(String, String)> {
         let mut results = Vec::new();
 
         for call in tool_calls {
-            info!("Executing tool: {} with args: {}", call.name, call.arguments);
-
-            // Convert JSON arguments to HashMap<String, String>
-            let args = match call.arguments.as_object() {
-                Some(obj) => {
-                    obj.iter()
-                        .filter_map(|(k, v)| {
-                            let value = match v {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
-                            };
-                            Some((k.clone(), value))
-                        })
-                        .collect()
-                }
-                None => HashMap::new(),
-            };
+            info!("Executing tool: {} with args: {:?}", call.name, call.arguments);
 
             // Execute the tool
-            match self.tool_registry.execute(&call.name, args).await {
+            match self.tool_registry.execute(&call.name, call.arguments.clone()).await {
                 Ok(result) => {
                     let result_str = if result.success {
                         format!("Success: {}", result.output)
@@ -278,7 +276,7 @@ impl LlmClient {
             // Execute tool calls
             let tool_results = self.execute_tool_calls(&response.tool_calls).await;
 
-            // Add assistant message with tool calls
+            // Add assistant message with tool calls (if it has content)
             if !response.content.is_empty() {
                 current_messages.push(Message {
                     role: "assistant".to_string(),
@@ -299,50 +297,5 @@ impl LlmClient {
 
         // Return final response (should not reach here in normal flow)
         self.generate_with_tools(&current_messages, system_prompt, false).await
-    }
-
-    /// Convert our tool registry to llm crate format
-    async fn convert_tools_for_llm(&self) -> Result<Vec<Tool>> {
-        let tools_info = self.tool_registry.get_tools_for_ai().await;
-        let mut llm_tools = Vec::new();
-
-        for tool_info in tools_info {
-            // Convert parameters to llm crate format
-            let mut properties = HashMap::new();
-            let mut required = Vec::new();
-
-            for param in &tool_info.parameters {
-                properties.insert(
-                    param.name.clone(),
-                    ParameterProperty {
-                        param_type: param.param_type.clone(),
-                        description: Some(param.description.clone()),
-                        enum_values: None,
-                    },
-                );
-
-                if param.required {
-                    required.push(param.name.clone());
-                }
-            }
-
-            let function = FunctionTool {
-                name: tool_info.name.clone(),
-                description: Some(tool_info.description.clone()),
-                parameters: ParametersSchema {
-                    schema_type: "object".to_string(),
-                    properties,
-                    required,
-                },
-            };
-
-            llm_tools.push(Tool {
-                tool_type: "function".to_string(),
-                function,
-            });
-        }
-
-        debug!("Converted {} tools for LLM", llm_tools.len());
-        Ok(llm_tools)
     }
 }

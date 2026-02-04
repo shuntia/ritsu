@@ -117,7 +117,8 @@ impl MemoryManager {
         ];
         
         let response = llm_client.generate(&messages, None).await
-            .unwrap_or_else(|_| crate::llm::LlmResponse {
+            .ok()
+            .unwrap_or_else(|| crate::llm::LlmResponse {
                 content: format!("Conversation summary for {date} ({} messages)", conversations.len()),
                 tool_calls: Vec::new(),
             });
@@ -206,7 +207,8 @@ impl MemoryManager {
         ];
         
         let response = llm_client.generate(&messages, None).await
-            .unwrap_or_else(|_| crate::llm::LlmResponse {
+            .ok()
+            .unwrap_or_else(|| crate::llm::LlmResponse {
                 content: format!("Monthly summary for {year_month} ({} days)", summaries.len()),
                 tool_calls: Vec::new(),
             });
@@ -298,13 +300,12 @@ impl MemoryManager {
     pub async fn build_effective_prompt(&self) -> Result<String> {
         // First try to read from .config/system_prompt.md
         let config_prompt = std::fs::read_to_string(".config/system_prompt.md")
-            .or_else(|_| {
+            .ok()
+            .or_else(|| {
                 // Try from home directory
                 dirs::home_dir()
-                    .map(|home| home.join(".config/ritsu/system_prompt.md"))
-                    .and_then(|path| std::fs::read_to_string(path).ok())
-            })
-            .ok();
+                    .and_then(|home| std::fs::read_to_string(home.join(".config/ritsu/system_prompt.md")).ok())
+            });
 
         // Then get database prompts
         let base = self.get_system_prompt("base").await?;

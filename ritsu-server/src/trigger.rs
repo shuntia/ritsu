@@ -352,9 +352,13 @@ pub async fn execute_idle_analysis(
             ];
             
             let response = llm_client.generate(&messages, None).await
-                .unwrap_or_else(|_| crate::llm::LlmResponse {
-                    content: format!("Pattern analysis for past 7 days ({} summaries)", past_summaries.len()),
-                    tool_calls: Vec::new(),
+                .ok()
+                .unwrap_or_else(|| {
+                    warn!("Pattern analysis LLM error");
+                    crate::llm::LlmResponse {
+                        content: format!("Pattern analysis for past 7 days ({} summaries)", past_summaries.len()),
+                        tool_calls: Vec::new(),
+                    }
                 });
             
             let findings = HashMap::from([
@@ -398,9 +402,13 @@ pub async fn execute_idle_analysis(
             ];
             
             let response = llm_client.generate(&messages, None).await
-                .unwrap_or_else(|_| crate::llm::LlmResponse {
-                    content: format!("Effectiveness analysis for past 14 days ({} summaries)", past_summaries.len()),
-                    tool_calls: Vec::new(),
+                .ok()
+                .unwrap_or_else(|| {
+                    warn!("Effectiveness analysis LLM error");
+                    crate::llm::LlmResponse {
+                        content: format!("Effectiveness analysis for past 14 days ({} summaries)", past_summaries.len()),
+                        tool_calls: Vec::new(),
+                    }
                 });
             
             let findings = HashMap::from([
@@ -463,9 +471,13 @@ pub async fn execute_idle_analysis(
             ];
             
             let response = llm_client.generate(&messages, None).await
-                .unwrap_or_else(|_| crate::llm::LlmResponse {
-                    content: "Good morning! Have a great day ahead!".to_string(),
-                    tool_calls: Vec::new(),
+                .ok()
+                .unwrap_or_else(|| {
+                    warn!("Daily briefing LLM error");
+                    crate::llm::LlmResponse {
+                        content: "Good morning! Have a great day ahead!".to_string(),
+                        tool_calls: Vec::new(),
+                    }
                 });
             
             // Store as a note for the user to see
