@@ -1,0 +1,38 @@
+[package]
+name = "ritsu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Ritsu client CLI and GUI"
+
+[[bin]]
+name = "ritsu"
+path = "src/main.rs"
+
+[dependencies]
+ritsu-common.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+bincode.workspace = true
+dirs = "5.0"
+
+# GUI dependencies (optional feature)
+iced = { workspace = true, optional = true }
+notify-rust = { workspace = true, optional = true }
+
+[features]
+default = ["gui"]
+gui = ["iced", "notify-rust"]
+
+[lints]
+workspace = true
