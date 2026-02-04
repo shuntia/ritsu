@@ -1,16 +1,51 @@
-//! Memory query commands
+//! Memory and notes commands
 
 use anyhow::Result;
+use ritsu_common::protocol::{ClientRequest, MemoryQueryType};
 
+pub async fn query_memory(days: Option<u32>) -> Result<()> {
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    
+    let _days = days.unwrap_or(7);
+    let response = client
+        .send_request(ClientRequest::QueryMemory {
+            query_type: MemoryQueryType::Recent,
+            date_range: None,
+        })
+        .await?;
 
-pub fn query_memory(days: u32) -> Result<()> {
-    println!("Querying memory for last {days} days...");
-    println!("No recent memory (placeholder)");
-    Ok(())
+    match response {
+        ritsu_common::protocol::ServerResponse::Memory { content } => {
+            println!("{}", content);
+            Ok(())
+        }
+        ritsu_common::protocol::ServerResponse::Error { message } => {
+            eprintln!("Error: {}", message);
+            anyhow::bail!(message)
+        }
+        _ => anyhow::bail!("Unexpected response"),
+    }
 }
 
-pub fn query_notes(tag: Option<&str>) -> Result<()> {
-    println!("Querying notes with tag filter: {tag:?}");
-    println!("No notes (placeholder)");
-    Ok(())
+pub async fn query_notes(_tag: Option<&str>) -> Result<()> {
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    
+    let response = client
+        .send_request(ClientRequest::QueryMemory {
+            query_type: MemoryQueryType::Notes,
+            date_range: None,
+        })
+        .await?;
+
+    match response {
+        ritsu_common::protocol::ServerResponse::Memory { content } => {
+            println!("{}", content);
+            Ok(())
+        }
+        ritsu_common::protocol::ServerResponse::Error { message } => {
+            eprintln!("Error: {}", message);
+            anyhow::bail!(message)
+        }
+        _ => anyhow::bail!("Unexpected response"),
+    }
 }

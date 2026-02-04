@@ -1,9 +1,14 @@
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::missing_const_for_fn)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::unused_async)]
 //! Ritsu Client - Unified CLI and GUI client
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod ipc;
 
 #[derive(Parser)]
 #[command(name = "ritsu")]
@@ -121,7 +126,8 @@ enum TaskCommands {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -133,10 +139,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start => commands::daemon::start()?,
-        Commands::Stop => commands::daemon::stop()?,
-        Commands::Status => commands::daemon::status()?,
-        Commands::Restart => commands::daemon::restart()?,
+        Commands::Start => commands::daemon::start().await?,
+        Commands::Stop => commands::daemon::stop().await?,
+        Commands::Status => commands::daemon::status().await?,
+        Commands::Restart => commands::daemon::restart().await?,
         Commands::Chat => {
             #[cfg(feature = "gui")]
             commands::chat::run()?;
@@ -147,11 +153,11 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Commands::Send { message } => commands::send::send_message(&message)?,
-        Commands::Trigger(cmd) => commands::trigger::handle(cmd)?,
-        Commands::Task(cmd) => commands::task::handle(cmd)?,
-        Commands::Memory { days } => commands::memory::query_memory(days)?,
-        Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref())?,
+        Commands::Send { message } => commands::send::send_message(&message).await?,
+        Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
+        Commands::Task(cmd) => commands::task::handle(cmd).await?,
+        Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
+        Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
     }
 
     Ok(())

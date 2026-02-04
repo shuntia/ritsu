@@ -5,6 +5,7 @@ use tracing::info;
 
 mod config;
 mod database;
+mod ipc;
 mod llm;
 mod memory;
 mod tasks;
@@ -44,6 +45,10 @@ async fn main() -> Result<()> {
     let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone()));
     info!("Memory manager initialized");
 
+    // Initialize task manager
+    let task_manager = std::sync::Arc::new(tasks::TaskManager::new(db.connection.clone()));
+    info!("Task manager initialized");
+
     // Initialize trigger registry
     let trigger_registry = std::sync::Arc::new(trigger::TriggerRegistry::new(config.server.database_path.clone()));
     trigger_registry.register_builtin_triggers().await?;
@@ -56,6 +61,18 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         if let Err(e) = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, llm_client_clone).await {
             tracing::error!("Trigger loop error: {}", e);
+        }
+    });
+
+    // Start IPC server in background
+    let ipc_server = ipc::IpcServer::new(
+        config.server.socket_path.clone(),
+        memory.clone(),
+        task_manager.clone(),
+    );
+    tokio::spawn(async move {
+        if let Err(e) = ipc_server.run().await {
+            tracing::error!("IPC server error: {}", e);
         }
     });
 
