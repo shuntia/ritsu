@@ -386,19 +386,27 @@ pub async fn execute_idle_analysis(
             // Bi-weekly tool effectiveness analysis
             info!("Starting tool effectiveness analysis");
             
+            // Get tool usage statistics
+            let tool_stats = memory.get_tool_effectiveness_summary(14).await
+                .unwrap_or_else(|_| "Unable to retrieve tool usage statistics".to_string());
+            
             // Get past 14 days of activity
             let past_summaries = memory.query_daily_summaries(14).await?;
             
-            if past_summaries.is_empty() {
+            if past_summaries.is_empty() && tool_stats.contains("No tool usage") {
                 info!("No activity to analyze for tool effectiveness");
                 return Ok(());
             }
             
             let system_prompt = memory.build_effective_prompt().await?;
-            let summaries_text = past_summaries.iter()
-                .map(|(date, summary)| format!("{date}: {summary}"))
-                .collect::<Vec<_>>()
-                .join("\n\n");
+            let summaries_text = if !past_summaries.is_empty() {
+                past_summaries.iter()
+                    .map(|(date, summary)| format!("{date}: {summary}"))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            } else {
+                "No daily summaries available".to_string()
+            };
             
             let messages = vec![
                 crate::llm::Message {
@@ -408,8 +416,8 @@ pub async fn execute_idle_analysis(
                 crate::llm::Message {
                     role: "user".to_string(),
                     content: format!(
-                        "Analyze the effectiveness of interactions over the past 14 days:\n\n{}\n\nEvaluate:\n1. What types of requests were most common\n2. What worked well\n3. What could be improved\n4. Suggestions for better assistance",
-                        summaries_text
+                        "Analyze tool effectiveness over the past 14 days:\n\n{}\n\n📊 Tool Usage Statistics:\n{}\n\nEvaluate:\n1. Which tools are most/least used\n2. Tool success rates and performance\n3. User interaction patterns\n4. Suggestions for improvement",
+                        summaries_text, tool_stats
                     ),
                 }
             ];
@@ -419,7 +427,7 @@ pub async fn execute_idle_analysis(
                 .unwrap_or_else(|| {
                     warn!("Effectiveness analysis LLM error");
                     crate::llm::LlmResponse {
-                        content: format!("Effectiveness analysis for past 14 days ({} summaries)", past_summaries.len()),
+                        content: format!("Tool effectiveness analysis for past 14 days\n{}", tool_stats),
                         tool_calls: Vec::new(),
                     }
                 });
@@ -428,6 +436,7 @@ pub async fn execute_idle_analysis(
                 ("type".to_string(), "tool_effectiveness".to_string()),
                 ("summary".to_string(), response.content.clone()),
                 ("period".to_string(), "14_days".to_string()),
+                ("stats".to_string(), tool_stats),
             ]);
             memory.store_idle_analysis("tools", &findings, None).await?;
             info!("Tool effectiveness analysis completed: {}", response.content.chars().take(100).collect::<String>());

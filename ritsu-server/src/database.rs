@@ -158,6 +158,33 @@ impl Database {
             [],
         )?;
 
+        // Tool usage tracking table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tool_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_name TEXT NOT NULL,
+                arguments TEXT NOT NULL,
+                success BOOLEAN NOT NULL,
+                result TEXT NOT NULL,
+                execution_time_ms INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                triggered_by TEXT
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tool_usage_timestamp 
+             ON tool_usage(timestamp)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tool_usage_tool_name 
+             ON tool_usage(tool_name)",
+            [],
+        )?;
+
         info!("Database schema initialized successfully");
         Ok(())
     }

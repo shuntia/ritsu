@@ -475,4 +475,81 @@ impl MemoryManager {
         let results = rows.filter_map(Result::ok).collect();
         Ok(results)
     }
+
+    /// Get tool usage statistics
+    pub async fn get_tool_usage_stats(&self, days: i64) -> Result<Vec<(String, i64, i64, f64)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT tool_name, 
+                    COUNT(*) as total_calls,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_calls,
+                    AVG(execution_time_ms) as avg_execution_time
+             FROM tool_usage
+             WHERE datetime(timestamp) >= datetime('now', ? || ' days')
+             GROUP BY tool_name
+             ORDER BY total_calls DESC"
+        )?;
+        
+        let rows = stmt.query_map([format!("-{}", days)], |row| {
+            Ok((
+                row.get(0)?,  // tool_name
+                row.get(1)?,  // total_calls
+                row.get(2)?,  // successful_calls
+                row.get(3)?,  // avg_execution_time
+            ))
+        })?;
+
+        let results = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
+
+    /// Get recent tool usage
+    pub async fn get_recent_tool_usage(&self, limit: i64) -> Result<Vec<(String, String, bool, String, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT tool_name, arguments, success, result, timestamp
+             FROM tool_usage
+             ORDER BY timestamp DESC
+             LIMIT ?1"
+        )?;
+        
+        let rows = stmt.query_map([limit], |row| {
+            Ok((
+                row.get(0)?,  // tool_name
+                row.get(1)?,  // arguments
+                row.get(2)?,  // success
+                row.get(3)?,  // result
+                row.get(4)?,  // timestamp
+            ))
+        })?;
+
+        let results = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
+
+    /// Get tool effectiveness summary
+    pub async fn get_tool_effectiveness_summary(&self, days: i64) -> Result<String> {
+        let stats = self.get_tool_usage_stats(days).await?;
+        
+        if stats.is_empty() {
+            return Ok(format!("No tool usage in the past {} days", days));
+        }
+
+        let mut summary = format!("Tool Usage Summary (Past {} Days):\n\n", days);
+        
+        for (tool_name, total, successful, avg_time) in stats {
+            let success_rate = if total > 0 {
+                (successful as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            summary.push_str(&format!(
+                "📊 {}: {} calls, {:.1}% success, {:.0}ms avg\n",
+                tool_name, total, success_rate, avg_time
+            ));
+        }
+        
+        Ok(summary)
+    }
 }

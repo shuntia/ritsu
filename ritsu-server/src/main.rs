@@ -45,10 +45,12 @@ async fn main() -> Result<()> {
     trigger_registry.register_builtin_triggers().await?;
     info!("Trigger registry initialized with {} triggers", trigger_registry.get_all_triggers().await.len());
 
-    // Initialize tool registry (needs memory, task_manager, trigger_registry)
-    let tool_registry = std::sync::Arc::new(tools::ToolRegistry::new());
+    // Initialize tool registry (needs memory, task_manager, trigger_registry, database)
+    let tool_registry = std::sync::Arc::new(
+        tools::ToolRegistry::new().with_database(db.connection.clone())
+    );
     tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone()).await;
-    info!("Tool registry initialized");
+    info!("Tool registry initialized with usage tracking");
 
     // Initialize LLM client (needs tool registry for tool calling)
     let llm_client = std::sync::Arc::new(llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone())?);
