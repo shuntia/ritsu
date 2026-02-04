@@ -126,6 +126,23 @@ CREATE TABLE idle_analyses (
 );
 ```
 
+#### 8. Tasks Table
+```sql
+CREATE TABLE tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL, -- "pending", "in_progress", "completed", "cancelled"
+    priority TEXT NOT NULL, -- "low", "medium", "high", "urgent"
+    tags TEXT, -- JSON array of tags
+    due_date TIMESTAMP,
+    created_by TEXT NOT NULL, -- "user" or "ai"
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+```
+
 ### Memory Compaction Rules
 
 1. **Daily Compaction**: At end of each day (or first trigger next day):
@@ -301,6 +318,16 @@ pub struct ToolResult {
    - Args: `{"message": "...", "urgency": "low|normal|urgent"}`
    - Launches GUI if not running, brings window to focus
    - Used in conjunction with notifications for important interactions
+
+7. **create_task**: Create a new task
+   - Args: `{"title": "...", "description": "...", "priority": "low|medium|high|urgent", "due_date": "ISO8601", "tags": "tag1,tag2"}`
+   - Both AI and user can create tasks
+
+8. **update_task**: Update task status or details
+   - Args: `{"id": "123", "status": "...", "priority": "...", ...}`
+
+9. **list_tasks**: Query tasks with filters
+   - Args: `{"status": "pending|in_progress|completed", "priority": "...", "tags": "...", "due_before": "..."}`
 
 ### Timeouts and Error Handling
 
@@ -492,9 +519,11 @@ ritsu-sonnet/
 
 ### Phase 1: Foundation
 - [ ] Set up Cargo workspace (server, client, common crates)
-- [ ] Implement SQLite schema and database module
+- [ ] Configure strict clippy lints in workspace Cargo.toml and clippy.toml
+- [ ] Implement SQLite schema and database module with migrations
 - [ ] Create basic IPC protocol between server and client
 - [ ] Implement server daemon with tokio runtime
+- [ ] Set up configuration system with TOML parsing and defaults
 
 ### Phase 2: Memory System
 - [ ] Implement daily conversation storage
@@ -503,6 +532,7 @@ ritsu-sonnet/
 - [ ] Implement 40-day rotation cleanup task
 - [ ] Create system prompt storage and retrieval
 - [ ] Implement idle analysis tables
+- [ ] Implement tasks database and CRUD operations
 
 ### Phase 3: LLM Integration
 - [ ] Integrate `llm` crate with Ollama support
@@ -517,6 +547,7 @@ ritsu-sonnet/
 - [ ] Implement `create_trigger` tool (AI self-triggering)
 - [ ] Implement `analyze_now` tool for dynamic idle analysis
 - [ ] Implement `open_chat` tool (launch GUI and request focus)
+- [ ] Implement task management tools (create_task, update_task, list_tasks)
 - [ ] Add timeout handling for user responses
 
 ### Phase 5: Trigger System & Idle Analysis
@@ -548,8 +579,11 @@ ritsu-sonnet/
 ### Phase 8: Polish & Testing
 - [ ] Write integration tests for trigger execution
 - [ ] Test memory compaction and rotation
+- [ ] Test task management workflows
 - [ ] Add configuration validation
+- [ ] Run `cargo clippy --all-features --all-targets` and fix all warnings
 - [ ] Write documentation and usage examples
+- [ ] Create example configuration files
 
 ### Future Enhancements
 - [ ] Screen time tracking integration
@@ -557,17 +591,113 @@ ritsu-sonnet/
 - [ ] Deno runtime for HTTP/JavaScript tools
 - [ ] Web UI for trigger and memory management
 - [ ] Multi-user support
+- [ ] Task subtasks and dependencies
+- [ ] Task time tracking and estimates
+- [ ] Recurring tasks
 
 ## Key Conventions
 
+### Design Principles
+
+- **No Hard-Coding**: All configuration values, paths, timeouts, schedules must be configurable
+  - Load from config files with documented defaults
+  - Use environment variables where appropriate
+  - Avoid magic numbers and strings - use constants/enums
+  
+- **Loose Coupling**: Components communicate through well-defined interfaces
+  - Use trait objects for extensibility (tools, LLM backends, storage)
+  - IPC protocol should be version-agnostic with feature negotiation
+  - Database schema changes should be handled via migrations
+  - Tools should not depend on each other or specific implementations
+
+### Code Quality
+
+- **Strict Clippy Lints**: Enforced via `clippy.toml` configuration
+  ```toml
+  # clippy.toml
+  warn-on-all-wildcard-imports = true
+  disallowed-methods = []
+  ```
+  
+  And in `Cargo.toml`:
+  ```toml
+  [workspace.lints.clippy]
+  all = "warn"
+  pedantic = "warn"
+  nursery = "warn"
+  cargo = "warn"
+  unwrap_used = "deny"
+  expect_used = "deny"
+  panic = "deny"
+  todo = "warn"
+  unimplemented = "deny"
+  ```
+
+- **Pre-Commit Validation**: Always run before committing
+  ```bash
+  cargo clippy --all-features --all-targets -- -D warnings
+  ```
+  Only commit if all lints pass
+
+### Implementation Guidelines
+
 - **Error Handling**: Use `anyhow::Result` for application errors, `thiserror` for library errors
+  - Never use `.unwrap()` or `.expect()` - use proper error propagation
+  - Log errors with context using `tracing`
+  
 - **Async**: All I/O operations (database, LLM, IPC) must be async
+  - Use `tokio::spawn` for concurrent tasks
+  - Use `tokio::select!` for multiplexing futures
+  
 - **Tool Functions**: Always return `Pin<Box<dyn Future<Output = ToolResult> + Send>>` for consistency
+  - Tools are registered at runtime, not compile-time
+  - Each tool should be self-contained and testable
+  
 - **Configuration**: Load from `~/.config/ritsu/config.toml`, fall back to defaults
+  - All defaults must be documented in example config
+  - Support environment variable overrides
+  
 - **Logging**: Use `tracing` crate with spans for debugging trigger execution and LLM calls
+  - Structured logging with contextual information
+  - Different log levels per module configurable
+  
 - **Timestamps**: Always use UTC internally, convert to local time for display
+
 - **Timeouts**: All blocking operations (user input, HTTP, LLM) must have timeouts; on user timeout, notify AI to decide next action
+
 - **Focus Control**: Use platform-specific APIs (X11/Wayland on Linux) to launch and focus GUI windows
+
+## Development Workflow
+
+### Before Every Commit
+
+1. **Run clippy with all features**:
+   ```bash
+   cargo clippy --all-features --all-targets -- -D warnings
+   ```
+
+2. **Only commit if all lints pass** - no warnings or errors allowed
+
+3. **Run tests** (when available):
+   ```bash
+   cargo test --all-features
+   ```
+
+4. **Commit without GPG signing**:
+   ```bash
+   git commit --no-gpg-sign -m "Your message"
+   ```
+
+### Code Review Checklist
+
+- [ ] No hard-coded values (use config or constants)
+- [ ] No `.unwrap()`, `.expect()`, or `panic!()`
+- [ ] All errors properly propagated with context
+- [ ] Timeouts on all blocking operations
+- [ ] Loose coupling via traits/interfaces
+- [ ] Async operations don't block
+- [ ] Configuration documented in example config
+- [ ] Clippy passes with all features
 
 ## References
 
