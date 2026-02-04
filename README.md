@@ -31,7 +31,13 @@ cargo build --release
 mkdir -p ~/.config/ritsu
 cp config.toml.example ~/.config/ritsu/config.toml
 # Edit config.toml with your LLM backend settings
+
+# Optional: Customize system prompt (first half of AI personality)
+cp .config/system_prompt.md.example .config/system_prompt.md
+# Edit .config/system_prompt.md to define Ritsu's personality and capabilities
 ```
+
+**System Prompt**: The `.config/system_prompt.md` file defines the first half of Ritsu's personality and capabilities. This is combined with AI-generated context to form the complete system prompt. The file is read at runtime, so changes take effect immediately.
 
 ### Usage
 
@@ -68,9 +74,9 @@ cp config.toml.example ~/.config/ritsu/config.toml
 
 ### IPC Protocol
 
-Length-prefixed bincode serialization over Unix domain socket (`/tmp/ritsu.sock`):
+Length-prefixed postcard serialization over Unix domain socket (`/tmp/ritsu.sock`):
 - 4-byte big-endian length header
-- Bincode-serialized request/response payload
+- Postcard-serialized request/response payload
 
 See `AGENTS.md` for detailed architecture and development plan.
 

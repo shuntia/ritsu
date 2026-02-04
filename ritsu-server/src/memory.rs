@@ -296,15 +296,36 @@ impl MemoryManager {
 
     /// Build the effective system prompt (base + AI-generated)
     pub async fn build_effective_prompt(&self) -> Result<String> {
-        let base = self.get_system_prompt("base").await?
-            .unwrap_or_else(|| "You are Ritsu, a helpful AI assistant.".to_string());
-        
+        // First try to read from .config/system_prompt.md
+        let config_prompt = std::fs::read_to_string(".config/system_prompt.md")
+            .or_else(|_| {
+                // Try from home directory
+                dirs::home_dir()
+                    .map(|home| home.join(".config/ritsu/system_prompt.md"))
+                    .and_then(|path| std::fs::read_to_string(path).ok())
+            })
+            .ok();
+
+        // Then get database prompts
+        let base = self.get_system_prompt("base").await?;
         let ai_generated = self.get_system_prompt("ai_generated").await?;
 
-        Ok(ai_generated.map_or_else(
-            || base.clone(),
-            |ai| format!("{base}\n\n{ai}"),
-        ))
+        // Build the prompt in order: config file → database base → AI generated
+        let mut parts = Vec::new();
+
+        if let Some(config) = config_prompt {
+            parts.push(config);
+        } else if let Some(base_prompt) = base {
+            parts.push(base_prompt);
+        } else {
+            parts.push("You are Ritsu, a helpful AI assistant.".to_string());
+        }
+
+        if let Some(ai) = ai_generated {
+            parts.push(ai);
+        }
+
+        Ok(parts.join("\n\n"))
     }
 
     /// Store an idle analysis result
