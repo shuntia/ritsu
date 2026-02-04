@@ -252,3 +252,49 @@ impl Database {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_database_creation() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("ritsu_test_{}.db", std::process::id()));
+        
+        let result = Database::new(&db_path);
+        assert!(result.is_ok());
+        
+        // Cleanup
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_database_schema_tables() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("ritsu_test_schema_{}.db", std::process::id()));
+        
+        let db = Database::new(&db_path).unwrap();
+        let conn = db.connection.lock().await;
+        
+        // Check if key tables exist
+        let tables = vec![
+            "notes", "conversations", "daily_summaries", "monthly_summaries",
+            "triggers", "tasks", "tool_usage", "idle_analyses",
+            "conversations", "conversation_turns", "preferences"
+        ];
+        
+        for table in tables {
+            let result: Result<i64, _> = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                [table],
+                |row| row.get(0),
+            );
+            assert!(result.unwrap() > 0, "Table '{}' should exist", table);
+        }
+        
+        drop(conn);
+        // Cleanup
+        let _ = std::fs::remove_file(&db_path);
+    }
+}

@@ -27,6 +27,9 @@ async fn main() -> Result<()> {
 
     info!("Starting ritsu-server v{}", env!("CARGO_PKG_VERSION"));
 
+    // Auto-start Ollama if installed but not running
+    start_ollama_if_needed().await;
+
     // Load configuration
     let config = config::Config::load()?;
     info!("Configuration loaded from: {:?}", config::Config::config_file_path());
@@ -106,4 +109,53 @@ async fn main() -> Result<()> {
     info!("Shutting down ritsu-server");
 
     Ok(())
+}
+
+/// Check if Ollama is installed and start it if not already running
+async fn start_ollama_if_needed() {
+    use std::process::Command;
+    
+    // Check if ollama is installed
+    let ollama_check = Command::new("which")
+        .arg("ollama")
+        .output();
+    
+    if ollama_check.is_err() || !ollama_check.as_ref().unwrap().status.success() {
+        tracing::debug!("Ollama not found in PATH");
+        return;
+    }
+    
+    // Check if Ollama is already running by trying to connect
+    let health_check = tokio::process::Command::new("curl")
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:11434/"])
+        .output()
+        .await;
+    
+    if let Ok(output) = health_check {
+        let status_code = String::from_utf8_lossy(&output.stdout);
+        if status_code == "200" {
+            tracing::info!("Ollama server already running");
+            return;
+        }
+    }
+    
+    // Start Ollama in background
+    tracing::info!("Starting Ollama server...");
+    let result = tokio::process::Command::new("ollama")
+        .arg("serve")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    
+    match result {
+        Ok(_child) => {
+            tracing::info!("Ollama server started in background");
+            // Give it a moment to start
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        }
+        Err(e) => {
+            tracing::warn!("Failed to start Ollama server: {}", e);
+        }
+    }
 }
