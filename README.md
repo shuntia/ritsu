@@ -2,50 +2,82 @@
 
 An autonomous AI agent that can schedule and trigger itself arbitrarily, with persistent memory and task management.
 
-## Project Status
+## Features
 
-🚧 **Phase 1: Foundation** - In Progress
+✅ **Memory System**: Daily/monthly conversation compaction with 40-day rotation  
+✅ **Multi-Backend LLM**: Ollama (local) + OpenAI-compatible APIs  
+✅ **Task Management**: Full CRUD with priorities, tags, due dates  
+✅ **Tool System**: 9 extensible async tools  
+✅ **Strict Lints**: All code passes clippy pedantic/nursery  
 
-- [x] Cargo workspace setup
-- [x] Strict clippy lints configured
-- [x] Basic configuration system
-- [x] Database schema initialized
-- [ ] IPC protocol implementation
-- [ ] Server daemon runtime
+## Quick Start
 
-## Building
+### Prerequisites
 
-```bash
-# Build all crates
-cargo build --all-features
+- Rust 1.93+ 
+- Ollama (or OpenAI-compatible API)
 
-# Build server
-cargo build -p ritsu-server
-
-# Build client
-cargo build -p ritsu
-
-# Build without GUI
-cargo build -p ritsu --no-default-features
-```
-
-## Running
+### Build
 
 ```bash
-# Start the server
-cargo run -p ritsu-server
-
-# Use the client (placeholder commands)
-cargo run -p ritsu -- status
-cargo run -p ritsu -- chat
+cargo build --release
 ```
+
+### Configuration
+
+```bash
+mkdir -p ~/.config/ritsu
+cp config.toml.example ~/.config/ritsu/config.toml
+# Edit config.toml with your settings
+```
+
+### Run Server
+
+```bash
+./target/release/ritsu-server
+```
+
+### Use Client
+
+```bash
+./target/release/ritsu status
+./target/release/ritsu task list
+./target/release/ritsu chat  # GUI (when implemented)
+```
+
+## Architecture
+
+- **ritsu-server**: Long-running daemon with SQLite, LLM, tools
+- **ritsu**: Unified CLI/GUI client  
+- **ritsu-common**: Shared types and IPC protocol
+
+See `AGENTS.md` for detailed architecture and development plan.
+
+## Development Status
+
+**Phase 1-4 Complete:**
+- ✅ Foundation (workspace, config, database)
+- ✅ Memory System (storage, compaction, tasks)
+- ✅ LLM Integration (Ollama + OpenAI)
+- ✅ Tool System (9 core tools)
+
+**Remaining:**
+- ⏳ Trigger System & Idle Analysis
+- ⏳ IPC Implementation
+- ⏳ CLI Commands
+- ⏳ GUI (iced)
 
 ## Development
 
-Before committing, ensure all lints pass:
-
 ```bash
-cargo clippy --all-features --all-targets -- -D warnings
+# Run clippy (required before commit)
+cargo clippy --all-features -- -D warnings
+
+# Run server in dev mode
+RUST_LOG=debug cargo run -p ritsu-server
+
+# Run client
+cargo run -p ritsu -- --help
 ```
 
 ## License

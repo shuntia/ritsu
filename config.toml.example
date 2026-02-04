@@ -1,0 +1,30 @@
+# Ritsu Configuration Example
+# Copy to ~/.config/ritsu/config.toml and customize
+
+[llm]
+default_backend = "ollama"
+
+[[llm.backends]]
+name = "ollama"
+endpoint = "http://localhost:11434"
+model = "llama3.2"
+
+# Uncomment to add OpenAI-compatible backend
+# [[llm.backends]]
+# name = "openai"
+# endpoint = "https://api.openai.com/v1"
+# model = "gpt-4"
+# api_key_env = "OPENAI_API_KEY"
+
+[server]
+socket_path = "/tmp/ritsu.sock"
+database_path = "~/.local/share/ritsu/ritsu.db"
+client_binary_path = "/usr/bin/ritsu"
+
+[memory]
+daily_rotation_days = 40
+
+[timeouts]
+user_response_seconds = 300     # 5 minutes
+http_request_seconds = 30       # 30 seconds
+llm_request_seconds = 60        # 60 seconds
