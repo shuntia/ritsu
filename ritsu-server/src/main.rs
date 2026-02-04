@@ -5,6 +5,7 @@ use tracing::info;
 
 mod config;
 mod database;
+mod llm;
 mod memory;
 mod tasks;
 
@@ -27,6 +28,10 @@ async fn main() -> Result<()> {
     // Initialize database
     let _db = database::Database::new(&config.server.database_path)?;
     info!("Database initialized at: {}", config.server.database_path);
+
+    // Initialize LLM client
+    let _llm_client = llm::LlmClient::new(&config.llm, &config.timeouts)?;
+    info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
 
     info!("ritsu-server started successfully");
 

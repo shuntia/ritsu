@@ -48,6 +48,9 @@ notify-rust = "4.11"
 futures = "0.3"
 async-trait = "0.1"
 
+# HTTP client for LLM APIs
+reqwest = { version = "0.12", features = ["json"] }
+
 # Internal crates
 ritsu-common = { path = "ritsu-common" }
 
