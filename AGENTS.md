@@ -12,25 +12,19 @@
    - Executes scheduled tasks and tool calls
    - Listens for client connections
 
-2. **CLI (ritsu-cli)**: Daemon management client that:
-   - Starts/stops/restarts the server
-   - Manages triggers (list, enable, disable, delete)
-   - Queries memory and configuration
-   - Provides command-line interface for administration
-
-3. **GUI (ritsu-gui)**: Chat interface client that:
-   - Provides iced-based chat UI for conversations
-   - Connects to server via IPC
-   - Displays conversation history
-   - Handles system notifications from server
-   - Can be launched and focused by server on demand
+2. **Client (ritsu)**: Unified client binary with subcommands:
+   - **Daemon management**: `ritsu start`, `ritsu stop`, `ritsu status`, `ritsu restart`
+   - **Trigger management**: `ritsu trigger list`, `ritsu trigger add`, etc.
+   - **Memory queries**: `ritsu memory`, `ritsu notes`
+   - **Task management**: `ritsu task list`, `ritsu task add`, etc.
+   - **Chat GUI**: `ritsu chat` (launches iced-based GUI)
+   - **Quick messages**: `ritsu send "message"`
 
 ### Communication
 - Server-client communication via IPC (Unix domain sockets or TCP)
-- CLI can send admin commands, query status, manage triggers
-- GUI connects to server for chat and receives push notifications
-- Server pushes system notifications to all connected clients
-- Server can launch GUI and request window focus for urgent interactions
+- CLI subcommands send admin/query requests to server
+- `ritsu chat` launches GUI for interactive conversations
+- Server can launch GUI via `ritsu chat` when needed (AI-initiated)
 
 ## Core Technologies
 
@@ -316,7 +310,7 @@ pub struct ToolResult {
 
 6. **open_chat**: Open chat window and request focus
    - Args: `{"message": "...", "urgency": "low|normal|urgent"}`
-   - Launches GUI if not running, brings window to focus
+   - Launches `ritsu chat` if not running, brings window to focus
    - Used in conjunction with notifications for important interactions
 
 7. **create_task**: Create a new task
@@ -468,7 +462,7 @@ api_key_env = "OPENAI_API_KEY"
 [server]
 socket_path = "/tmp/ritsu.sock"
 database_path = "~/.local/share/ritsu/ritsu.db"
-gui_binary_path = "/usr/bin/ritsu-gui"  # For launching GUI
+client_binary_path = "/usr/bin/ritsu"  # For launching `ritsu chat`
 
 [memory]
 daily_rotation_days = 40
@@ -495,18 +489,23 @@ ritsu-sonnet/
 │   │   ├── llm.rs           # LLM client wrapper
 │   │   ├── ipc.rs           # Server-client communication
 │   │   └── focus.rs         # GUI launch and focus control
-├── ritsu-cli/
+├── ritsu/
 │   ├── Cargo.toml
 │   ├── src/
-│   │   ├── main.rs          # CLI entry point
-│   │   └── commands.rs      # Admin commands
-├── ritsu-gui/
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── main.rs          # GUI entry point
-│   │   ├── chat.rs          # Chat interface with iced
-│   │   ├── notify.rs        # System notifications
-│   │   └── ipc.rs           # GUI-server communication
+│   │   ├── main.rs          # CLI entry point with subcommands
+│   │   ├── commands/
+│   │   │   ├── daemon.rs    # start, stop, status, restart
+│   │   │   ├── trigger.rs   # trigger management
+│   │   │   ├── memory.rs    # memory queries
+│   │   │   ├── task.rs      # task management
+│   │   │   ├── chat.rs      # Launch GUI chat interface
+│   │   │   └── send.rs      # Quick message sending
+│   │   ├── gui/
+│   │   │   ├── mod.rs       # GUI module entry
+│   │   │   ├── app.rs       # iced application
+│   │   │   ├── chat.rs      # Chat interface
+│   │   │   └── notify.rs    # System notifications
+│   │   └── ipc.rs           # Client-server communication
 └── ritsu-common/
     ├── Cargo.toml
     └── src/
@@ -560,13 +559,15 @@ ritsu-sonnet/
 - [ ] Implement system prompt composition and updates
 
 ### Phase 6: CLI Client
-- [ ] Build CLI for daemon management (start, stop, status)
-- [ ] Add trigger management commands (list, enable, disable, delete)
-- [ ] Add memory query commands
-- [ ] Add configuration commands
+- [ ] Set up clap for CLI subcommand structure
+- [ ] Implement daemon commands (start, stop, status, restart)
+- [ ] Implement trigger management commands
+- [ ] Implement memory query commands
+- [ ] Implement task management commands
+- [ ] Implement quick send command
 
 ### Phase 7: GUI Client (iced)
-- [ ] Set up iced application structure
+- [ ] Set up iced application in `ritsu chat` subcommand
 - [ ] Build chat interface (message list + input field)
 - [ ] Implement IPC connection to server
 - [ ] Display conversation history from memory
@@ -666,6 +667,44 @@ ritsu-sonnet/
 - **Timeouts**: All blocking operations (user input, HTTP, LLM) must have timeouts; on user timeout, notify AI to decide next action
 
 - **Focus Control**: Use platform-specific APIs (X11/Wayland on Linux) to launch and focus GUI windows
+
+## CLI Usage Examples
+
+### Daemon Management
+```bash
+ritsu start           # Start the server daemon
+ritsu stop            # Stop the server
+ritsu restart         # Restart the server
+ritsu status          # Check server status
+```
+
+### Chat Interface
+```bash
+ritsu chat            # Open GUI chat window
+ritsu send "Hello"    # Send quick message without opening GUI
+```
+
+### Task Management
+```bash
+ritsu task list                              # List all tasks
+ritsu task list --status pending             # Filter by status
+ritsu task add "Buy groceries" --priority high --due 2026-02-05
+ritsu task update 123 --status completed
+```
+
+### Trigger Management
+```bash
+ritsu trigger list                           # List all triggers
+ritsu trigger add "morning-alarm" --time "0 7 * * *"
+ritsu trigger disable morning-alarm
+ritsu trigger delete morning-alarm
+```
+
+### Memory Queries
+```bash
+ritsu memory --days 7                        # Last 7 days summary
+ritsu notes --tag important                  # Filter notes by tag
+```
 
 ## Development Workflow
 
