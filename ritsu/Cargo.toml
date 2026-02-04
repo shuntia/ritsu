@@ -23,8 +23,8 @@ anyhow.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-bincode.workspace = true
-dirs = "5.0"
+postcard.workspace = true
+dirs = "6.0"
 
 # GUI dependencies
 iced.workspace = true

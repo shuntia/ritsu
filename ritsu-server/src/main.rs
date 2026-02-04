@@ -32,14 +32,14 @@ async fn main() -> Result<()> {
     let db = database::Database::new(&config.server.database_path)?;
     info!("Database initialized at: {}", config.server.database_path);
 
-    // Initialize LLM client
-    let llm_client = std::sync::Arc::new(llm::LlmClient::new(&config.llm, &config.timeouts)?);
-    info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
-
     // Initialize tool registry
-    let tool_registry = tools::ToolRegistry::new();
+    let tool_registry = std::sync::Arc::new(tools::ToolRegistry::new());
     tools::register_all_tools(&tool_registry).await;
     info!("Tool registry initialized");
+
+    // Initialize LLM client (needs tool registry for tool calling)
+    let llm_client = std::sync::Arc::new(llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone())?);
+    info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
 
     // Initialize memory manager
     let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone()));
@@ -70,6 +70,7 @@ async fn main() -> Result<()> {
         memory.clone(),
         task_manager.clone(),
         trigger_registry.clone(),
+        llm_client.clone(),
     );
     tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {

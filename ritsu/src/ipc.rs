@@ -18,7 +18,7 @@ impl IpcClient {
         let mut stream = UnixStream::connect(&self.socket_path).await?;
 
         // Serialize request
-        let request_data = bincode::serialize(&request)?;
+        let request_data = postcard::to_allocvec(&request)?;
         let request_len = (request_data.len() as u32).to_be_bytes();
 
         // Send request
@@ -36,7 +36,7 @@ impl IpcClient {
         stream.read_exact(&mut data).await?;
 
         // Deserialize response
-        let response: ServerResponse = bincode::deserialize(&data)?;
+        let response: ServerResponse = postcard::from_bytes(&data)?;
         Ok(response)
     }
 

@@ -12,6 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{error, info, warn};
 
+use crate::llm::LlmClient;
 use crate::memory::MemoryManager;
 use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry;
@@ -21,6 +22,7 @@ pub struct IpcServer {
     memory: Arc<MemoryManager>,
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerRegistry>,
+    llm_client: Arc<LlmClient>,
 }
 
 impl IpcServer {
@@ -29,12 +31,14 @@ impl IpcServer {
         memory: Arc<MemoryManager>,
         task_manager: Arc<TaskManager>,
         trigger_registry: Arc<TriggerRegistry>,
+        llm_client: Arc<LlmClient>,
     ) -> Self {
         Self {
             socket_path,
             memory,
             task_manager,
             trigger_registry,
+            llm_client,
         }
     }
 
@@ -53,9 +57,10 @@ impl IpcServer {
                     let memory = self.memory.clone();
                     let task_manager = self.task_manager.clone();
                     let trigger_registry = self.trigger_registry.clone();
+                    let llm_client = self.llm_client.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, memory, task_manager, trigger_registry).await {
+                        if let Err(e) = handle_client(stream, memory, task_manager, trigger_registry, llm_client).await {
                             error!("Client handler error: {}", e);
                         }
                     });
@@ -73,6 +78,7 @@ async fn handle_client(
     memory: Arc<MemoryManager>,
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerRegistry>,
+    llm_client: Arc<LlmClient>,
 ) -> Result<()> {
     loop {
         // Read message length (4 bytes)
@@ -98,14 +104,14 @@ async fn handle_client(
         stream.read_exact(&mut data).await?;
 
         // Deserialize request
-        let request: ClientRequest = bincode::deserialize(&data)?;
+        let request: ClientRequest = postcard::from_bytes(&data)?;
         info!("Received request: {:?}", request);
 
         // Handle request
-        let response = handle_request(request, &memory, &task_manager, &trigger_registry).await;
+        let response = handle_request(request, &memory, &task_manager, &trigger_registry, &llm_client).await;
 
         // Serialize response
-        let response_data = bincode::serialize(&response)?;
+        let response_data = postcard::to_allocvec(&response)?;
         #[allow(clippy::cast_possible_truncation)]
         let response_len = (response_data.len() as u32).to_be_bytes();
 
@@ -122,15 +128,67 @@ async fn handle_request(
     memory: &MemoryManager,
     task_manager: &TaskManager,
     trigger_registry: &TriggerRegistry,
+    llm_client: &LlmClient,
 ) -> ServerResponse {
     match request {
         ClientRequest::Ping => ServerResponse::Pong,
 
         ClientRequest::SendMessage { content } => {
-            match memory.store_conversation("user", &content).await {
-                Ok(()) => ServerResponse::Ok,
-                Err(e) => ServerResponse::Error {
+            // Store user message
+            if let Err(e) = memory.store_conversation("user", &content).await {
+                return ServerResponse::Error {
                     message: format!("Failed to store message: {}", e),
+                };
+            }
+
+            // Get system prompt
+            let system_prompt = match memory.build_effective_prompt().await {
+                Ok(prompt) => Some(prompt),
+                Err(e) => {
+                    warn!("Failed to build system prompt: {}", e);
+                    None
+                }
+            };
+
+            // Get recent conversation history (last 10 messages)
+            let history = match memory.query_recent_conversations(1).await {
+                Ok(convs) => convs.into_iter()
+                    .map(|(_, role, content)| crate::llm::Message {
+                        role,
+                        content,
+                    })
+                    .collect::<Vec<_>>(),
+                Err(e) => {
+                    warn!("Failed to get conversation history: {}", e);
+                    Vec::new()
+                }
+            };
+
+            // Add current message
+            let mut messages = history;
+            messages.push(crate::llm::Message {
+                role: "user".to_string(),
+                content: content.clone(),
+            });
+
+            // Generate response with tool execution
+            match llm_client.generate_with_tool_execution(
+                &messages,
+                system_prompt.as_deref(),
+                5, // max 5 iterations
+            ).await {
+                Ok(response) => {
+                    // Store assistant response
+                    if let Err(e) = memory.store_conversation("assistant", &response.content).await {
+                        warn!("Failed to store assistant response: {}", e);
+                    }
+
+                    ServerResponse::Message {
+                        content: response.content,
+                    }
+                }
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to generate response: {}", e),
                 },
             }
         }
