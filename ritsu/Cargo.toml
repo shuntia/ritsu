@@ -26,13 +26,12 @@ tracing-subscriber.workspace = true
 bincode.workspace = true
 dirs = "5.0"
 
-# GUI dependencies (optional feature)
-iced = { workspace = true, optional = true }
-notify-rust = { workspace = true, optional = true }
+# GUI dependencies
+iced.workspace = true
+notify-rust.workspace = true
 
 [features]
-default = ["gui"]
-gui = ["iced", "notify-rust"]
+default = []
 
 [lints]
 workspace = true

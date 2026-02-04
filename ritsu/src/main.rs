@@ -8,6 +8,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod gui;
 mod ipc;
 
 #[derive(Parser)]
@@ -144,14 +145,8 @@ async fn main() -> Result<()> {
         Commands::Status => commands::daemon::status().await?,
         Commands::Restart => commands::daemon::restart().await?,
         Commands::Chat => {
-            #[cfg(feature = "gui")]
-            commands::chat::run()?;
-            
-            #[cfg(not(feature = "gui"))]
-            {
-                eprintln!("GUI feature not enabled. Rebuild with --features gui");
-                std::process::exit(1);
-            }
+            println!("Starting Ritsu GUI...");
+            gui::run().await?;
         }
         Commands::Send { message } => commands::send::send_message(&message).await?,
         Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
