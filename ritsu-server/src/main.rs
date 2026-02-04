@@ -32,15 +32,6 @@ async fn main() -> Result<()> {
     let db = database::Database::new(&config.server.database_path)?;
     info!("Database initialized at: {}", config.server.database_path);
 
-    // Initialize tool registry
-    let tool_registry = std::sync::Arc::new(tools::ToolRegistry::new());
-    tools::register_all_tools(&tool_registry).await;
-    info!("Tool registry initialized");
-
-    // Initialize LLM client (needs tool registry for tool calling)
-    let llm_client = std::sync::Arc::new(llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone())?);
-    info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
-
     // Initialize memory manager
     let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone()));
     info!("Memory manager initialized");
@@ -53,6 +44,15 @@ async fn main() -> Result<()> {
     let trigger_registry = std::sync::Arc::new(trigger::TriggerRegistry::new(config.server.database_path.clone()));
     trigger_registry.register_builtin_triggers().await?;
     info!("Trigger registry initialized with {} triggers", trigger_registry.get_all_triggers().await.len());
+
+    // Initialize tool registry (needs memory, task_manager, trigger_registry)
+    let tool_registry = std::sync::Arc::new(tools::ToolRegistry::new());
+    tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone()).await;
+    info!("Tool registry initialized");
+
+    // Initialize LLM client (needs tool registry for tool calling)
+    let llm_client = std::sync::Arc::new(llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone())?);
+    info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
 
     // Start trigger loop in background
     let trigger_registry_clone = trigger_registry.clone();

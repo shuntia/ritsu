@@ -433,4 +433,38 @@ impl MemoryManager {
         let results: Vec<(i64, String, String)> = rows.filter_map(Result::ok).collect();
         Ok(results)
     }
+
+    /// Get recent conversations (last N days)
+    pub async fn get_recent_conversations_days(&self, days: i64) -> Result<Vec<(String, String, String, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT timestamp, role, content, user_id FROM conversations 
+             WHERE datetime(timestamp) >= datetime('now', ? || ' days')
+             ORDER BY timestamp DESC"
+        )?;
+        
+        let rows = stmt.query_map([format!("-{}", days)], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+
+        let results = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
+
+    /// Get recent summaries (daily or monthly)
+    pub async fn get_summaries(&self, summary_type: &str, limit: i64) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT date, summary, tags FROM summaries 
+             WHERE type = ?1
+             ORDER BY date DESC LIMIT ?2"
+        )?;
+        
+        let rows = stmt.query_map((summary_type, limit), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+
+        let results = rows.filter_map(Result::ok).collect();
+        Ok(results)
+    }
 }

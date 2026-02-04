@@ -164,7 +164,7 @@ mod tool_impls {
         }
     }
 
-    pub fn create_note() -> Tool {
+    pub fn create_note(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
         Tool {
             name: "create_note".to_string(),
             description: "Create a persistent note for future reference".to_string(),
@@ -183,21 +183,36 @@ mod tool_impls {
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let memory = memory.clone();
                 Box::pin(async move {
                     let content = args.get("content").cloned().unwrap_or_default();
-                    let tags = args.get("tags").cloned().unwrap_or_default();
-
-                    // TODO: Store note in database
-                    info!("Creating note with tags: {tags}");
+                    let tags_str = args.get("tags").cloned().unwrap_or_default();
                     
-                    ToolResult::success(format!("Note created: {content}"))
+                    // Parse tags
+                    let tags: Vec<String> = tags_str
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+
+                    // Store note in database
+                    match memory.create_note(&content, &tags).await {
+                        Ok(_) => {
+                            info!("Note created with tags: {}", tags_str);
+                            ToolResult::success(format!("Note created successfully with {} tags", tags.len()))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create note: {}", e);
+                            ToolResult::error(format!("Failed to create note: {}", e))
+                        }
+                    }
                 })
             }),
         }
     }
 
-    pub fn query_memory() -> Tool {
+    pub fn query_memory(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
         Tool {
             name: "query_memory".to_string(),
             description: "Query past conversations, summaries, or notes".to_string(),
@@ -215,42 +230,148 @@ mod tool_impls {
                     required: false,
                     param_type: "string".to_string(),
                 },
+                ToolParameter {
+                    name: "limit".to_string(),
+                    description: "Maximum number of results (default: 10)".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let memory = memory.clone();
                 Box::pin(async move {
                     let query_type = args.get("type").cloned().unwrap_or_default();
                     let query = args.get("query").cloned().unwrap_or_default();
+                    let limit = args.get("limit")
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .unwrap_or(10);
 
-                    // TODO: Query memory from database
-                    info!("Querying memory: type={query_type}, query={query}");
-                    
-                    ToolResult::success("Memory query results (placeholder)".to_string())
+                    info!("Querying memory: type={}, query={}, limit={}", query_type, query, limit);
+
+                    let result = match query_type.as_str() {
+                        "conversations" => {
+                            match memory.get_recent_conversations_days(30).await {
+                                Ok(convs) => {
+                                    let filtered: Vec<(String, String, String, String)> = convs.into_iter()
+                                        .filter(|(_, _, content, _)| query.is_empty() || content.contains(&query))
+                                        .take(limit as usize)
+                                        .collect();
+                                    
+                                    let summary = filtered.iter()
+                                        .map(|(timestamp, role, content, _)| format!("[{}] {}: {}", timestamp, role, content))
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    
+                                    Ok(format!("Found {} conversations:\n{}", filtered.len(), summary))
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        "daily" => {
+                            match memory.get_summaries("daily", 30).await {
+                                Ok(summaries) => {
+                                    let filtered: Vec<(String, String, String)> = summaries.into_iter()
+                                        .filter(|(_, summary, _)| query.is_empty() || summary.contains(&query))
+                                        .take(limit as usize)
+                                        .collect();
+                                    
+                                    let summary = filtered.iter()
+                                        .map(|(date, summ, _)| format!("[{}] {}", date, summ))
+                                        .collect::<Vec<_>>()
+                                        .join("\n\n");
+                                    
+                                    Ok(format!("Found {} daily summaries:\n{}", filtered.len(), summary))
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        "monthly" => {
+                            match memory.get_summaries("monthly", 12).await {
+                                Ok(summaries) => {
+                                    let filtered: Vec<(String, String, String)> = summaries.into_iter()
+                                        .filter(|(_, summary, _)| query.is_empty() || summary.contains(&query))
+                                        .take(limit as usize)
+                                        .collect();
+                                    
+                                    let summary = filtered.iter()
+                                        .map(|(date, summ, _)| format!("[{}] {}", date, summ))
+                                        .collect::<Vec<_>>()
+                                        .join("\n\n");
+                                    
+                                    Ok(format!("Found {} monthly summaries:\n{}", filtered.len(), summary))
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        "notes" => {
+                            match memory.query_notes(limit as u32).await {
+                                Ok(notes) => {
+                                    let filtered_notes: Vec<(i64, String, String)> = notes.into_iter()
+                                        .filter(|(_, content, _)| query.is_empty() || content.contains(&query))
+                                        .collect();
+                                    
+                                    let summary = filtered_notes.iter()
+                                        .map(|(id, content, tags_json)| {
+                                            let tags: Vec<String> = serde_json::from_str(tags_json).unwrap_or_default();
+                                            let tags_display = if !tags.is_empty() {
+                                                format!(" [tags: {}]", tags.join(", "))
+                                            } else {
+                                                String::new()
+                                            };
+                                            format!("#{}{} {}", id, tags_display, content)
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n\n");
+                                    
+                                    Ok(format!("Found {} notes:\n{}", filtered_notes.len(), summary))
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        _ => {
+                            Err(anyhow::anyhow!("Unknown query type: {}. Use: conversations, daily, monthly, notes", query_type))
+                        }
+                    };
+
+                    match result {
+                        Ok(output) => ToolResult::success(output),
+                        Err(e) => {
+                            tracing::error!("Memory query failed: {}", e);
+                            ToolResult::error(format!("Query failed: {}", e))
+                        }
+                    }
                 })
             }),
         }
     }
 
-    pub fn create_trigger() -> Tool {
+    pub fn create_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "create_trigger".to_string(),
-            description: "Create a new time-based or event-based trigger".to_string(),
+            description: "Create a new time-based or event-based trigger for automation".to_string(),
             tags: vec!["automation".to_string(), "trigger".to_string()],
             parameters: vec![
                 ToolParameter {
                     name: "name".to_string(),
-                    description: "Trigger name".to_string(),
+                    description: "Unique trigger name".to_string(),
                     required: true,
                     param_type: "string".to_string(),
                 },
                 ToolParameter {
                     name: "schedule".to_string(),
-                    description: "Cron-like schedule or event type".to_string(),
+                    description: "Schedule: 'HH:MM' for time, seconds for interval/inactivity".to_string(),
                     required: true,
                     param_type: "string".to_string(),
                 },
                 ToolParameter {
                     name: "type".to_string(),
-                    description: "Trigger type: time, event, idle_analysis".to_string(),
+                    description: "Trigger type: time, interval, inactivity, dynamic".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "tag".to_string(),
+                    description: "Tag for categorization".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
@@ -261,16 +382,33 @@ mod tool_impls {
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
                     let name = args.get("name").cloned().unwrap_or_default();
                     let schedule = args.get("schedule").cloned().unwrap_or_default();
                     let trigger_type = args.get("type").cloned().unwrap_or_else(|| "time".to_string());
+                    let tag = args.get("tag").cloned();
+                    let description = args.get("description").cloned();
 
-                    // TODO: Create trigger in database and register with trigger system
-                    info!("Creating trigger: {name} ({trigger_type}) at {schedule}");
+                    info!("Creating trigger: {} ({}) at {}", name, trigger_type, schedule);
                     
-                    ToolResult::success(format!("Trigger created: {name}"))
+                    match trigger_registry.create_trigger(
+                        &name,
+                        &trigger_type,
+                        &schedule,
+                        tag.as_deref(),
+                        description.as_deref(),
+                    ).await {
+                        Ok(_) => {
+                            let desc_info = description.map(|d| format!(": {}", d)).unwrap_or_default();
+                            ToolResult::success(format!("Trigger '{}' created successfully{}", name, desc_info))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create trigger: {}", e);
+                            ToolResult::error(format!("Failed to create trigger: {}", e))
+                        }
+                    }
                 })
             }),
         }
@@ -338,7 +476,7 @@ mod tool_impls {
         }
     }
 
-    pub fn create_task() -> Tool {
+    pub fn create_task(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "create_task".to_string(),
             description: "Create a new task to track".to_string(),
@@ -352,7 +490,7 @@ mod tool_impls {
                 },
                 ToolParameter {
                     name: "priority".to_string(),
-                    description: "Priority: low, medium, high".to_string(),
+                    description: "Priority: low, medium, high, urgent".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
@@ -362,26 +500,54 @@ mod tool_impls {
                     required: false,
                     param_type: "string".to_string(),
                 },
+                ToolParameter {
+                    name: "description".to_string(),
+                    description: "Task description".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let task_manager = task_manager.clone();
                 Box::pin(async move {
                     let title = args.get("title").cloned().unwrap_or_default();
-                    let priority = args.get("priority").cloned().unwrap_or_else(|| "medium".to_string());
+                    let priority_str = args.get("priority").cloned().unwrap_or_else(|| "medium".to_string());
                     let due_date = args.get("due_date").cloned();
+                    let description = args.get("description").cloned();
 
-                    // TODO: Create task in database
-                    info!("Creating task: {title} (priority: {priority})");
-                    if let Some(due) = due_date {
-                        info!("Due date: {due}");
-                    }
+                    // Parse priority
+                    let priority = match priority_str.to_lowercase().as_str() {
+                        "low" => ritsu_common::TaskPriority::Low,
+                        "medium" => ritsu_common::TaskPriority::Medium,
+                        "high" => ritsu_common::TaskPriority::High,
+                        "urgent" => ritsu_common::TaskPriority::Urgent,
+                        _ => ritsu_common::TaskPriority::Medium,
+                    };
+
+                    info!("Creating task: {} (priority: {})", title, priority_str);
                     
-                    ToolResult::success(format!("Task created: {title}"))
+                    match task_manager.create_task(
+                        &title,
+                        description.as_deref(),
+                        &priority,
+                        &[], // no tags from tool
+                        due_date.as_deref()
+                    ).await {
+                        Ok(task_id) => {
+                            let due_info = due_date.map(|d| format!(" (due: {})", d)).unwrap_or_default();
+                            ToolResult::success(format!("Task created with ID {}: {}{}", task_id, title, due_info))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create task: {}", e);
+                            ToolResult::error(format!("Failed to create task: {}", e))
+                        }
+                    }
                 })
             }),
         }
     }
 
-    pub fn update_task() -> Tool {
+    pub fn update_task(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "update_task".to_string(),
             description: "Update an existing task's status or priority".to_string(),
@@ -406,28 +572,76 @@ mod tool_impls {
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let task_manager = task_manager.clone();
                 Box::pin(async move {
-                    let id = args.get("id").cloned().unwrap_or_default();
+                    let id_str = args.get("id").cloned().unwrap_or_default();
                     let status = args.get("status").cloned();
                     let priority = args.get("priority").cloned();
 
-                    // TODO: Update task in database
-                    info!("Updating task {id}");
+                    // Parse task ID
+                    let id = match id_str.parse::<i64>() {
+                        Ok(id) => id,
+                        Err(_) => return ToolResult::error(format!("Invalid task ID: {}", id_str)),
+                    };
+
+                    info!("Updating task {}", id);
+                    
+                    let mut updates = Vec::new();
+                    
                     if let Some(s) = status {
-                        info!("New status: {s}");
-                    }
-                    if let Some(p) = priority {
-                        info!("New priority: {p}");
+                        let task_status = match s.to_lowercase().as_str() {
+                            "pending" => ritsu_common::TaskStatus::Pending,
+                            "in_progress" | "inprogress" | "progress" => ritsu_common::TaskStatus::InProgress,
+                            "completed" | "done" => ritsu_common::TaskStatus::Completed,
+                            "cancelled" | "canceled" => ritsu_common::TaskStatus::Cancelled,
+                            _ => return ToolResult::error(format!("Invalid status: {}", s)),
+                        };
+                        
+                        match task_manager.update_task_status(id, &task_status).await {
+                            Ok(_) => {
+                                info!("Updated status to: {:?}", task_status);
+                                updates.push(format!("status → {:?}", task_status));
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to update status: {}", e);
+                                return ToolResult::error(format!("Failed to update status: {}", e));
+                            }
+                        }
                     }
                     
-                    ToolResult::success(format!("Task {id} updated"))
+                    if let Some(p) = priority {
+                        let task_priority = match p.to_lowercase().as_str() {
+                            "low" => ritsu_common::TaskPriority::Low,
+                            "medium" => ritsu_common::TaskPriority::Medium,
+                            "high" => ritsu_common::TaskPriority::High,
+                            "urgent" => ritsu_common::TaskPriority::Urgent,
+                            _ => return ToolResult::error(format!("Invalid priority: {}", p)),
+                        };
+                        
+                        match task_manager.update_task_priority(id, &task_priority).await {
+                            Ok(_) => {
+                                info!("Updated priority to: {:?}", task_priority);
+                                updates.push(format!("priority → {:?}", task_priority));
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to update priority: {}", e);
+                                return ToolResult::error(format!("Failed to update priority: {}", e));
+                            }
+                        }
+                    }
+
+                    if updates.is_empty() {
+                        ToolResult::error("No updates provided (need status or priority)".to_string())
+                    } else {
+                        ToolResult::success(format!("Task {} updated: {}", id, updates.join(", ")))
+                    }
                 })
             }),
         }
     }
 
-    pub fn list_tasks() -> Tool {
+    pub fn list_tasks(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "list_tasks".to_string(),
             description: "List tasks with optional filters".to_string(),
@@ -446,31 +660,63 @@ mod tool_impls {
                     param_type: "string".to_string(),
                 },
             ],
-            handler: Arc::new(|args: HashMap<String, String>| {
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let task_manager = task_manager.clone();
                 Box::pin(async move {
                     let status = args.get("status").cloned();
                     let priority = args.get("priority").cloned();
 
-                    // TODO: Query tasks from database
-                    info!("Listing tasks with filters - status: {status:?}, priority: {priority:?}");
+                    info!("Listing tasks - status: {:?}, priority: {:?}", status, priority);
                     
-                    ToolResult::success("Task list (placeholder)".to_string())
+                    match task_manager.list_tasks(status.as_deref(), priority.as_deref()).await {
+                        Ok(tasks) => {
+                            if tasks.is_empty() {
+                                ToolResult::success("No tasks found matching the filters".to_string())
+                            } else {
+                                let summary = tasks.iter()
+                                    .map(|t| {
+                                        let due_info = t.due_date.as_ref()
+                                            .map(|d| format!(" (due: {})", d))
+                                            .unwrap_or_default();
+                                        format!("#{} [{:?}] [{:?}] {}{}", 
+                                            t.id, t.status, t.priority, t.title, due_info)
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                
+                                ToolResult::success(format!("Found {} tasks:\n{}", tasks.len(), summary))
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to list tasks: {}", e);
+                            ToolResult::error(format!("Failed to list tasks: {}", e))
+                        }
+                    }
                 })
             }),
         }
     }
 }
 
-pub async fn register_all_tools(registry: &ToolRegistry) {
+use crate::memory::MemoryManager;
+use crate::tasks::TaskManager;
+use crate::trigger::TriggerRegistry as TriggerReg;
+
+pub async fn register_all_tools(
+    registry: &ToolRegistry,
+    memory: Arc<MemoryManager>,
+    task_manager: Arc<TaskManager>,
+    trigger_registry: Arc<TriggerReg>,
+) {
     registry.register(tool_impls::notify_client()).await;
-    registry.register(tool_impls::create_note()).await;
-    registry.register(tool_impls::query_memory()).await;
-    registry.register(tool_impls::create_trigger()).await;
+    registry.register(tool_impls::create_note(memory.clone())).await;
+    registry.register(tool_impls::query_memory(memory.clone())).await;
+    registry.register(tool_impls::create_trigger(trigger_registry.clone())).await;
     registry.register(tool_impls::analyze_now()).await;
     registry.register(tool_impls::open_chat()).await;
-    registry.register(tool_impls::create_task()).await;
-    registry.register(tool_impls::update_task()).await;
-    registry.register(tool_impls::list_tasks()).await;
+    registry.register(tool_impls::create_task(task_manager.clone())).await;
+    registry.register(tool_impls::update_task(task_manager.clone())).await;
+    registry.register(tool_impls::list_tasks(task_manager.clone())).await;
     
     info!("Registered {} tools", 9);
 }
