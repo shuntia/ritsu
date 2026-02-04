@@ -170,8 +170,10 @@ async fn handle_request(
             name,
             trigger_type,
             schedule,
+            tag,
+            description,
         } => {
-            match trigger_registry.create_trigger(&name, &trigger_type, &schedule).await {
+            match trigger_registry.create_trigger(&name, &trigger_type, &schedule, tag.as_deref(), description.as_deref()).await {
                 Ok(()) => ServerResponse::Ok,
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to create trigger: {}", e),

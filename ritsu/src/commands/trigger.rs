@@ -46,6 +46,8 @@ async fn create_trigger(name: &str, time: &str) -> Result<()> {
             name: name.to_string(),
             trigger_type: "time".to_string(),
             schedule: time.to_string(),
+            tag: None,
+            description: None,
         })
         .await?;
 

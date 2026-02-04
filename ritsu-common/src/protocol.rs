@@ -18,6 +18,8 @@ pub enum ClientRequest {
         name: String,
         trigger_type: String,
         schedule: String,
+        tag: Option<String>,
+        description: Option<String>,
     },
     /// Delete a trigger
     DeleteTrigger { name: String },

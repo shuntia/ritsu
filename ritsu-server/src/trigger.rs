@@ -184,13 +184,25 @@ impl TriggerRegistry {
         name: &str,
         trigger_type: &str,
         schedule: &str,
+        tag: Option<&str>,
+        description: Option<&str>,
     ) -> Result<()> {
         let conn = Connection::open(&self.db_path)?;
         
+        // Build metadata JSON with tag and description
+        let mut metadata = HashMap::new();
+        if let Some(t) = tag {
+            metadata.insert("tag".to_string(), t.to_string());
+        }
+        if let Some(d) = description {
+            metadata.insert("description".to_string(), d.to_string());
+        }
+        let metadata_json = serde_json::to_string(&metadata)?;
+        
         conn.execute(
             "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
-             VALUES (?1, ?2, ?3, 1, 'user', '{}', datetime('now'))",
-            (name, trigger_type, schedule),
+             VALUES (?1, ?2, ?3, 1, 'user', ?4, datetime('now'))",
+            (name, trigger_type, schedule, metadata_json),
         )?;
 
         self.load_from_database().await?;
@@ -286,6 +298,7 @@ fn calculate_next_trigger_time(time_str: &str) -> Option<Instant> {
 }
 
 /// Execute idle analysis based on trigger metadata
+#[allow(clippy::too_many_lines)]
 pub async fn execute_idle_analysis(
     trigger: &Trigger,
     memory: &MemoryManager,
@@ -308,21 +321,95 @@ pub async fn execute_idle_analysis(
         }
         "pattern" => {
             // Weekly pattern recognition
+            info!("Starting weekly pattern recognition");
+            
+            // Get past week's daily summaries
+            let past_summaries = memory.query_daily_summaries(7).await?;
+            
+            if past_summaries.is_empty() {
+                info!("No summaries to analyze for pattern recognition");
+                return Ok(());
+            }
+            
+            let system_prompt = memory.build_effective_prompt().await?;
+            let summaries_text = past_summaries.iter()
+                .map(|(date, summary)| format!("{date}: {summary}"))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            
+            let messages = vec![
+                crate::llm::Message {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                crate::llm::Message {
+                    role: "user".to_string(),
+                    content: format!(
+                        "Analyze patterns from the past week's activity:\n\n{}\n\nIdentify:\n1. Recurring themes and topics\n2. Time-based patterns\n3. User preferences and habits\n4. Areas of focus",
+                        summaries_text
+                    ),
+                }
+            ];
+            
+            let response = llm_client.generate(&messages, None).await
+                .unwrap_or_else(|_| crate::llm::LlmResponse {
+                    content: format!("Pattern analysis for past 7 days ({} summaries)", past_summaries.len()),
+                    tool_calls: Vec::new(),
+                });
+            
             let findings = HashMap::from([
                 ("type".to_string(), "pattern_recognition".to_string()),
-                ("summary".to_string(), "Weekly pattern analysis completed".to_string()),
+                ("summary".to_string(), response.content.clone()),
+                ("period".to_string(), "7_days".to_string()),
             ]);
             memory.store_idle_analysis("pattern", &findings, None).await?;
-            info!("Weekly pattern recognition completed");
+            info!("Weekly pattern recognition completed: {}", response.content.chars().take(100).collect::<String>());
         }
         "tools" => {
             // Bi-weekly tool effectiveness analysis
+            info!("Starting tool effectiveness analysis");
+            
+            // Get past 14 days of activity
+            let past_summaries = memory.query_daily_summaries(14).await?;
+            
+            if past_summaries.is_empty() {
+                info!("No activity to analyze for tool effectiveness");
+                return Ok(());
+            }
+            
+            let system_prompt = memory.build_effective_prompt().await?;
+            let summaries_text = past_summaries.iter()
+                .map(|(date, summary)| format!("{date}: {summary}"))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            
+            let messages = vec![
+                crate::llm::Message {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                crate::llm::Message {
+                    role: "user".to_string(),
+                    content: format!(
+                        "Analyze the effectiveness of interactions over the past 14 days:\n\n{}\n\nEvaluate:\n1. What types of requests were most common\n2. What worked well\n3. What could be improved\n4. Suggestions for better assistance",
+                        summaries_text
+                    ),
+                }
+            ];
+            
+            let response = llm_client.generate(&messages, None).await
+                .unwrap_or_else(|_| crate::llm::LlmResponse {
+                    content: format!("Effectiveness analysis for past 14 days ({} summaries)", past_summaries.len()),
+                    tool_calls: Vec::new(),
+                });
+            
             let findings = HashMap::from([
                 ("type".to_string(), "tool_effectiveness".to_string()),
-                ("summary".to_string(), "Tool effectiveness analysis completed".to_string()),
+                ("summary".to_string(), response.content.clone()),
+                ("period".to_string(), "14_days".to_string()),
             ]);
             memory.store_idle_analysis("tools", &findings, None).await?;
-            info!("Tool effectiveness analysis completed");
+            info!("Tool effectiveness analysis completed: {}", response.content.chars().take(100).collect::<String>());
         }
         "reflection" => {
             // Monthly self-reflection and compaction
@@ -343,6 +430,47 @@ pub async fn execute_idle_analysis(
             ]);
             memory.store_idle_analysis("reflection", &findings, None).await?;
             info!("Monthly self-reflection completed");
+        }
+        "morning_briefing" | "daily_briefing" => {
+            // Morning/daily briefing trigger
+            info!("Generating daily briefing");
+            
+            // Get yesterday's summary
+            let yesterday = Local::now().date_naive().pred_opt()
+                .ok_or_else(|| anyhow::anyhow!("Failed to calculate yesterday"))?;
+            
+            let yesterday_summary = memory.get_daily_summary(&yesterday.to_string()).await?;
+            
+            let system_prompt = memory.build_effective_prompt().await?;
+            let today = Local::now().format("%A, %B %d, %Y").to_string();
+            
+            let mut prompt = format!("Good morning! Today is {}.", today);
+            if let Some(summary) = yesterday_summary {
+                prompt.push_str("\n\nYesterday: ");
+                prompt.push_str(&summary);
+            }
+            prompt.push_str("\n\nProvide a brief morning briefing and motivation for the day ahead.");
+            
+            let messages = vec![
+                crate::llm::Message {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                crate::llm::Message {
+                    role: "user".to_string(),
+                    content: prompt,
+                }
+            ];
+            
+            let response = llm_client.generate(&messages, None).await
+                .unwrap_or_else(|_| crate::llm::LlmResponse {
+                    content: "Good morning! Have a great day ahead!".to_string(),
+                    tool_calls: Vec::new(),
+                });
+            
+            // Store as a note for the user to see
+            memory.create_note(&format!("Daily Briefing - {}: {}", today, response.content), &["briefing".to_string()]).await?;
+            info!("Daily briefing generated and stored as note");
         }
         _ => {
             warn!("Unknown analysis type: {}", analysis_type);

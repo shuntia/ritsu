@@ -78,16 +78,41 @@ impl MemoryManager {
             return Ok(());
         }
 
+        // Get previous day's summary for context
+        let previous_summary = if let Some(previous_day) = date.pred_opt() {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT summary FROM daily_summaries WHERE date = ?1",
+                [previous_day.to_string()],
+                |row| row.get::<_, String>(0),
+            ).ok()
+        } else {
+            None
+        };
+
+        // Get system prompt
+        let system_prompt = self.build_effective_prompt().await?;
+
         // Generate summary with LLM (no lock held)
         let conversation_text = conversations.iter()
             .map(|(role, content)| format!("{role}: {content}"))
             .collect::<Vec<_>>()
             .join("\n");
         
+        let mut prompt = format!("Summarize the following conversation into key points:\n\n{conversation_text}");
+        
+        if let Some(prev) = previous_summary {
+            prompt = format!("Previous day context: {prev}\n\n{prompt}");
+        }
+        
         let messages = vec![
             crate::llm::Message {
+                role: "system".to_string(),
+                content: system_prompt,
+            },
+            crate::llm::Message {
                 role: "user".to_string(),
-                content: format!("Summarize the following conversation into key points:\n\n{conversation_text}"),
+                content: prompt,
             }
         ];
         
@@ -143,16 +168,40 @@ impl MemoryManager {
             return Ok(());
         }
 
+        // Get system prompt
+        let system_prompt = self.build_effective_prompt().await?;
+
+        // Get previous month's summary for continuity
+        let prev_month_summary = {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT summary FROM monthly_summaries 
+                 WHERE year_month < ?1 ORDER BY year_month DESC LIMIT 1",
+                [year_month],
+                |row| row.get::<_, String>(0),
+            ).ok()
+        };
+
         // Generate monthly summary with LLM (no lock held)
         let summaries_text = summaries.iter()
             .map(|(date, summary)| format!("{date}: {summary}"))
             .collect::<Vec<String>>()
             .join("\n\n");
         
+        let mut prompt = format!("Create a comprehensive monthly summary from these daily summaries:\n\n{summaries_text}\n\nIdentify key themes, patterns, and progress.");
+        
+        if let Some(prev) = prev_month_summary {
+            prompt = format!("Previous month: {prev}\n\n{prompt}");
+        }
+        
         let messages = vec![
             crate::llm::Message {
+                role: "system".to_string(),
+                content: system_prompt,
+            },
+            crate::llm::Message {
                 role: "user".to_string(),
-                content: format!("Create a comprehensive monthly summary from these daily summaries:\n\n{summaries_text}"),
+                content: prompt,
             }
         ];
         
@@ -334,6 +383,17 @@ impl MemoryManager {
 
         let results: Vec<(String, String, i32)> = rows.filter_map(Result::ok).collect();
         Ok(results)
+    }
+
+    /// Get daily summary for a specific date
+    pub async fn get_daily_summary(&self, date: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let result = conn.query_row(
+            "SELECT summary FROM daily_summaries WHERE date = ?1",
+            [date],
+            |row| row.get::<_, String>(0),
+        ).ok();
+        Ok(result)
     }
 
     /// Query notes
