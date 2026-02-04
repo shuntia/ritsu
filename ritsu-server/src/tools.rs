@@ -785,9 +785,57 @@ mod tool_impls {
             }),
         }
     }
+
+    pub fn set_preference(preferences: Arc<super::super::preferences::PreferencesManager>) -> Tool {
+        Tool {
+            name: "set_preference".to_string(),
+            description: "Remember a user preference for future reference".to_string(),
+            tags: vec!["preferences".to_string(), "memory".to_string()],
+            parameters: vec![
+                ToolParameter {
+                    name: "category".to_string(),
+                    description: "Preference category (e.g., schedule, communication, work)".to_string(),
+                    required: true,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "key".to_string(),
+                    description: "Preference key (e.g., wake_time, notification_style)".to_string(),
+                    required: true,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "value".to_string(),
+                    description: "Preference value".to_string(),
+                    required: true,
+                    param_type: "string".to_string(),
+                },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let preferences = preferences.clone();
+                Box::pin(async move {
+                    let category = args.get("category").cloned().unwrap_or_default();
+                    let key = args.get("key").cloned().unwrap_or_default();
+                    let value = args.get("value").cloned().unwrap_or_default();
+
+                    match preferences.set_preference(&category, &key, &value, 1.0, Some("user")).await {
+                        Ok(_) => {
+                            info!("Set preference: {}/{} = {}", category, key, value);
+                            ToolResult::success(format!("Preference saved: {} / {} = {}", category, key, value))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to set preference: {}", e);
+                            ToolResult::error(format!("Failed to save preference: {}", e))
+                        }
+                    }
+                })
+            }),
+        }
+    }
 }
 
 use crate::memory::MemoryManager;
+use crate::preferences::PreferencesManager;
 use crate::state::ServerState;
 use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry as TriggerReg;
@@ -798,6 +846,7 @@ pub async fn register_all_tools(
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerReg>,
     state: Arc<ServerState>,
+    preferences: Arc<PreferencesManager>,
 ) {
     registry.register(tool_impls::notify_client(state.clone())).await;
     registry.register(tool_impls::create_note(memory.clone())).await;
@@ -808,6 +857,7 @@ pub async fn register_all_tools(
     registry.register(tool_impls::create_task(task_manager.clone())).await;
     registry.register(tool_impls::update_task(task_manager.clone())).await;
     registry.register(tool_impls::list_tasks(task_manager.clone())).await;
+    registry.register(tool_impls::set_preference(preferences.clone())).await;
     
-    info!("Registered {} tools", 9);
+    info!("Registered {} tools", 10);
 }

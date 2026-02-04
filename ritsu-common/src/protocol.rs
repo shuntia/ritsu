@@ -8,7 +8,10 @@ pub enum ClientRequest {
     /// Ping to check server status
     Ping,
     /// Send a message to the AI
-    SendMessage { content: String },
+    SendMessage { 
+        content: String,
+        session_id: Option<String>,
+    },
     /// Shutdown the server
     Shutdown,
     /// List all triggers

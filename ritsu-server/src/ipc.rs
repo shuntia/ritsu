@@ -13,6 +13,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+use crate::conversations::ConversationManager;
 use crate::llm::LlmClient;
 use crate::memory::MemoryManager;
 use crate::state::ServerState;
@@ -22,6 +23,7 @@ use crate::trigger::TriggerRegistry;
 pub struct IpcServer {
     socket_path: String,
     memory: Arc<MemoryManager>,
+    conversation_manager: Arc<ConversationManager>,
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerRegistry>,
     llm_client: Arc<LlmClient>,
@@ -32,6 +34,7 @@ impl IpcServer {
     pub fn new(
         socket_path: String,
         memory: Arc<MemoryManager>,
+        conversation_manager: Arc<ConversationManager>,
         task_manager: Arc<TaskManager>,
         trigger_registry: Arc<TriggerRegistry>,
         llm_client: Arc<LlmClient>,
@@ -40,6 +43,7 @@ impl IpcServer {
         Self {
             socket_path,
             memory,
+            conversation_manager,
             task_manager,
             trigger_registry,
             llm_client,
@@ -60,13 +64,14 @@ impl IpcServer {
             match listener.accept().await {
                 Ok((stream, _)) => {
                     let memory = self.memory.clone();
+                    let conversation_manager = self.conversation_manager.clone();
                     let task_manager = self.task_manager.clone();
                     let trigger_registry = self.trigger_registry.clone();
                     let llm_client = self.llm_client.clone();
                     let state = self.state.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, memory, task_manager, trigger_registry, llm_client, state).await {
+                        if let Err(e) = handle_client(stream, memory, conversation_manager, task_manager, trigger_registry, llm_client, state).await {
                             error!("Client handler error: {}", e);
                         }
                     });
@@ -82,6 +87,7 @@ impl IpcServer {
 async fn handle_client(
     mut stream: UnixStream,
     memory: Arc<MemoryManager>,
+    conversation_manager: Arc<ConversationManager>,
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerRegistry>,
     llm_client: Arc<LlmClient>,
@@ -101,6 +107,7 @@ async fn handle_client(
                         let response = handle_request(
                             request,
                             &memory,
+                            &conversation_manager,
                             &task_manager,
                             &trigger_registry,
                             &llm_client,
@@ -165,6 +172,7 @@ async fn send_push(stream: &mut UnixStream, push: ServerPush) -> Result<()> {
 async fn handle_request(
     request: ClientRequest,
     memory: &MemoryManager,
+    conversation_manager: &ConversationManager,
     task_manager: &TaskManager,
     trigger_registry: &TriggerRegistry,
     llm_client: &LlmClient,
@@ -172,12 +180,26 @@ async fn handle_request(
     match request {
         ClientRequest::Ping => ServerResponse::Pong,
 
-        ClientRequest::SendMessage { content } => {
-            // Store user message
+        ClientRequest::SendMessage { content, session_id } => {
+            // Get or create conversation session
+            let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
+            let session = match conversation_manager.get_or_create_session(&session_id).await {
+                Ok(s) => s,
+                Err(e) => {
+                    return ServerResponse::Error {
+                        message: format!("Failed to create session: {}", e),
+                    };
+                }
+            };
+
+            // Store user message in session
+            if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None).await {
+                warn!("Failed to store user turn: {}", e);
+            }
+
+            // Also store in legacy conversations table for compaction
             if let Err(e) = memory.store_conversation("user", &content).await {
-                return ServerResponse::Error {
-                    message: format!("Failed to store message: {}", e),
-                };
+                warn!("Failed to store in conversations: {}", e);
             }
 
             // Get system prompt
@@ -189,16 +211,17 @@ async fn handle_request(
                 }
             };
 
-            // Get recent conversation history (last 10 messages)
-            let history = match memory.query_recent_conversations(1).await {
-                Ok(convs) => convs.into_iter()
-                    .map(|(_, role, content)| crate::llm::Message {
-                        role,
-                        content,
+            // Get conversation history from session (last 20 turns)
+            let history = match conversation_manager.get_history(&session_id, 20).await {
+                Ok(turns) => turns.into_iter()
+                    .filter(|turn| turn.turn_number < session.turn_count) // Exclude current turn
+                    .map(|turn| crate::llm::Message {
+                        role: turn.role,
+                        content: turn.content,
                     })
                     .collect::<Vec<_>>(),
                 Err(e) => {
-                    warn!("Failed to get conversation history: {}", e);
+                    warn!("Failed to get session history: {}", e);
                     Vec::new()
                 }
             };
@@ -217,7 +240,12 @@ async fn handle_request(
                 5, // max 5 iterations
             ).await {
                 Ok(response) => {
-                    // Store assistant response
+                    // Store assistant response in session
+                    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &response.content, None, None).await {
+                        warn!("Failed to store assistant turn: {}", e);
+                    }
+
+                    // Also store in legacy conversations table
                     if let Err(e) = memory.store_conversation("assistant", &response.content).await {
                         warn!("Failed to store assistant response: {}", e);
                     }

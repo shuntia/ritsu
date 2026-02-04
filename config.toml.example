@@ -7,7 +7,7 @@ default_backend = "ollama"
 [[llm.backends]]
 name = "ollama"
 endpoint = "http://localhost:11434"
-model = "llama3.2"
+model = "gemma3:1b"
 
 # Uncomment to add OpenAI-compatible backend
 # [[llm.backends]]

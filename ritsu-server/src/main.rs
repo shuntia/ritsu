@@ -4,10 +4,12 @@ use anyhow::Result;
 use tracing::info;
 
 mod config;
+mod conversations;
 mod database;
 mod ipc;
 mod llm;
 mod memory;
+mod preferences;
 mod state;
 mod tasks;
 mod tools;
@@ -37,6 +39,14 @@ async fn main() -> Result<()> {
     let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone()));
     info!("Memory manager initialized");
 
+    // Initialize conversation manager
+    let conversation_manager = std::sync::Arc::new(conversations::ConversationManager::new(db.connection.clone()));
+    info!("Conversation manager initialized");
+
+    // Initialize preferences manager
+    let preferences_manager = std::sync::Arc::new(preferences::PreferencesManager::new(db.connection.clone()));
+    info!("Preferences manager initialized");
+
     // Initialize task manager
     let task_manager = std::sync::Arc::new(tasks::TaskManager::new(db.connection.clone()));
     info!("Task manager initialized");
@@ -50,11 +60,11 @@ async fn main() -> Result<()> {
     let server_state = std::sync::Arc::new(state::ServerState::new());
     info!("Server state initialized");
 
-    // Initialize tool registry (needs memory, task_manager, trigger_registry, database, server_state)
+    // Initialize tool registry (needs memory, task_manager, trigger_registry, database, server_state, preferences)
     let tool_registry = std::sync::Arc::new(
         tools::ToolRegistry::new().with_database(db.connection.clone())
     );
-    tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone(), server_state.clone()).await;
+    tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone(), server_state.clone(), preferences_manager.clone()).await;
     info!("Tool registry initialized with usage tracking");
 
     // Initialize LLM client (needs tool registry for tool calling)
@@ -77,6 +87,7 @@ async fn main() -> Result<()> {
     let ipc_server = ipc::IpcServer::new(
         config.server.socket_path.clone(),
         memory.clone(),
+        conversation_manager.clone(),
         task_manager.clone(),
         trigger_registry.clone(),
         llm_client.clone(),
