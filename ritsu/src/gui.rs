@@ -39,11 +39,18 @@ impl RitsuGui {
             Task::none(),
         )
     }
+}
 
-    fn title(&self) -> String {
-        String::from("Ritsu - AI Agent")
+impl Default for RitsuGui {
+    fn default() -> Self {
+        Self {
+            input: String::new(),
+            messages: Vec::new(),
+        }
     }
+}
 
+impl RitsuGui {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::InputChanged(value) => {
@@ -64,6 +71,7 @@ impl RitsuGui {
                             let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
                             let request = ritsu_common::protocol::ClientRequest::SendMessage {
                                 content: content.clone(),
+                                session_id: None,
                             };
                             client.send_request(request).await
                         },
@@ -137,15 +145,23 @@ impl RitsuGui {
             .height(iced::Length::Fill)
             .into()
     }
+}
 
-    fn theme(&self) -> Theme {
-        Theme::Dark
-    }
+fn update(state: &mut RitsuGui, message: Message) -> Task<Message> {
+    state.update(message)
+}
+
+fn view(state: &RitsuGui) -> Element<'_, Message> {
+    state.view()
 }
 
 pub async fn run() -> anyhow::Result<()> {
-    iced::application(RitsuGui::title, RitsuGui::update, RitsuGui::view)
-        .theme(RitsuGui::theme)
-        .run_with(RitsuGui::new)
-        .map_err(|e| anyhow::anyhow!("GUI error: {e}"))
+    iced::application(
+        RitsuGui::default,
+        update,
+        view
+    )
+    .theme(|_state: &RitsuGui| Theme::Dark)
+    .run()
+    .map_err(|e| anyhow::anyhow!("GUI error: {e}"))
 }

@@ -9,6 +9,7 @@ pub async fn send_message(message: &str) -> Result<()> {
     let response = client
         .send_request(ClientRequest::SendMessage {
             content: message.to_string(),
+            session_id: None, // Let server auto-generate session ID
         })
         .await?;
 
