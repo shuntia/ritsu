@@ -57,9 +57,10 @@ async fn main() -> Result<()> {
     // Start trigger loop in background
     let trigger_registry_clone = trigger_registry.clone();
     let memory_clone = memory.clone();
+    let task_manager_clone = task_manager.clone();
     let llm_client_clone = llm_client.clone();
     tokio::spawn(async move {
-        if let Err(e) = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, llm_client_clone).await {
+        if let Err(e) = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, task_manager_clone, llm_client_clone).await {
             tracing::error!("Trigger loop error: {}", e);
         }
     });

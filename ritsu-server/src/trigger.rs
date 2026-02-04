@@ -302,6 +302,7 @@ fn calculate_next_trigger_time(time_str: &str) -> Option<Instant> {
 pub async fn execute_idle_analysis(
     trigger: &Trigger,
     memory: &MemoryManager,
+    task_manager: &crate::tasks::TaskManager,
     llm_client: &LlmClient,
 ) -> Result<()> {
     let analysis_type = trigger.metadata.get("analysis_type")
@@ -315,7 +316,10 @@ pub async fn execute_idle_analysis(
             let yesterday = Local::now().date_naive().pred_opt()
                 .ok_or_else(|| anyhow::anyhow!("Failed to calculate yesterday"))?;
             
-            if let Err(e) = memory.compact_daily(&yesterday, llm_client).await {
+            // Get task context
+            let task_context = task_manager.get_task_summary().await.ok();
+            
+            if let Err(e) = memory.compact_daily(&yesterday, llm_client, task_context.as_deref()).await {
                 error!("Failed to compact daily conversations: {}", e);
             }
         }
@@ -337,6 +341,18 @@ pub async fn execute_idle_analysis(
                 .collect::<Vec<_>>()
                 .join("\n\n");
             
+            // Get task context
+            let task_summary = task_manager.get_active_tasks_summary().await.unwrap_or_default();
+            
+            let mut prompt = format!(
+                "Analyze patterns from the past week's activity:\n\n{}\n\nIdentify:\n1. Recurring themes and topics\n2. Time-based patterns\n3. User preferences and habits\n4. Areas of focus",
+                summaries_text
+            );
+            
+            if !task_summary.is_empty() {
+                prompt = format!("{}\n\n📋 Current Tasks:\n{}\n\nInclude task progress and workflow patterns in analysis.", prompt, task_summary);
+            }
+            
             let messages = vec![
                 crate::llm::Message {
                     role: "system".to_string(),
@@ -344,10 +360,7 @@ pub async fn execute_idle_analysis(
                 },
                 crate::llm::Message {
                     role: "user".to_string(),
-                    content: format!(
-                        "Analyze patterns from the past week's activity:\n\n{}\n\nIdentify:\n1. Recurring themes and topics\n2. Time-based patterns\n3. User preferences and habits\n4. Areas of focus",
-                        summaries_text
-                    ),
+                    content: prompt,
                 }
             ];
             
@@ -428,7 +441,10 @@ pub async fn execute_idle_analysis(
             
             let year_month = format!("{}-{:02}", last_month.year(), last_month.month());
             
-            if let Err(e) = memory.compact_monthly(&year_month, llm_client).await {
+            // Get task context for the month
+            let task_summary = task_manager.get_task_summary().await.ok();
+            
+            if let Err(e) = memory.compact_monthly(&year_month, llm_client, task_summary.as_deref()).await {
                 error!("Failed to compact monthly summaries: {}", e);
             }
 
@@ -449,6 +465,9 @@ pub async fn execute_idle_analysis(
             
             let yesterday_summary = memory.get_daily_summary(&yesterday.to_string()).await?;
             
+            // Get today's tasks
+            let task_summary = task_manager.get_active_tasks_summary().await.unwrap_or_default();
+            
             let system_prompt = memory.build_effective_prompt().await?;
             let today = Local::now().format("%A, %B %d, %Y").to_string();
             
@@ -456,6 +475,10 @@ pub async fn execute_idle_analysis(
             if let Some(summary) = yesterday_summary {
                 prompt.push_str("\n\nYesterday: ");
                 prompt.push_str(&summary);
+            }
+            if !task_summary.is_empty() {
+                prompt.push_str("\n\n📋 Today's Tasks:\n");
+                prompt.push_str(&task_summary);
             }
             prompt.push_str("\n\nProvide a brief morning briefing and motivation for the day ahead.");
             
@@ -496,6 +519,7 @@ pub async fn execute_idle_analysis(
 pub async fn run_trigger_loop(
     registry: Arc<TriggerRegistry>,
     memory: Arc<MemoryManager>,
+    task_manager: Arc<crate::tasks::TaskManager>,
     llm_client: Arc<LlmClient>,
 ) -> Result<()> {
     info!("Starting trigger loop");
@@ -547,7 +571,7 @@ pub async fn run_trigger_loop(
             
             // Execute the trigger
             info!("Executing trigger: {}", trigger.name);
-            if let Err(e) = execute_idle_analysis(&trigger, &memory, &llm_client).await {
+            if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client).await {
                 error!("Failed to execute trigger {}: {}", trigger.name, e);
             }
         } else {

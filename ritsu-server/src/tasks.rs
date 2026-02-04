@@ -7,6 +7,7 @@
 use anyhow::Result;
 use ritsu_common::{TaskPriority, TaskStatus};
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
@@ -178,5 +179,108 @@ impl TaskManager {
             .collect();
 
         Ok(tasks)
+    }
+
+    /// Get task summary statistics for AI context
+    pub async fn get_task_summary(&self) -> Result<String> {
+        let conn = self.conn.lock().await;
+        
+        // Count by status
+        let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM tasks GROUP BY status")?;
+        let status_counts: HashMap<String, i64> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(Result::ok)
+            .collect();
+        
+        // Count by priority
+        let mut stmt = conn.prepare("SELECT priority, COUNT(*) FROM tasks WHERE status != 'completed' AND status != 'cancelled' GROUP BY priority")?;
+        let priority_counts: HashMap<String, i64> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(Result::ok)
+            .collect();
+        
+        // Get overdue tasks
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM tasks WHERE status != 'completed' AND status != 'cancelled' AND due_date < date('now')")?;
+        let overdue: i64 = stmt.query_row([], |row| row.get(0))?;
+        
+        // Get tasks due soon (within 3 days)
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM tasks WHERE status != 'completed' AND status != 'cancelled' AND due_date BETWEEN date('now') AND date('now', '+3 days')")?;
+        let due_soon: i64 = stmt.query_row([], |row| row.get(0))?;
+        
+        // Build summary
+        let pending = status_counts.get("pending").unwrap_or(&0);
+        let in_progress = status_counts.get("in_progress").unwrap_or(&0);
+        let completed = status_counts.get("completed").unwrap_or(&0);
+        
+        let high = priority_counts.get("high").unwrap_or(&0);
+        let urgent = priority_counts.get("urgent").unwrap_or(&0);
+        
+        let mut summary = format!(
+            "Task Status: {} pending, {} in progress, {} completed today",
+            pending, in_progress, completed
+        );
+        
+        if *urgent > 0 || *high > 0 {
+            summary.push_str(&format!(
+                "\nHigh Priority: {} urgent, {} high",
+                urgent, high
+            ));
+        }
+        
+        if overdue > 0 {
+            summary.push_str(&format!("\n⚠️  {} tasks overdue", overdue));
+        }
+        
+        if due_soon > 0 {
+            summary.push_str(&format!("\n📅 {} tasks due within 3 days", due_soon));
+        }
+        
+        Ok(summary)
+    }
+
+    /// Get detailed list of active tasks for AI context
+    pub async fn get_active_tasks_summary(&self) -> Result<String> {
+        let tasks = self.list_tasks(None, None).await?;
+        
+        let active: Vec<_> = tasks.into_iter()
+            .filter(|t| !matches!(t.status, TaskStatus::Completed | TaskStatus::Cancelled))
+            .collect();
+        
+        if active.is_empty() {
+            return Ok("No active tasks".to_string());
+        }
+        
+        let summary = active.iter()
+            .take(10) // Limit to top 10
+            .map(|t| {
+                let priority_emoji = match t.priority {
+                    TaskPriority::Urgent => "🔴",
+                    TaskPriority::High => "🟠",
+                    TaskPriority::Medium => "🟡",
+                    TaskPriority::Low => "🟢",
+                };
+                
+                let status_str = match t.status {
+                    TaskStatus::Pending => "PENDING",
+                    TaskStatus::InProgress => "IN_PROGRESS",
+                    TaskStatus::Completed => "COMPLETED",
+                    TaskStatus::Cancelled => "CANCELLED",
+                };
+                
+                let due_info = t.due_date.as_ref()
+                    .map(|d| format!(" (due: {})", d))
+                    .unwrap_or_default();
+                
+                format!("{} [{}] {}{}", priority_emoji, status_str, t.title, due_info)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        let total = active.len();
+        if total > 10 {
+            Ok(format!("{}\n... and {} more", summary, total - 10))
+        } else {
+            Ok(summary)
+        }
     }
 }

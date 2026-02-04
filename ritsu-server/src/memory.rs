@@ -50,7 +50,7 @@ impl MemoryManager {
     }
 
     /// Compact daily conversations into a daily summary
-    pub async fn compact_daily(&self, date: &NaiveDate, llm_client: &LlmClient) -> Result<()> {
+    pub async fn compact_daily(&self, date: &NaiveDate, llm_client: &LlmClient, task_context: Option<&str>) -> Result<()> {
         info!("Compacting conversations for {date}");
 
         // Get all conversations for the date (collect first, then release lock)
@@ -105,6 +105,10 @@ impl MemoryManager {
             prompt = format!("Previous day context: {prev}\n\n{prompt}");
         }
         
+        if let Some(tasks) = task_context {
+            prompt = format!("{prompt}\n\n📋 Active Tasks:\n{tasks}\n\nInclude relevant task updates in your summary.");
+        }
+        
         let messages = vec![
             crate::llm::Message {
                 role: "system".to_string(),
@@ -141,7 +145,7 @@ impl MemoryManager {
     }
 
     /// Compact daily summaries into a monthly summary
-    pub async fn compact_monthly(&self, year_month: &str, llm_client: &LlmClient) -> Result<()> {
+    pub async fn compact_monthly(&self, year_month: &str, llm_client: &LlmClient, task_context: Option<&str>) -> Result<()> {
         info!("Compacting daily summaries for {year_month}");
 
         // Get all daily summaries for the month (collect first, then release lock)
@@ -193,6 +197,10 @@ impl MemoryManager {
         
         if let Some(prev) = prev_month_summary {
             prompt = format!("Previous month: {prev}\n\n{prompt}");
+        }
+        
+        if let Some(tasks) = task_context {
+            prompt = format!("{prompt}\n\n📋 Task Summary:\n{tasks}\n\nInclude task completion patterns and productivity insights.");
         }
         
         let messages = vec![
