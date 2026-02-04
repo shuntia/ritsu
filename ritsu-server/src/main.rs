@@ -5,6 +5,8 @@ use tracing::info;
 
 mod config;
 mod database;
+mod memory;
+mod tasks;
 
 #[tokio::main]
 async fn main() -> Result<()> {
