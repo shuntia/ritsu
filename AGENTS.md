@@ -291,6 +291,10 @@ pub struct ToolResult {
 4. **query_memory**: Retrieve information from memory (notes, summaries)
    - Args: `{"type": "notes|daily|monthly", "query": "...", "date_range": "..."}`
 
+5. **analyze_now**: Trigger immediate idle analysis
+   - Args: `{"type": "conversation|pattern|tools|self_reflection|dynamic"}`
+   - Allows AI to analyze current context and update its prompt during conversation
+
 ### Future Tools (post-v1)
 - HTTP requests (if Deno runtime added)
 - Screen time tracking integration
@@ -442,6 +446,8 @@ ritsu-sonnet/
 - [ ] Build daily compaction logic (end-of-day summary)
 - [ ] Build monthly compaction logic
 - [ ] Implement 40-day rotation cleanup task
+- [ ] Create system prompt storage and retrieval
+- [ ] Implement idle analysis tables
 
 ### Phase 3: LLM Integration
 - [ ] Integrate `llm` crate with Ollama support
@@ -454,12 +460,16 @@ ritsu-sonnet/
 - [ ] Implement `notify_client` tool
 - [ ] Implement `create_note` and `query_memory` tools
 - [ ] Implement `create_trigger` tool (AI self-triggering)
+- [ ] Implement `analyze_now` tool for dynamic idle analysis
 
-### Phase 5: Trigger System
+### Phase 5: Trigger System & Idle Analysis
 - [ ] Design trigger data structures and persistence
 - [ ] Implement time-based triggers with tokio
 - [ ] Implement interval-based triggers
 - [ ] Build trigger execution loop with `select_all`
+- [ ] Implement idle analysis triggers (daily, weekly, bi-weekly, monthly)
+- [ ] Build idle analysis logic for each analysis type
+- [ ] Implement system prompt composition and updates
 
 ### Phase 6: CLI Client
 - [ ] Build CLI for daemon management (start, stop, status)
