@@ -1,26 +1,34 @@
 //! Memory management and compaction
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::missing_const_for_fn)]
+#![allow(clippy::doc_markdown)]
 
 use anyhow::Result;
 use chrono::NaiveDate;
 use rusqlite::Connection;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::info;
 
-pub struct MemoryManager<'a> {
-    conn: &'a Connection,
+use crate::llm::LlmClient;
+
+pub struct MemoryManager {
+    conn: Arc<Mutex<Connection>>,
 }
 
 #[allow(dead_code)]
-impl<'a> MemoryManager<'a> {
+impl MemoryManager {
     #[must_use]
-    pub const fn new(conn: &'a Connection) -> Self {
+    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
         Self { conn }
     }
 
     /// Store a conversation message
-    pub fn store_conversation(&self, role: &str, content: &str) -> Result<()> {
+    pub async fn store_conversation(&self, role: &str, content: &str) -> Result<()> {
         let date = chrono::Utc::now().date_naive();
         
-        self.conn.execute(
+        let conn = self.conn.lock().await;
+        conn.execute(
             "INSERT INTO daily_conversations (date, role, content) VALUES (?1, ?2, ?3)",
             (date.to_string(), role, content),
         )?;
@@ -29,142 +37,202 @@ impl<'a> MemoryManager<'a> {
     }
 
     /// Create a note
-    pub fn create_note(&self, content: &str, tags: &[String]) -> Result<i64> {
+    pub async fn create_note(&self, content: &str, tags: &[String]) -> Result<i64> {
         let tags_json = serde_json::to_string(tags)?;
         
-        self.conn.execute(
+        let conn = self.conn.lock().await;
+        conn.execute(
             "INSERT INTO notes (content, tags) VALUES (?1, ?2)",
-            (content, tags_json),
+            (content, &tags_json),
         )?;
         
-        Ok(self.conn.last_insert_rowid())
+        Ok(conn.last_insert_rowid())
     }
 
     /// Compact daily conversations into a daily summary
-    pub fn compact_daily(&self, date: NaiveDate) -> Result<()> {
+    pub async fn compact_daily(&self, date: &NaiveDate, llm_client: &LlmClient) -> Result<()> {
         info!("Compacting conversations for {date}");
 
-        // Get all conversations for the date
-        let mut stmt = self.conn.prepare(
-            "SELECT role, content FROM daily_conversations 
-             WHERE date = ?1 ORDER BY timestamp"
-        )?;
-        
-        let conversations: Vec<(String, String)> = stmt
-            .query_map([date.to_string()], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Get all conversations for the date (collect first, then release lock)
+        let conversations = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT role, content FROM daily_conversations 
+                 WHERE date = ?1 ORDER BY timestamp"
+            )?;
+            
+            let rows = stmt
+                .query_map([date.to_string()], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+            
+            let mut result = Vec::new();
+            for row in rows {
+                result.push(row?);
+            }
+            result
+        }; // Lock released here
 
         if conversations.is_empty() {
             info!("No conversations to compact for {date}");
             return Ok(());
         }
 
-        // TODO: Use LLM to generate summary
-        let summary = format!("Day had {} conversations (placeholder summary)", conversations.len());
+        // Generate summary with LLM (no lock held)
+        let conversation_text = conversations.iter()
+            .map(|(role, content)| format!("{role}: {content}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        let messages = vec![
+            crate::llm::Message {
+                role: "user".to_string(),
+                content: format!("Summarize the following conversation into key points:\n\n{conversation_text}"),
+            }
+        ];
+        
+        let response = llm_client.generate(&messages, None).await
+            .unwrap_or_else(|_| crate::llm::LlmResponse {
+                content: format!("Conversation summary for {date} ({} messages)", conversations.len()),
+                tool_calls: Vec::new(),
+            });
+        
+        let summary = response.content;
         let tags = serde_json::to_string(&Vec::<String>::new())?;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let count = conversations.len() as i32;
 
-        // Insert daily summary
-        self.conn.execute(
+        // Insert daily summary (acquire lock again)
+        let conn = self.conn.lock().await;
+        conn.execute(
             "INSERT OR REPLACE INTO daily_summaries (date, summary, tags, conversation_count) 
              VALUES (?1, ?2, ?3, ?4)",
             (date.to_string(), summary, tags, count),
         )?;
 
-        info!("Created daily summary for {date} with {count} conversations");
+        info!("Compacted {count} conversations into daily summary for {date}");
         Ok(())
     }
 
     /// Compact daily summaries into a monthly summary
-    pub fn compact_monthly(&self, year: i32, month: u32) -> Result<()> {
-        let year_month = format!("{year:04}-{month:02}");
+    pub async fn compact_monthly(&self, year_month: &str, llm_client: &LlmClient) -> Result<()> {
         info!("Compacting daily summaries for {year_month}");
 
-        // Get all daily summaries for the month
-        let mut stmt = self.conn.prepare(
-            "SELECT date, summary FROM daily_summaries 
-             WHERE date LIKE ?1 ORDER BY date"
-        )?;
-        
-        let summaries: Vec<(String, String)> = stmt
-            .query_map([format!("{year_month}%")], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        // Get all daily summaries for the month (collect first, then release lock)
+        let summaries = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT date, summary FROM daily_summaries 
+                 WHERE date LIKE ?1 ORDER BY date"
+            )?;
+            
+            let rows = stmt
+                .query_map([format!("{year_month}%")], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+            
+            let mut result = Vec::new();
+            for row in rows {
+                result.push(row?);
+            }
+            result
+        }; // Lock released here
 
         if summaries.is_empty() {
             info!("No daily summaries to compact for {year_month}");
             return Ok(());
         }
 
-        // TODO: Use LLM to generate monthly summary
-        let summary = format!("Month had {} days with activity (placeholder summary)", summaries.len());
+        // Generate monthly summary with LLM (no lock held)
+        let summaries_text = summaries.iter()
+            .map(|(date, summary)| format!("{date}: {summary}"))
+            .collect::<Vec<String>>()
+            .join("\n\n");
+        
+        let messages = vec![
+            crate::llm::Message {
+                role: "user".to_string(),
+                content: format!("Create a comprehensive monthly summary from these daily summaries:\n\n{summaries_text}"),
+            }
+        ];
+        
+        let response = llm_client.generate(&messages, None).await
+            .unwrap_or_else(|_| crate::llm::LlmResponse {
+                content: format!("Monthly summary for {year_month} ({} days)", summaries.len()),
+                tool_calls: Vec::new(),
+            });
+        
+        let summary = response.content;
         let tags = serde_json::to_string(&Vec::<String>::new())?;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let days_count = summaries.len() as i32;
 
-        // Insert monthly summary
-        self.conn.execute(
+        // Insert monthly summary (acquire lock again)
+        let conn = self.conn.lock().await;
+        conn.execute(
             "INSERT OR REPLACE INTO monthly_summaries (year_month, summary, tags, days_included) 
              VALUES (?1, ?2, ?3, ?4)",
-            (&year_month, summary, tags, days_count),
+            (year_month, summary, tags, days_count),
         )?;
 
-        info!("Created monthly summary for {year_month} with {days_count} days");
+        info!("Compacted {days_count} daily summaries into monthly summary for {year_month}");
         Ok(())
     }
 
-    /// Rotate out old daily conversations (40+ days old)
-    pub fn rotate_old_conversations(&self, rotation_days: u32) -> Result<()> {
-        let cutoff_date = chrono::Utc::now().date_naive() - chrono::Duration::days(i64::from(rotation_days));
-        
-        let deleted = self.conn.execute(
+    /// Rotate old conversations (delete conversations older than rotation_days)
+    pub async fn rotate_old_conversations(&self, rotation_days: u32) -> Result<()> {
+        let cutoff_date = chrono::Utc::now()
+            .date_naive()
+            .checked_sub_days(chrono::Days::new(u64::from(rotation_days)))
+            .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
+
+        let conn = self.conn.lock().await;
+        let deleted = conn.execute(
             "DELETE FROM daily_conversations WHERE date < ?1",
             [cutoff_date.to_string()],
         )?;
 
-        if deleted > 0 {
-            info!("Rotated out {deleted} old conversation entries before {cutoff_date}");
-        }
-
+        info!("Rotated {deleted} old conversations (older than {cutoff_date})");
         Ok(())
     }
 
-    /// Store or update system prompt
-    pub fn store_system_prompt(&self, prompt_type: &str, content: &str) -> Result<()> {
-        // Deactivate existing prompts of this type
-        self.conn.execute(
-            "UPDATE system_prompts SET active = FALSE WHERE prompt_type = ?1",
+    /// Store a system prompt (base or AI-generated)
+    pub async fn store_system_prompt(&self, prompt_type: &str, content: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        
+        // Deactivate previous prompts of this type
+        conn.execute(
+            "UPDATE system_prompts SET active = 0 WHERE prompt_type = ?1",
             [prompt_type],
         )?;
 
         // Get next version number
-        let version: i32 = self.conn
+        let version: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) + 1 FROM system_prompts WHERE prompt_type = ?1",
                 [prompt_type],
                 |row| row.get(0),
-            )?;
+            )
+            .unwrap_or(1);
 
         // Insert new prompt
-        self.conn.execute(
+        conn.execute(
             "INSERT INTO system_prompts (prompt_type, content, version, active) 
-             VALUES (?1, ?2, ?3, TRUE)",
+             VALUES (?1, ?2, ?3, 1)",
             (prompt_type, content, version),
         )?;
 
-        info!("Stored system prompt type '{prompt_type}' version {version}");
+        info!("Stored {prompt_type} system prompt (version {version})");
         Ok(())
     }
 
-    /// Get active system prompt
-    pub fn get_system_prompt(&self, prompt_type: &str) -> Result<Option<String>> {
-        let result = self.conn.query_row(
+    /// Get the active system prompt of a specific type
+    pub async fn get_system_prompt(&self, prompt_type: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        
+        let result = conn.query_row(
             "SELECT content FROM system_prompts 
-             WHERE prompt_type = ?1 AND active = TRUE 
+             WHERE prompt_type = ?1 AND active = 1 
              ORDER BY version DESC LIMIT 1",
             [prompt_type],
             |row| row.get(0),
@@ -177,30 +245,33 @@ impl<'a> MemoryManager<'a> {
         }
     }
 
-    /// Build effective system prompt (base + AI-generated)
-    pub fn build_effective_prompt(&self) -> Result<String> {
-        let base = self.get_system_prompt("base")?
-            .unwrap_or_else(|| "You are Ritsu, a self-triggering AI agent.".to_string());
+    /// Build the effective system prompt (base + AI-generated)
+    pub async fn build_effective_prompt(&self) -> Result<String> {
+        let base = self.get_system_prompt("base").await?
+            .unwrap_or_else(|| "You are Ritsu, a helpful AI assistant.".to_string());
         
-        let ai_additions = self.get_system_prompt("ai_generated")?;
+        let ai_generated = self.get_system_prompt("ai_generated").await?;
 
-        Ok(match ai_additions {
-            Some(additions) => format!("{base}\n\n--- AI-Generated Context ---\n{additions}"),
-            None => base,
-        })
+        Ok(ai_generated.map_or_else(
+            || base.clone(),
+            |ai| format!("{base}\n\n{ai}"),
+        ))
     }
 
-    /// Store idle analysis results
-    pub fn store_idle_analysis(
-        &self, 
-        analysis_type: &str, 
-        findings: &str, 
-        prompted_changes: Option<&str>
+    /// Store an idle analysis result
+    pub async fn store_idle_analysis(
+        &self,
+        analysis_type: &str,
+        findings: &std::collections::HashMap<String, String>,
+        prompted_changes: Option<&str>,
     ) -> Result<()> {
-        self.conn.execute(
+        let findings_json = serde_json::to_string(findings)?;
+        
+        let conn = self.conn.lock().await;
+        conn.execute(
             "INSERT INTO idle_analyses (analysis_type, findings, prompted_changes) 
              VALUES (?1, ?2, ?3)",
-            (analysis_type, findings, prompted_changes),
+            (analysis_type, findings_json, prompted_changes),
         )?;
 
         info!("Stored {analysis_type} idle analysis");

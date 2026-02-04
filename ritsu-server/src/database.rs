@@ -3,10 +3,12 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct Database {
-    conn: Connection,
+    pub connection: Arc<Mutex<Connection>>,
 }
 
 impl Database {
@@ -23,21 +25,30 @@ impl Database {
         let conn = Connection::open(path)
             .context("Failed to open database")?;
         
-        let db = Self { conn };
-        db.initialize_schema()?;
+        let db = Self { connection: Arc::new(Mutex::new(conn)) };
+        
+        // Initialize schema synchronously in a blocking task
+        let conn_clone = db.connection.clone();
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let conn = conn_clone.lock().await;
+                Self::initialize_schema_sync(&conn)
+            })
+        })?;
         
         Ok(db)
     }
 
     /// Initialize or migrate database schema
-    fn initialize_schema(&self) -> Result<()> {
+    fn initialize_schema_sync(conn: &Connection) -> Result<()> {
         info!("Initializing database schema");
 
         // Enable foreign keys
-        self.conn.execute("PRAGMA foreign_keys = ON", [])?;
+        conn.execute("PRAGMA foreign_keys = ON", [])?;
 
         // Notes table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -48,7 +59,7 @@ impl Database {
         )?;
 
         // Daily summaries table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS daily_summaries (
                 date DATE PRIMARY KEY,
                 summary TEXT NOT NULL,
@@ -60,7 +71,7 @@ impl Database {
         )?;
 
         // Monthly summaries table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS monthly_summaries (
                 year_month TEXT PRIMARY KEY,
                 summary TEXT NOT NULL,
@@ -72,7 +83,7 @@ impl Database {
         )?;
 
         // Daily conversations table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS daily_conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date DATE NOT NULL,
@@ -83,14 +94,14 @@ impl Database {
             [],
         )?;
 
-        self.conn.execute(
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_daily_conversations_date 
              ON daily_conversations(date)",
             [],
         )?;
 
         // Triggers table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS triggers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -105,7 +116,7 @@ impl Database {
         )?;
 
         // System prompts table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS system_prompts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 prompt_type TEXT NOT NULL,
@@ -118,7 +129,7 @@ impl Database {
         )?;
 
         // Idle analyses table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS idle_analyses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_type TEXT NOT NULL,
@@ -130,7 +141,7 @@ impl Database {
         )?;
 
         // Tasks table
-        self.conn.execute(
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
