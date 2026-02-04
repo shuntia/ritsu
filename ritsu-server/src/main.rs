@@ -8,6 +8,7 @@ mod database;
 mod llm;
 mod memory;
 mod tasks;
+mod tools;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,6 +33,11 @@ async fn main() -> Result<()> {
     // Initialize LLM client
     let _llm_client = llm::LlmClient::new(&config.llm, &config.timeouts)?;
     info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
+
+    // Initialize tool registry
+    let tool_registry = tools::ToolRegistry::new();
+    tools::register_all_tools(&tool_registry).await;
+    info!("Tool registry initialized");
 
     info!("ritsu-server started successfully");
 
