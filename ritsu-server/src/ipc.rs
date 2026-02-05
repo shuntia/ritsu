@@ -159,7 +159,7 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
 
 async fn send_response(stream: &mut UnixStream, response: ServerResponse) -> Result<()> {
     let bytes = postcard::to_allocvec(&response)?;
-    let len = bytes.len() as u32;
+    let len = u32::try_from(bytes.len()).context("Response too large")?;
     stream.write_all(&len.to_be_bytes()).await?;
     stream.write_all(&bytes).await?;
     stream.flush().await?;
@@ -168,7 +168,7 @@ async fn send_response(stream: &mut UnixStream, response: ServerResponse) -> Res
 
 async fn send_push(stream: &mut UnixStream, push: ServerPush) -> Result<()> {
     let bytes = postcard::to_allocvec(&push)?;
-    let len = bytes.len() as u32;
+    let len = u32::try_from(bytes.len()).context("Push message too large")?;
     stream.write_all(&len.to_be_bytes()).await?;
     stream.write_all(&bytes).await?;
     stream.flush().await?;

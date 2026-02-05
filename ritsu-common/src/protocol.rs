@@ -155,12 +155,13 @@ pub enum TaskPriority {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_client_request_creation() {
-        let requests = vec![
+        let requests = [
             ClientRequest::Ping,
             ClientRequest::SendMessage {
                 content: "test".to_string(),
@@ -170,21 +171,22 @@ mod tests {
             ClientRequest::ListTriggers,
         ];
 
-        for request in requests {
-            // Just check they can be created
+        for request in &requests {
+            // Just check they can be created and matched
+            #[allow(clippy::wildcard_in_or_patterns)]
             match request {
-                ClientRequest::Ping => assert!(true),
-                ClientRequest::SendMessage { .. } => assert!(true),
-                ClientRequest::Shutdown => assert!(true),
-                ClientRequest::ListTriggers => assert!(true),
-                _ => (),
+                ClientRequest::Ping
+                | ClientRequest::SendMessage { .. }
+                | ClientRequest::Shutdown
+                | ClientRequest::ListTriggers
+                | _ => {}
             }
         }
     }
 
     #[test]
     fn test_server_response_creation() {
-        let _responses = vec![
+        let _responses = [
             ServerResponse::Ok,
             ServerResponse::Pong,
             ServerResponse::Error {
@@ -195,12 +197,11 @@ mod tests {
             },
         ];
         // Just check they compile
-        assert!(true);
     }
 
     #[test]
     fn test_server_push_creation() {
-        let _pushes = vec![
+        let _pushes = [
             ServerPush::Notification {
                 title: "Test".to_string(),
                 message: "Message".to_string(),
@@ -212,7 +213,6 @@ mod tests {
             },
         ];
         // Just check they compile
-        assert!(true);
     }
 
     #[test]

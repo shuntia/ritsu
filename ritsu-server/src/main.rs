@@ -163,6 +163,8 @@ async fn main() -> Result<()> {
         use tokio::signal::unix::{signal, SignalKind};
         let shutdown_flag_clone = shutdown_flag.clone();
         tokio::spawn(async move {
+            // Signal setup failure is fatal - we need graceful shutdown capability
+            #[allow(clippy::expect_used)]
             let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
             sigterm.recv().await;
             info!("Received SIGTERM! Shutting down gracefully...");
@@ -186,8 +188,13 @@ async fn start_ollama_if_needed() {
         .arg("ollama")
         .output();
     
-    if ollama_check.is_err() || !ollama_check.as_ref().unwrap().status.success() {
-        tracing::debug!("Ollama not found in PATH");
+    if let Ok(output) = ollama_check {
+        if !output.status.success() {
+            tracing::debug!("Ollama not found in PATH");
+            return;
+        }
+    } else {
+        tracing::debug!("Failed to check for ollama");
         return;
     }
     
@@ -221,10 +228,18 @@ async fn start_ollama_if_needed() {
         }
     };
     
+    let stdout_file = match log_file.try_clone() {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!("Failed to clone log file handle: {}", e);
+            return;
+        }
+    };
+    
     let result = tokio::process::Command::new("ollama")
         .arg("serve")
         .stdin(std::process::Stdio::null())
-        .stdout(log_file.try_clone().unwrap())
+        .stdout(stdout_file)
         .stderr(log_file)
         .spawn();
     

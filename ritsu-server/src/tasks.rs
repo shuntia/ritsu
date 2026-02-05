@@ -221,18 +221,15 @@ impl TaskManager {
         );
         
         if *urgent > 0 || *high > 0 {
-            summary.push_str(&format!(
-                "\nHigh Priority: {} urgent, {} high",
-                urgent, high
-            ));
+            summary = format!("{summary}\nHigh Priority: {urgent} urgent, {high} high");
         }
         
         if overdue > 0 {
-            summary.push_str(&format!("\n⚠️  {} tasks overdue", overdue));
+            summary = format!("{summary}\n⚠️  {overdue} tasks overdue");
         }
         
         if due_soon > 0 {
-            summary.push_str(&format!("\n📅 {} tasks due within 3 days", due_soon));
+            summary = format!("{summary}\n📅 {due_soon} tasks due within 3 days");
         }
         
         Ok(summary)

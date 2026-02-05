@@ -431,13 +431,13 @@ pub async fn execute_idle_analysis(
             }
             
             let system_prompt = memory.build_effective_prompt().await?;
-            let summaries_text = if !past_summaries.is_empty() {
+            let summaries_text = if past_summaries.is_empty() {
+                "No daily summaries available".to_string()
+            } else {
                 past_summaries.iter()
                     .map(|(date, summary)| format!("{date}: {summary}"))
                     .collect::<Vec<_>>()
                     .join("\n\n")
-            } else {
-                "No daily summaries available".to_string()
             };
             
             let messages = vec![

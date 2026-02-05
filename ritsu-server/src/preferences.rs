@@ -23,12 +23,13 @@ pub struct PreferencesManager {
 }
 
 impl PreferencesManager {
-    pub fn new(db: Arc<Mutex<Connection>>) -> Self {
+    pub const fn new(db: Arc<Mutex<Connection>>) -> Self {
         Self { db }
     }
 
     /// Set or update a preference
     pub async fn set_preference(
+    #[allow(clippy::significant_drop_tightening)]
         &self,
         category: &str,
         key: &str,
@@ -52,6 +53,7 @@ impl PreferencesManager {
     /// Get a specific preference
     #[allow(dead_code)]
     pub async fn get_preference(&self, category: &str, key: &str) -> Result<Option<Preference>> {
+    #[allow(clippy::significant_drop_tightening)]
         let conn = self.db.lock().await;
         
         let mut stmt = conn.prepare(
@@ -80,6 +82,7 @@ impl PreferencesManager {
     /// Get all preferences in a category
     #[allow(dead_code)]
     pub async fn get_category(&self, category: &str) -> Result<Vec<Preference>> {
+    #[allow(clippy::significant_drop_tightening)]
         let conn = self.db.lock().await;
         
         let mut stmt = conn.prepare(
@@ -142,9 +145,9 @@ impl PreferencesManager {
         let mut output = String::from("\n## User Preferences\n");
         
         for (category, items) in prefs {
-            output.push_str(&format!("\n### {}\n", category));
+            output = format!("{output}\n### {category}\n");
             for (key, value) in items {
-                output.push_str(&format!("- {}: {}\n", key, value));
+                output = format!("{output}- {key}: {value}\n");
             }
         }
         
@@ -180,10 +183,11 @@ impl PreferencesManager {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
-    async fn create_test_db() -> Arc<Mutex<Connection>> {
+    fn create_test_db() -> Arc<Mutex<Connection>> {
         let conn = Connection::open_in_memory().unwrap();
         
         conn.execute(
@@ -206,7 +210,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_set_and_get_preference() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("schedule", "wake_time", "7:00AM", 0.9, Some("user")).await.unwrap();
@@ -215,12 +219,15 @@ mod tests {
         assert!(pref.is_some());
         let pref = pref.unwrap();
         assert_eq!(pref.value, "7:00AM");
-        assert_eq!(pref.confidence, 0.9);
+        #[allow(clippy::float_cmp)]
+        {
+            assert_eq!(pref.confidence, 0.9);
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_get_category() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("schedule", "wake_time", "7:00AM", 1.0, None).await.unwrap();
@@ -233,7 +240,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_format_for_prompt() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("schedule", "wake_time", "7:00AM", 1.0, None).await.unwrap();
@@ -247,7 +254,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_remove_preference() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("test", "key", "value", 1.0, None).await.unwrap();

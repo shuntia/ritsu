@@ -41,6 +41,7 @@ impl Database {
     }
 
     /// Initialize or migrate database schema
+    #[allow(clippy::too_many_lines)]
     fn initialize_schema_sync(conn: &Connection) -> Result<()> {
         info!("Initializing database schema");
 
@@ -254,6 +255,7 @@ impl Database {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -290,7 +292,7 @@ mod tests {
                 [table],
                 |row| row.get(0),
             );
-            assert!(result.unwrap() > 0, "Table '{}' should exist", table);
+            assert!(result.unwrap() > 0, "Table '{table}' should exist");
         }
         
         drop(conn);

@@ -31,11 +31,12 @@ pub struct ConversationManager {
 }
 
 impl ConversationManager {
-    pub fn new(db: Arc<Mutex<Connection>>) -> Self {
+    pub const fn new(db: Arc<Mutex<Connection>>) -> Self {
         Self { db }
     }
 
     /// Create or resume a conversation session
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_or_create_session(&self, session_id: &str) -> Result<ConversationSession> {
         let conn = self.db.lock().await;
         
@@ -54,33 +55,31 @@ impl ConversationManager {
             })
         });
         
-        match session {
-            Ok(s) => {
-                // Update last_activity
-                conn.execute(
-                    "UPDATE conversations SET last_activity = datetime('now') WHERE session_id = ?",
-                    [session_id],
-                )?;
-                Ok(s)
-            }
-            Err(_) => {
-                // Create new session
-                conn.execute(
-                    "INSERT INTO conversations (session_id, metadata) VALUES (?, '{}')",
-                    [session_id],
-                )?;
-                
-                Ok(ConversationSession {
-                    session_id: session_id.to_string(),
-                    turn_count: 0,
-                    started_at: chrono::Utc::now().to_rfc3339(),
-                    last_activity: chrono::Utc::now().to_rfc3339(),
-                })
-            }
+        if let Ok(s) = session {
+            // Update last_activity
+            conn.execute(
+                "UPDATE conversations SET last_activity = datetime('now') WHERE session_id = ?",
+                [session_id],
+            )?;
+            Ok(s)
+        } else {
+            // Create new session
+            conn.execute(
+                "INSERT INTO conversations (session_id, metadata) VALUES (?, '{}')",
+                [session_id],
+            )?;
+            
+            Ok(ConversationSession {
+                session_id: session_id.to_string(),
+                turn_count: 0,
+                started_at: chrono::Utc::now().to_rfc3339(),
+                last_activity: chrono::Utc::now().to_rfc3339(),
+            })
         }
     }
 
     /// Add a turn to the conversation
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn add_turn(
         &self,
         session_id: &str,
@@ -121,6 +120,7 @@ impl ConversationManager {
     }
 
     /// Get conversation history (last N turns)
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_history(&self, session_id: &str, limit: i64) -> Result<Vec<ConversationTurn>> {
         let conn = self.db.lock().await;
         
@@ -148,6 +148,7 @@ impl ConversationManager {
     }
 
     /// Get all active sessions (active in last 24 hours)
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_active_sessions(&self) -> Result<Vec<ConversationSession>> {
         let conn = self.db.lock().await;
         
@@ -172,13 +173,14 @@ impl ConversationManager {
     }
 
     /// Clean up old conversations (older than 30 days)
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn cleanup_old_sessions(&self, days: i64) -> Result<usize> {
         let conn = self.db.lock().await;
         
         let deleted = conn.execute(
             "DELETE FROM conversations 
              WHERE last_activity < datetime('now', ? || ' days')",
-            [format!("-{}", days)],
+            [format!("-{days}")],
         )?;
         
         if deleted > 0 {
@@ -190,10 +192,11 @@ impl ConversationManager {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
-    async fn create_test_db() -> Arc<Mutex<Connection>> {
+    fn create_test_db() -> Arc<Mutex<Connection>> {
         let conn = Connection::open_in_memory().unwrap();
         
         // Create minimal schema for testing
@@ -229,7 +232,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_session() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = ConversationManager::new(db);
         
         let session = manager.get_or_create_session("test_session").await.unwrap();
@@ -239,7 +242,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_add_turn() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = ConversationManager::new(db);
         
         let _session = manager.get_or_create_session("test_session").await.unwrap();
@@ -257,7 +260,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_get_history() {
-        let db = create_test_db().await;
+        let db = create_test_db();
         let manager = ConversationManager::new(db);
         
         let _session = manager.get_or_create_session("test_session").await.unwrap();

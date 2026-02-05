@@ -273,7 +273,7 @@ mod tool_impls {
                         }
                         Err(e) => {
                             tracing::error!("Failed to create note: {}", e);
-                            ToolResult::error(format!("Failed to create note: {}", e))
+                            ToolResult::error(format!("Failed to create note: {e}"))
                         }
                     }
                 })
@@ -327,7 +327,7 @@ mod tool_impls {
                                         .collect();
                                     
                                     let summary = filtered.iter()
-                                        .map(|(timestamp, role, content, _)| format!("[{}] {}: {}", timestamp, role, content))
+                                        .map(|(timestamp, role, content, _)| format!("[{timestamp}] {role}: {content}"))
                                         .collect::<Vec<_>>()
                                         .join("\n");
                                     
@@ -345,7 +345,7 @@ mod tool_impls {
                                         .collect();
                                     
                                     let summary = filtered.iter()
-                                        .map(|(date, summ, _)| format!("[{}] {}", date, summ))
+                                        .map(|(date, summ, _)| format!("[{date}] {summ}"))
                                         .collect::<Vec<_>>()
                                         .join("\n\n");
                                     
@@ -363,7 +363,7 @@ mod tool_impls {
                                         .collect();
                                     
                                     let summary = filtered.iter()
-                                        .map(|(date, summ, _)| format!("[{}] {}", date, summ))
+                                        .map(|(date, summ, _)| format!("[{date}] {summ}"))
                                         .collect::<Vec<_>>()
                                         .join("\n\n");
                                     
@@ -382,12 +382,12 @@ mod tool_impls {
                                     let summary = filtered_notes.iter()
                                         .map(|(id, content, tags_json)| {
                                             let tags: Vec<String> = serde_json::from_str(tags_json).unwrap_or_default();
-                                            let tags_display = if !tags.is_empty() {
-                                                format!(" [tags: {}]", tags.join(", "))
-                                            } else {
+                                            let tags_display = if tags.is_empty() {
                                                 String::new()
+                                            } else {
+                                                format!(" [tags: {}]", tags.join(", "))
                                             };
-                                            format!("#{}{} {}", id, tags_display, content)
+                                            format!("#{id}{tags_display} {content}")
                                         })
                                         .collect::<Vec<_>>()
                                         .join("\n\n");
@@ -398,7 +398,7 @@ mod tool_impls {
                             }
                         }
                         _ => {
-                            Err(anyhow::anyhow!("Unknown query type: {}. Use: conversations, daily, monthly, notes", query_type))
+                            Err(anyhow::anyhow!("Unknown query type: {query_type}. Use: conversations, daily, monthly, notes"))
                         }
                     };
 
@@ -406,7 +406,7 @@ mod tool_impls {
                         Ok(output) => ToolResult::success(output),
                         Err(e) => {
                             tracing::error!("Memory query failed: {}", e);
-                            ToolResult::error(format!("Query failed: {}", e))
+                            ToolResult::error(format!("Query failed: {e}"))
                         }
                     }
                 })
@@ -469,13 +469,13 @@ mod tool_impls {
                         tag.as_deref(),
                         description.as_deref(),
                     ).await {
-                        Ok(_) => {
-                            let desc_info = description.map(|d| format!(": {}", d)).unwrap_or_default();
-                            ToolResult::success(format!("Trigger '{}' created successfully{}", name, desc_info))
+                        Ok(()) => {
+                            let desc_info = description.map(|d| format!(": {d}")).unwrap_or_default();
+                            ToolResult::success(format!("Trigger '{name}' created successfully{desc_info}"))
                         }
                         Err(e) => {
                             tracing::error!("Failed to create trigger: {}", e);
-                            ToolResult::error(format!("Failed to create trigger: {}", e))
+                            ToolResult::error(format!("Failed to create trigger: {e}"))
                         }
                     }
                 })
@@ -513,11 +513,11 @@ mod tool_impls {
                         vec!["analysis".to_string(), "immediate".to_string()],
                         metadata,
                     ).await {
-                        return ToolResult::error(format!("Failed to create analysis trigger: {}", e));
+                        return ToolResult::error(format!("Failed to create analysis trigger: {e}"));
                     }
                     
                     info!("Created immediate analysis trigger: {}", trigger_name);
-                    ToolResult::success(format!("Analysis scheduled: {}", analysis_type))
+                    ToolResult::success(format!("Analysis scheduled: {analysis_type}"))
                 })
             }),
         }
@@ -610,6 +610,7 @@ mod tool_impls {
                     let description = args.get("description").cloned();
 
                     // Parse priority
+                    #[allow(clippy::match_same_arms)]
                     let priority = match priority_str.to_lowercase().as_str() {
                         "low" => ritsu_common::TaskPriority::Low,
                         "medium" => ritsu_common::TaskPriority::Medium,
@@ -628,12 +629,12 @@ mod tool_impls {
                         due_date.as_deref()
                     ).await {
                         Ok(task_id) => {
-                            let due_info = due_date.map(|d| format!(" (due: {})", d)).unwrap_or_default();
-                            ToolResult::success(format!("Task created with ID {}: {}{}", task_id, title, due_info))
+                            let due_info = due_date.map(|d| format!(" (due: {d})")).unwrap_or_default();
+                            ToolResult::success(format!("Task created with ID {task_id}: {title}{due_info}"))
                         }
                         Err(e) => {
                             tracing::error!("Failed to create task: {}", e);
-                            ToolResult::error(format!("Failed to create task: {}", e))
+                            ToolResult::error(format!("Failed to create task: {e}"))
                         }
                     }
                 })
@@ -674,9 +675,8 @@ mod tool_impls {
                     let priority = args.get("priority").cloned();
 
                     // Parse task ID
-                    let id = match id_str.parse::<i64>() {
-                        Ok(id) => id,
-                        Err(_) => return ToolResult::error(format!("Invalid task ID: {}", id_str)),
+                    let Ok(id) = id_str.parse::<i64>() else {
+                        return ToolResult::error(format!("Invalid task ID: {id_str}"));
                     };
 
                     info!("Updating task {}", id);
@@ -689,17 +689,17 @@ mod tool_impls {
                             "in_progress" | "inprogress" | "progress" => ritsu_common::TaskStatus::InProgress,
                             "completed" | "done" => ritsu_common::TaskStatus::Completed,
                             "cancelled" | "canceled" => ritsu_common::TaskStatus::Cancelled,
-                            _ => return ToolResult::error(format!("Invalid status: {}", s)),
+                            _ => return ToolResult::error(format!("Invalid status: {s}")),
                         };
                         
                         match task_manager.update_task_status(id, &task_status).await {
-                            Ok(_) => {
+                            Ok(()) => {
                                 info!("Updated status to: {:?}", task_status);
-                                updates.push(format!("status → {:?}", task_status));
+                                updates.push(format!("status → {task_status:?}"));
                             }
                             Err(e) => {
                                 tracing::error!("Failed to update status: {}", e);
-                                return ToolResult::error(format!("Failed to update status: {}", e));
+                                return ToolResult::error(format!("Failed to update status: {e}"));
                             }
                         }
                     }
@@ -710,17 +710,17 @@ mod tool_impls {
                             "medium" => ritsu_common::TaskPriority::Medium,
                             "high" => ritsu_common::TaskPriority::High,
                             "urgent" => ritsu_common::TaskPriority::Urgent,
-                            _ => return ToolResult::error(format!("Invalid priority: {}", p)),
+                            _ => return ToolResult::error(format!("Invalid priority: {p}")),
                         };
                         
                         match task_manager.update_task_priority(id, &task_priority).await {
-                            Ok(_) => {
+                            Ok(()) => {
                                 info!("Updated priority to: {:?}", task_priority);
-                                updates.push(format!("priority → {:?}", task_priority));
+                                updates.push(format!("priority → {task_priority:?}"));
                             }
                             Err(e) => {
                                 tracing::error!("Failed to update priority: {}", e);
-                                return ToolResult::error(format!("Failed to update priority: {}", e));
+                                return ToolResult::error(format!("Failed to update priority: {e}"));
                             }
                         }
                     }
@@ -770,7 +770,7 @@ mod tool_impls {
                                 let summary = tasks.iter()
                                     .map(|t| {
                                         let due_info = t.due_date.as_ref()
-                                            .map(|d| format!(" (due: {})", d))
+                                            .map(|d| format!(" (due: {d})"))
                                             .unwrap_or_default();
                                         format!("#{} [{:?}] [{:?}] {}{}", 
                                             t.id, t.status, t.priority, t.title, due_info)
@@ -783,7 +783,7 @@ mod tool_impls {
                         }
                         Err(e) => {
                             tracing::error!("Failed to list tasks: {}", e);
-                            ToolResult::error(format!("Failed to list tasks: {}", e))
+                            ToolResult::error(format!("Failed to list tasks: {e}"))
                         }
                     }
                 })
@@ -824,13 +824,13 @@ mod tool_impls {
                     let value = args.get("value").cloned().unwrap_or_default();
 
                     match preferences.set_preference(&category, &key, &value, 1.0, Some("user")).await {
-                        Ok(_) => {
+                        Ok(()) => {
                             info!("Set preference: {}/{} = {}", category, key, value);
-                            ToolResult::success(format!("Preference saved: {} / {} = {}", category, key, value))
+                            ToolResult::success(format!("Preference saved: {category} / {key} = {value}"))
                         }
                         Err(e) => {
                             tracing::error!("Failed to set preference: {}", e);
-                            ToolResult::error(format!("Failed to save preference: {}", e))
+                            ToolResult::error(format!("Failed to save preference: {e}"))
                         }
                     }
                 })
@@ -868,6 +868,7 @@ pub async fn register_all_tools(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 

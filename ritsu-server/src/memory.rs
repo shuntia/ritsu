@@ -452,7 +452,7 @@ impl MemoryManager {
              ORDER BY ct.created_at DESC"
         )?;
         
-        let rows = stmt.query_map([format!("-{}", days)], |row| {
+        let rows = stmt.query_map([format!("-{days}")], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
 
@@ -491,7 +491,7 @@ impl MemoryManager {
              ORDER BY total_calls DESC"
         )?;
         
-        let rows = stmt.query_map([format!("-{}", days)], |row| {
+        let rows = stmt.query_map([format!("-{days}")], |row| {
             Ok((
                 row.get(0)?,  // tool_name
                 row.get(1)?,  // total_calls
@@ -533,22 +533,21 @@ impl MemoryManager {
         let stats = self.get_tool_usage_stats(days).await?;
         
         if stats.is_empty() {
-            return Ok(format!("No tool usage in the past {} days", days));
+            return Ok(format!("No tool usage in the past {days} days"));
         }
 
-        let mut summary = format!("Tool Usage Summary (Past {} Days):\n\n", days);
+        let mut summary = format!("Tool Usage Summary (Past {days} Days):\n\n");
         
         for (tool_name, total, successful, avg_time) in stats {
             let success_rate = if total > 0 {
-                (successful as f64 / total as f64) * 100.0
+                #[allow(clippy::cast_precision_loss)]
+                let rate = (successful as f64 / total as f64) * 100.0;
+                rate
             } else {
                 0.0
             };
             
-            summary.push_str(&format!(
-                "📊 {}: {} calls, {:.1}% success, {:.0}ms avg\n",
-                tool_name, total, success_rate, avg_time
-            ));
+            summary = format!("{summary}📊 {tool_name}: {total} calls, {success_rate:.1}% success, {avg_time:.0}ms avg\n");
         }
         
         Ok(summary)

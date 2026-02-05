@@ -70,24 +70,23 @@ impl IpcClient {
         let _response: ServerResponse = postcard::from_bytes(&data)?;
         
         // Now wait for push notifications on this connection
-        loop {
-            // Read push length
-            let mut len_buf = [0u8; 4];
-            stream.read_exact(&mut len_buf).await?;
-            let len = u32::from_be_bytes(len_buf) as usize;
-            
-            // Read push data
-            let mut data = vec![0u8; len];
-            stream.read_exact(&mut data).await?;
-            
-            // Deserialize push
-            let push: ritsu_common::protocol::ServerPush = postcard::from_bytes(&data)?;
-            return Ok(push);
-        }
+        // Read push length
+        let mut len_buf = [0u8; 4];
+        stream.read_exact(&mut len_buf).await?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        
+        // Read push data
+        let mut data = vec![0u8; len];
+        stream.read_exact(&mut data).await?;
+        
+        // Deserialize push
+        let push: ritsu_common::protocol::ServerPush = postcard::from_bytes(&data)?;
+        Ok(push)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 

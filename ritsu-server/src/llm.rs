@@ -148,15 +148,18 @@ impl LlmClient {
             let message_builder = match msg.role.as_str() {
                 "user" => ChatMessage::user(),
                 "assistant" => ChatMessage::assistant(),
-                "system" | _ => {
+                _ => {
                     // System messages become user messages
                     ChatMessage::user()
                 }
             };
 
             // Prepend system prompt to first user message if provided
-            let content = if i == 0 && system_prompt.is_some() {
-                format!("{}\n\n{}", system_prompt.unwrap(), msg.content)
+            let content = if i == 0 {
+                system_prompt.as_ref().map_or_else(
+                    || msg.content.clone(),
+                    |prompt| format!("{prompt}\n\n{}", msg.content)
+                )
             } else {
                 msg.content.clone()
             };
@@ -185,7 +188,7 @@ impl LlmClient {
         };
 
         // Extract content
-        let content = response.text().unwrap_or_default().to_string();
+        let content = response.text().unwrap_or_default();
 
         // Extract tool calls
         let tool_calls: Vec<ToolCallInfo> = response.tool_calls()
@@ -244,7 +247,7 @@ impl LlmClient {
                     results.push((call.name.clone(), result_str));
                 }
                 Err(e) => {
-                    let error_str = format!("Tool execution failed: {}", e);
+                    let error_str = format!("Tool execution failed: {e}");
                     warn!("Tool {} error: {}", call.name, error_str);
                     results.push((call.name.clone(), error_str));
                 }
@@ -318,7 +321,7 @@ impl LlmClient {
             for (tool_name, result) in tool_results {
                 current_messages.push(Message {
                     role: "user".to_string(),
-                    content: format!("Tool '{}' returned: {}", tool_name, result),
+                    content: format!("Tool '{tool_name}' returned: {result}"),
                 });
             }
 
