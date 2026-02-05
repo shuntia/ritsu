@@ -4,13 +4,17 @@
 
 ### High Priority
 - [x] Implement animated loading indicator (throbber) in chat GUI
-- [ ] Add streaming responses from LLM (incremental display)
-- [ ] Add connection status indicator in GUI
-- [ ] Implement task manager panel in chat window
-  - [ ] View tasks list with filtering (status, priority)
+- [x] Add side panel with view switcher (Chat, Sessions, Tasks, Memory)
+- [ ] Implement session list view - show today's sessions (IPC call needed)
+- [ ] Implement session loading - switch to previous conversation (IPC call needed)
+- [ ] Implement task manager view (IPC calls needed)
+  - [x] View tasks list with filtering (status, priority) - UI complete
   - [ ] Create new tasks from GUI
   - [ ] Update task status/priority
   - [ ] Delete tasks
+- [x] Implement memory view placeholder
+- [ ] Add streaming responses from LLM (incremental display)
+- [ ] Add connection status indicator in GUI
 - [ ] Add message history scrolling and pagination
 - [ ] Improve chat UI styling and layout
 
