@@ -446,10 +446,10 @@ impl MemoryManager {
     pub async fn get_recent_conversations_days(&self, days: i64) -> Result<Vec<(String, String, String, String)>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT ct.created_at, ct.role, ct.content, '' as user_id 
+            "SELECT ct.timestamp, ct.role, ct.content, ct.session_id as user_id 
              FROM conversation_turns ct
-             WHERE datetime(ct.created_at) >= datetime('now', ? || ' days')
-             ORDER BY ct.created_at DESC"
+             WHERE datetime(ct.timestamp) >= datetime('now', ? || ' days')
+             ORDER BY ct.timestamp DESC"
         )?;
         
         let rows = stmt.query_map([format!("-{days}")], |row| {
