@@ -8,6 +8,8 @@
 - [x] Make sidebar collapsible with hamburger menu (hidden by default)
 - [x] Improve theming and styling for iced application
 - [x] Add more GUI animations (sidebar slide, message fade-in)
+- [x] Make system prompt configurable and context-aware
+- [x] Fix AI behavior to prioritize chat over background tasks
 - [ ] **IMPLEMENT STREAMING RESPONSES** (currently not streaming!)
   - [ ] Add streaming support to LLM client
   - [ ] Stream tokens via ServerPush messages

@@ -209,14 +209,27 @@ async fn handle_request(
                 warn!("Failed to store in conversations: {}", e);
             }
 
-            // Get system prompt
-            let system_prompt = match memory.build_effective_prompt().await {
-                Ok(prompt) => Some(prompt),
+            // Get system prompt with chat session context
+            let base_prompt = match memory.build_effective_prompt().await {
+                Ok(prompt) => prompt,
                 Err(e) => {
                     warn!("Failed to build system prompt: {}", e);
-                    None
+                    "You are Ritsu, a helpful AI assistant.".to_string()
                 }
             };
+            
+            // Add chat mode instructions
+            let system_prompt = Some(format!(
+                "{}\n\n---\n\n**CHAT SESSION MODE**\n\
+                You are currently in an active chat conversation with the user.\n\
+                - Prioritize responding directly to the user's message\n\
+                - Be conversational and helpful\n\
+                - Avoid doing background tasks like memory compaction or analysis\n\
+                - Only use tools if directly relevant to answering the user's question\n\
+                - Don't create triggers or tasks unless explicitly asked\n\
+                - Focus on the conversation, not on system maintenance",
+                base_prompt
+            ));
 
             // Get conversation history from session (last 20 turns)
             let history = match conversation_manager.get_history(&session_id, 20).await {
