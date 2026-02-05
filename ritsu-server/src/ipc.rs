@@ -104,18 +104,44 @@ async fn handle_client(
                 match result {
                     Ok(Some(request)) => {
                         state.mark_activity().await;
-                        let response = handle_request(
-                            request,
-                            &memory,
-                            &conversation_manager,
-                            &task_manager,
-                            &trigger_registry,
-                            &llm_client,
-                        ).await;
-                        send_response(&mut stream, response).await?;
+                        
+                        // Special handling for SendMessage to support streaming
+                        if let ClientRequest::SendMessage { content, session_id } = request {
+                            if let Err(e) = handle_send_message_streaming(
+                                &mut stream,
+                                content,
+                                session_id,
+                                &memory,
+                                &conversation_manager,
+                                &task_manager,
+                                &llm_client,
+                            ).await {
+                                error!("Error handling streaming message: {}", e);
+                                let error_response = ServerResponse::Error {
+                                    message: format!("Error: {}", e),
+                                };
+                                send_response(&mut stream, error_response).await?;
+                            }
+                        } else {
+                            let response = handle_request(
+                                request,
+                                &memory,
+                                &conversation_manager,
+                                &task_manager,
+                                &trigger_registry,
+                                &llm_client,
+                            ).await;
+                            send_response(&mut stream, response).await?;
+                        }
                     }
-                    Ok(None) => return Ok(()), // Client disconnected
-                    Err(e) => return Err(e),
+                    Ok(None) => {
+                        debug!("Client disconnected gracefully");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        error!("Error reading client request: {}", e);
+                        return Err(e);
+                    }
                 }
             }
             // Handle outgoing push notifications to client
@@ -155,6 +181,124 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
     
     debug!("Successfully deserialized request: {:?}", request);
     Ok(Some(request))
+}
+
+async fn handle_send_message_streaming(
+    stream: &mut UnixStream,
+    content: String,
+    session_id: Option<String>,
+    memory: &MemoryManager,
+    conversation_manager: &ConversationManager,
+    task_manager: &TaskManager,
+    llm_client: &LlmClient,
+) -> Result<()> {
+    // Get or create conversation session
+    let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
+    let session = conversation_manager.get_or_create_session(&session_id).await?;
+
+    // Store user message
+    if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None).await {
+        warn!("Failed to store user turn: {}", e);
+    }
+    if let Err(e) = memory.store_conversation("user", &content).await {
+        warn!("Failed to store in conversations: {}", e);
+    }
+
+    // Get system prompt
+    let base_prompt = memory.build_effective_prompt().await
+        .unwrap_or_else(|_| "You are Ritsu, a helpful AI assistant.".to_string());
+    
+    let system_prompt = Some(format!(
+        "{}\n\n---\n\n**CHAT SESSION MODE**\n\
+        You are currently in an active chat conversation with the user.\n\
+        - Prioritize responding directly to the user's message\n\
+        - Be conversational and helpful\n\
+        - Avoid doing background tasks like memory compaction or analysis\n\
+        - Only use tools if directly relevant to answering the user's question\n\
+        - Don't create triggers or tasks unless explicitly asked\n\
+        - Focus on the conversation, not on system maintenance",
+        base_prompt
+    ));
+
+    // Get conversation history
+    let history = conversation_manager.get_history(&session_id, 20).await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|turn| turn.turn_number < session.turn_count)
+        .map(|turn| crate::llm::Message {
+            role: turn.role,
+            content: turn.content,
+        })
+        .collect::<Vec<_>>();
+
+    // Build enhanced message
+    let now = chrono::Local::now();
+    let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
+    let task_summary = task_manager.get_task_summary().await
+        .unwrap_or_else(|_| "Unable to retrieve task summary".to_string());
+    
+    let enhanced_content = format!(
+        "[Current Time: {}]\n[{}]\n\n{}",
+        time_str,
+        task_summary,
+        content
+    );
+
+    let mut messages = history;
+    messages.push(crate::llm::Message {
+        role: "user".to_string(),
+        content: enhanced_content,
+    });
+
+    // Start streaming
+    info!("Starting streaming response");
+    let mut stream_rx = llm_client.generate_streaming(&messages, system_prompt.as_deref()).await?;
+
+    let mut full_response = String::new();
+
+    // Stream chunks to client
+    while let Some(chunk_result) = stream_rx.recv().await {
+        match chunk_result {
+            Ok(chunk) => {
+                full_response.push_str(&chunk);
+                
+                // Send chunk as push notification
+                let push = ServerPush::MessageChunk {
+                    content: chunk,
+                    is_final: false,
+                };
+                send_push(stream, push).await?;
+            }
+            Err(e) => {
+                error!("Streaming error: {}", e);
+                let push = ServerPush::MessageChunk {
+                    content: format!("\n\n[Error: {}]", e),
+                    is_final: true,
+                };
+                send_push(stream, push).await?;
+                return Err(e);
+            }
+        }
+    }
+
+    // Send final marker
+    let push = ServerPush::MessageChunk {
+        content: String::new(),
+        is_final: true,
+    };
+    send_push(stream, push).await?;
+
+    info!("Streaming complete, {} bytes total", full_response.len());
+
+    // Store assistant response
+    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None).await {
+        warn!("Failed to store assistant turn: {}", e);
+    }
+    if let Err(e) = memory.store_conversation("assistant", &full_response).await {
+        warn!("Failed to store assistant response: {}", e);
+    }
+
+    Ok(())
 }
 
 async fn send_response(stream: &mut UnixStream, response: ServerResponse) -> Result<()> {
@@ -519,6 +663,59 @@ async fn handle_request(
             };
             
             ServerResponse::Memory { content: result }
+        }
+        
+        ClientRequest::ListSessions { limit } => {
+            match conversation_manager.get_active_sessions().await {
+                Ok(sessions) => {
+                    let mut sessions = sessions;
+                    if let Some(limit) = limit {
+                        sessions.truncate(limit);
+                    }
+                    
+                    let session_infos = sessions
+                        .into_iter()
+                        .map(|s| ritsu_common::protocol::SessionInfo {
+                            session_id: s.session_id,
+                            started_at: s.started_at,
+                            last_activity: s.last_activity,
+                            turn_count: s.turn_count,
+                        })
+                        .collect();
+                    
+                    ServerResponse::Sessions { sessions: session_infos }
+                }
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to list sessions: {}", e),
+                },
+            }
+        }
+        
+        ClientRequest::ClearMemory { confirm } => {
+            if !confirm {
+                return ServerResponse::Error {
+                    message: "ClearMemory requires confirm=true to prevent accidental deletion".to_string(),
+                };
+            }
+            
+            info!("Clearing all memory (requested by client)");
+            
+            // Clear conversations
+            if let Err(e) = conversation_manager.clear_all().await {
+                return ServerResponse::Error {
+                    message: format!("Failed to clear conversations: {}", e),
+                };
+            }
+            
+            // Clear memory tables
+            if let Err(e) = memory.clear_all().await {
+                return ServerResponse::Error {
+                    message: format!("Failed to clear memory: {}", e),
+                };
+            }
+            
+            info!("All memory cleared successfully");
+            ServerResponse::Ok
         }
         
         ClientRequest::Subscribe => {

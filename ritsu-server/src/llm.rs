@@ -1,12 +1,14 @@
 //! LLM client with tool calling support using the `llm` crate
 
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use llm::builder::{FunctionBuilder, LLMBackend, LLMBuilder, ParamBuilder};
 use llm::chat::ChatMessage;
 use llm::LLMProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::config::{LlmBackend, LlmConfig, TimeoutConfig};
@@ -327,5 +329,66 @@ impl LlmClient {
 
             debug!("Tool execution iteration {} complete, continuing...", iteration);
         }
+    }
+
+    /// Generate streaming response (no tool execution)
+    /// Returns a channel receiver that yields text chunks as they arrive
+    pub async fn generate_streaming(
+        &self,
+        messages: &[Message],
+        system_prompt: Option<&str>,
+    ) -> Result<mpsc::Receiver<Result<String>>> {
+        // Convert our messages to llm crate format
+        let mut chat_messages = Vec::new();
+        
+        // Add conversation messages
+        for (i, msg) in messages.iter().enumerate() {
+            let message_builder = match msg.role.as_str() {
+                "user" => ChatMessage::user(),
+                "assistant" => ChatMessage::assistant(),
+                _ => ChatMessage::user(),
+            };
+
+            // Prepend system prompt to first user message if provided
+            let content = if i == 0 {
+                system_prompt.as_ref().map_or_else(
+                    || msg.content.clone(),
+                    |prompt| format!("{prompt}\n\n{}", msg.content)
+                )
+            } else {
+                msg.content.clone()
+            };
+
+            chat_messages.push(message_builder.content(&content).build());
+        }
+
+        debug!("Starting streaming response for {} messages", chat_messages.len());
+
+        // Create a channel for streaming chunks
+        let (tx, rx) = mpsc::channel(32);
+
+        // Get the provider's streaming response
+        let mut stream = self.provider.chat_stream(&chat_messages).await
+            .context("Failed to start streaming chat")?;
+
+        // Spawn a task to forward stream items to the channel
+        tokio::spawn(async move {
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(text) => {
+                        if tx.send(Ok(text)).await.is_err() {
+                            // Receiver dropped, stop streaming
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(anyhow::anyhow!("Streaming error: {}", e))).await;
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
     }
 }

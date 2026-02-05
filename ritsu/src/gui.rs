@@ -6,7 +6,7 @@
 
 use iced::{
     widget::{button, column, container, row, scrollable, text, text_input},
-    Element, Task, Theme,
+    Element, Subscription, Task, Theme,
 };
 use std::time::Duration;
 
@@ -25,6 +25,8 @@ pub enum Message {
     InputChanged(String),
     SendMessage,
     MessageReceived(String),
+    MessageChunk(String, bool), // content, is_final
+    StreamingStarted,
     ServerResponse(Result<String, String>),
     Tick,
     SwitchView(ViewState),
@@ -32,6 +34,8 @@ pub enum Message {
     SessionsLoaded(Vec<SessionInfo>),
     TasksLoaded(Vec<TaskInfo>),
     ToggleSidebar,
+    ConnectionStatusChanged(ConnectionStatus),
+    RetryConnection,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +67,16 @@ pub struct RitsuGui {
     tasks: Vec<TaskInfo>,
     sidebar_visible: bool,
     sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
-    message_appear_frames: Vec<f32>, // Fade-in animation per message
+    connection_status: ConnectionStatus,
+    retry_countdown: Option<u32>, // Seconds until retry
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectionStatus {
+    Connected,
+    Disconnected,
+    Reconnecting,
+    Error(String),
 }
 
 #[derive(Debug, Clone)]
@@ -89,9 +102,23 @@ impl RitsuGui {
                 tasks: Vec::new(),
                 sidebar_visible: false,
                 sidebar_animation: 0.0,
-                message_appear_frames: Vec::new(),
+                connection_status: ConnectionStatus::Disconnected,
+                retry_countdown: None,
             },
-            Task::none(),
+            // Test connection on startup
+            Task::perform(
+                async {
+                    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                    client.ping().await
+                },
+                |result| {
+                    if result.is_ok() {
+                        Message::ConnectionStatusChanged(ConnectionStatus::Connected)
+                    } else {
+                        Message::ConnectionStatusChanged(ConnectionStatus::Disconnected)
+                    }
+                },
+            ),
         )
     }
 }
@@ -109,7 +136,8 @@ impl Default for RitsuGui {
             tasks: Vec::new(),
             sidebar_visible: false,
             sidebar_animation: 0.0,
-            message_appear_frames: Vec::new(),
+            connection_status: ConnectionStatus::Disconnected,
+            retry_countdown: None,
         }
     }
 }
@@ -147,10 +175,21 @@ impl RitsuGui {
                     }
                 }
                 
+                // Countdown retry timer
+                if let Some(countdown) = self.retry_countdown.as_mut() {
+                    if *countdown > 0 {
+                        *countdown -= 1;
+                        needs_animation = true;
+                    } else {
+                        self.retry_countdown = None;
+                        return Task::perform(async {}, |()| Message::RetryConnection);
+                    }
+                }
+                
                 if needs_animation {
                     Task::perform(
                         async {
-                            tokio::time::sleep(Duration::from_millis(16)).await; // ~60 FPS
+                            tokio::time::sleep(Duration::from_millis(1000)).await; // 1 FPS for countdown
                         },
                         |()| Message::Tick,
                     )
@@ -171,30 +210,30 @@ impl RitsuGui {
                     self.is_loading = true;
                     self.animation_frame = 0;
 
+                    // Use streaming (collects chunks then displays full response)
                     Task::batch([
                         Task::perform(
                             async move {
                                 let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
-                                let request = ritsu_common::protocol::ClientRequest::SendMessage {
-                                    content: content.clone(),
-                                    session_id: Some(session_id),
-                                };
-                                client.send_request(request).await
+                                match client.send_message_streaming(content, Some(session_id)).await {
+                                    Ok(mut rx) => {
+                                        let mut full_response = String::new();
+                                        while let Some(push) = rx.recv().await {
+                                            if let ritsu_common::protocol::ServerPush::MessageChunk { content, is_final } = push {
+                                                full_response.push_str(&content);
+                                                if is_final {
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        Ok(full_response)
+                                    }
+                                    Err(e) => Err(format!("Streaming error: {}", e)),
+                                }
                             },
                             |result| match result {
-                                Ok(response) => match response {
-                                    ritsu_common::protocol::ServerResponse::Message { content } => {
-                                        Message::MessageReceived(content)
-                                    }
-                                    ritsu_common::protocol::ServerResponse::Ok => {
-                                        Message::ServerResponse(Ok("Message sent".to_string()))
-                                    }
-                                    ritsu_common::protocol::ServerResponse::Error { message } => {
-                                        Message::ServerResponse(Err(message))
-                                    }
-                                    _ => Message::ServerResponse(Err("Unexpected response".to_string())),
-                                },
-                                Err(e) => Message::ServerResponse(Err(format!("IPC error: {e}"))),
+                                Ok(content) => Message::MessageReceived(content),
+                                Err(e) => Message::ConnectionStatusChanged(ConnectionStatus::Error(e)),
                             },
                         ),
                         Task::perform(async {}, |()| Message::Tick),
@@ -203,6 +242,10 @@ impl RitsuGui {
                     Task::none()
                 }
             }
+            Message::StreamingStarted => {
+                // Currently unused - placeholder for future real-time streaming
+                Task::none()
+            }
             Message::MessageReceived(content) => {
                 self.messages.push(ChatMessage {
                     content,
@@ -210,6 +253,34 @@ impl RitsuGui {
                     opacity: 0.0, // Start invisible for fade-in
                 });
                 self.is_loading = false;
+                Task::none()
+            }
+            Message::MessageChunk(chunk, is_final) => {
+                if is_final {
+                    // Streaming complete
+                    self.is_loading = false;
+                } else {
+                    // Append to the last assistant message, or create a new one
+                    if let Some(last_msg) = self.messages.last_mut() {
+                        if !last_msg.is_user {
+                            last_msg.content.push_str(&chunk);
+                        } else {
+                            // Last message was user, create new assistant message
+                            self.messages.push(ChatMessage {
+                                content: chunk,
+                                is_user: false,
+                                opacity: 1.0, // Immediately visible for streaming
+                            });
+                        }
+                    } else {
+                        // No messages yet, create first assistant message
+                        self.messages.push(ChatMessage {
+                            content: chunk,
+                            is_user: false,
+                            opacity: 1.0,
+                        });
+                    }
+                }
                 Task::none()
             }
             Message::ServerResponse(result) => {
@@ -227,22 +298,64 @@ impl RitsuGui {
                         // Fetch today's sessions
                         Task::perform(
                             async {
-                                // TODO: Implement IPC call to get sessions
-                                // For now, return mock data
-                                vec![]
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let request = ritsu_common::protocol::ClientRequest::ListSessions {
+                                    limit: Some(20),
+                                };
+                                client.send_request(request).await
                             },
-                            Message::SessionsLoaded,
+                            |result| match result {
+                                Ok(ritsu_common::protocol::ServerResponse::Sessions { sessions }) => {
+                                    Message::SessionsLoaded(
+                                        sessions
+                                            .into_iter()
+                                            .map(|s| SessionInfo {
+                                                session_id: s.session_id,
+                                                started_at: s.started_at,
+                                                last_activity: s.last_activity,
+                                                turn_count: s.turn_count,
+                                            })
+                                            .collect(),
+                                    )
+                                }
+                                Ok(ritsu_common::protocol::ServerResponse::Error { message }) => {
+                                    eprintln!("Error loading sessions: {}", message);
+                                    Message::SessionsLoaded(vec![])
+                                }
+                                Err(e) => {
+                                    eprintln!("IPC error loading sessions: {}", e);
+                                    Message::SessionsLoaded(vec![])
+                                }
+                                _ => Message::SessionsLoaded(vec![]),
+                            },
                         )
                     }
                     ViewState::Tasks => {
                         // Fetch tasks
                         Task::perform(
                             async {
-                                // TODO: Implement IPC call to get tasks
-                                // For now, return mock data
-                                vec![]
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let request = ritsu_common::protocol::ClientRequest::ListTasks {
+                                    filter: None,
+                                };
+                                client.send_request(request).await
                             },
-                            Message::TasksLoaded,
+                            |result| match result {
+                                Ok(ritsu_common::protocol::ServerResponse::Tasks { tasks }) => {
+                                    Message::TasksLoaded(
+                                        tasks
+                                            .into_iter()
+                                            .map(|t| TaskInfo {
+                                                id: t.id,
+                                                title: t.title,
+                                                status: format!("{:?}", t.status),
+                                                priority: format!("{:?}", t.priority),
+                                            })
+                                            .collect(),
+                                    )
+                                }
+                                _ => Message::TasksLoaded(vec![]),
+                            },
                         )
                     }
                     _ => Task::none(),
@@ -268,10 +381,76 @@ impl RitsuGui {
                 // Start animation
                 Task::perform(async {}, |()| Message::Tick)
             }
+            Message::ConnectionStatusChanged(status) => {
+                let was_disconnected = matches!(self.connection_status, ConnectionStatus::Disconnected);
+                let now_connected = matches!(status, ConnectionStatus::Connected);
+                
+                self.connection_status = status;
+                
+                // If we just reconnected, show success message
+                if was_disconnected && now_connected {
+                    self.messages.push(ChatMessage {
+                        content: "✓ Connected to server".to_string(),
+                        is_user: false,
+                        opacity: 0.0,
+                    });
+                }
+                
+                // If disconnected, start retry countdown
+                if matches!(self.connection_status, ConnectionStatus::Disconnected) {
+                    self.retry_countdown = Some(5); // Retry in 5 seconds
+                    return Task::perform(async {}, |()| Message::Tick);
+                }
+                
+                Task::none()
+            }
+            Message::RetryConnection => {
+                self.connection_status = ConnectionStatus::Reconnecting;
+                Task::perform(
+                    async {
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        client.ping().await
+                    },
+                    |result| {
+                        if result.is_ok() {
+                            Message::ConnectionStatusChanged(ConnectionStatus::Connected)
+                        } else {
+                            Message::ConnectionStatusChanged(ConnectionStatus::Disconnected)
+                        }
+                    },
+                )
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // Connection status indicator
+        let status_text = match &self.connection_status {
+            ConnectionStatus::Connected => "Connected".to_string(),
+            ConnectionStatus::Disconnected => {
+                if let Some(countdown) = self.retry_countdown {
+                    format!("Reconnecting in {}s...", countdown)
+                } else {
+                    "Disconnected".to_string()
+                }
+            }
+            ConnectionStatus::Reconnecting => "Connecting...".to_string(),
+            ConnectionStatus::Error(msg) => format!("Error: {}", msg),
+        };
+        
+        let status_color = match &self.connection_status {
+            ConnectionStatus::Connected => iced::Color::from_rgb(0.2, 0.8, 0.2),
+            ConnectionStatus::Disconnected | ConnectionStatus::Reconnecting => iced::Color::from_rgb(0.8, 0.6, 0.2),
+            ConnectionStatus::Error(_) => iced::Color::from_rgb(0.8, 0.2, 0.2),
+        };
+        
+        let status_indicator = row![
+            text("●").size(12).color(status_color),
+            text(status_text).size(12).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
+        ]
+        .spacing(5)
+        .align_y(iced::alignment::Vertical::Center);
+        
         // Hamburger menu button
         let menu_button = button(text("☰").size(24))
             .on_press(Message::ToggleSidebar)
@@ -285,6 +464,16 @@ impl RitsuGui {
                 },
                 ..button::primary(theme, status)
             });
+        
+        // Top bar with menu and status
+        let top_bar = row![
+            menu_button,
+            container(status_indicator)
+                .width(iced::Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .padding(10),
+        ]
+        .spacing(10);
 
         // Main content based on current view
         let main_content = match self.current_view {
@@ -424,27 +613,27 @@ impl RitsuGui {
                 .height(iced::Length::Fill);
 
             row![
-                column![menu_button, sidebar_container].spacing(0),
+                column![sidebar_container].spacing(0),
                 main_content
             ]
             .spacing(0)
         } else {
-            // Just menu button and content
-            row![
-                column![menu_button].width(iced::Length::Fixed(50.0)),
-                main_content
-            ]
+            // Just content (menu is in top bar)
+            row![main_content]
             .spacing(0)
         };
 
-        container(layout)
+        let main_layout = column![top_bar, layout]
+            .spacing(0);
+
+        container(main_layout)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
             .into()
     }
 
     fn view_chat(&self) -> Element<'_, Message> {
-        let messages_view = self.messages.iter().fold(
+        let mut messages_view = self.messages.iter().fold(
             column![].spacing(12),
             |col, msg| {
                 let opacity = msg.opacity;
@@ -481,6 +670,35 @@ impl RitsuGui {
                 col.push(row_content)
             }
         );
+
+        // Add typing indicator when loading
+        if self.is_loading {
+            let dots_frames = ["   ", ".  ", ".. ", "..."];
+            let dots = dots_frames[self.animation_frame % dots_frames.len()];
+            
+            let typing_indicator = container(
+                text(format!("Ritsu is typing{}", dots))
+                    .size(14)
+                    .color(iced::Color::from_rgb(0.6, 0.6, 0.6))
+            )
+            .padding(12)
+            .style(|_theme: &iced::Theme| {
+                container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.2, 0.25))),
+                    text_color: Some(iced::Color::from_rgb(0.8, 0.8, 0.85)),
+                    border: iced::Border {
+                        radius: 12.0.into(),
+                        ..Default::default()
+                    },
+                    ..container::Style::default()
+                }
+            })
+            .max_width(200);
+            
+            messages_view = messages_view.push(
+                row![container(typing_indicator).width(iced::Length::Fill).align_x(iced::alignment::Horizontal::Left)]
+            );
+        }
 
         let mut input_field = text_input("Type your message...", &self.input)
             .on_input(Message::InputChanged)
@@ -678,12 +896,18 @@ fn view(state: &RitsuGui) -> Element<'_, Message> {
     state.view()
 }
 
+fn subscription(_state: &RitsuGui) -> Subscription<Message> {
+    // For now, no subscriptions - streaming handled via Tasks
+    Subscription::none()
+}
+
 pub fn run_blocking() -> anyhow::Result<()> {
     iced::application(
         RitsuGui::default,
         update,
         view
     )
+    .subscription(subscription)
     .theme(|_state: &RitsuGui| Theme::Dark)
     .run()
     .map_err(|e| anyhow::anyhow!("GUI error: {e}"))

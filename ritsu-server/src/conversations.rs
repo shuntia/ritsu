@@ -189,6 +189,18 @@ impl ConversationManager {
         
         Ok(deleted)
     }
+
+    /// Clear all conversations and turns (for testing)
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn clear_all(&self) -> Result<()> {
+        let conn = self.db.lock().await;
+        
+        conn.execute("DELETE FROM conversation_turns", [])?;
+        conn.execute("DELETE FROM conversations", [])?;
+        
+        info!("Cleared all conversations and turns");
+        Ok(())
+    }
 }
 
 #[cfg(test)]

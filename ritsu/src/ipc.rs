@@ -1,9 +1,10 @@
 //! IPC client - Unix domain socket communication
 
 use anyhow::Result;
-use ritsu_common::protocol::{ClientRequest, ServerResponse};
+use ritsu_common::protocol::{ClientRequest, ServerPush, ServerResponse};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use tokio::sync::mpsc;
 
 pub struct IpcClient {
     socket_path: String,
@@ -45,6 +46,64 @@ impl IpcClient {
             ServerResponse::Pong => Ok(true),
             _ => Ok(false),
         }
+    }
+    
+    /// Send a message and subscribe to streaming responses
+    /// Returns a channel receiver that yields message chunks
+    pub async fn send_message_streaming(
+        &self,
+        content: String,
+        session_id: Option<String>,
+    ) -> Result<mpsc::Receiver<ServerPush>> {
+        let mut stream = UnixStream::connect(&self.socket_path).await?;
+        
+        // Send message request
+        let request = ClientRequest::SendMessage { content, session_id };
+        let request_data = postcard::to_allocvec(&request)?;
+        let request_len = (request_data.len() as u32).to_be_bytes();
+        
+        stream.write_all(&request_len).await?;
+        stream.write_all(&request_data).await?;
+        stream.flush().await?;
+        
+        // Create channel for streaming chunks
+        let (tx, rx) = mpsc::channel(32);
+        
+        // Spawn a task to read push notifications from the stream
+        tokio::spawn(async move {
+            loop {
+                // Read push length
+                let mut len_buf = [0u8; 4];
+                if stream.read_exact(&mut len_buf).await.is_err() {
+                    break;
+                }
+                let len = u32::from_be_bytes(len_buf) as usize;
+                
+                // Read push data
+                let mut data = vec![0u8; len];
+                if stream.read_exact(&mut data).await.is_err() {
+                    break;
+                }
+                
+                // Deserialize push
+                if let Ok(push) = postcard::from_bytes::<ServerPush>(&data) {
+                    // Check if this is the final chunk
+                    let is_final = matches!(push, ServerPush::MessageChunk { is_final: true, .. });
+                    
+                    if tx.send(push).await.is_err() {
+                        break;
+                    }
+                    
+                    if is_final {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        });
+        
+        Ok(rx)
     }
     
     /// Subscribe to server pushes and wait for next push notification

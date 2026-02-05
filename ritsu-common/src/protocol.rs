@@ -49,6 +49,15 @@ pub enum ClientRequest {
         query_type: MemoryQueryType,
         date_range: Option<DateRange>,
     },
+    /// List conversation sessions
+    ListSessions {
+        limit: Option<usize>,
+    },
+    /// Clear all memory (for testing)
+    ClearMemory {
+        /// Confirm flag to prevent accidental deletion
+        confirm: bool,
+    },
     /// Subscribe to server push notifications
     Subscribe,
 }
@@ -70,6 +79,8 @@ pub enum ServerResponse {
     Tasks { tasks: Vec<TaskInfo> },
     /// Memory query result
     Memory { content: String },
+    /// List of conversation sessions
+    Sessions { sessions: Vec<SessionInfo> },
 }
 
 /// Server push notification to client
@@ -88,6 +99,11 @@ pub enum ServerPush {
     },
     /// User response timeout
     ResponseTimeout { context: String },
+    /// Streaming message chunk
+    MessageChunk { 
+        content: String,
+        is_final: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +131,14 @@ pub struct TaskInfo {
     pub priority: TaskPriority,
     pub tags: Vec<String>,
     pub due_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionInfo {
+    pub session_id: String,
+    pub started_at: String,
+    pub last_activity: String,
+    pub turn_count: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

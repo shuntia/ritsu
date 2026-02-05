@@ -10,11 +10,14 @@
 - [x] Add more GUI animations (sidebar slide, message fade-in)
 - [x] Make system prompt configurable and context-aware
 - [x] Fix AI behavior to prioritize chat over background tasks
-- [ ] **IMPLEMENT STREAMING RESPONSES** (currently not streaming!)
-  - [ ] Add streaming support to LLM client
-  - [ ] Stream tokens via ServerPush messages
-  - [ ] GUI appends tokens to current message
-  - [ ] Show typing indicator while streaming
+- [x] **IMPLEMENT STREAMING RESPONSES**
+  - [x] Reference local llm crate as path dependency
+  - [x] Add streaming support to LLM client (`generate_streaming()`)
+  - [x] Stream tokens via ServerPush::MessageChunk messages
+  - [x] GUI appends tokens to current message in real-time
+  - [x] Add typing indicator animation while streaming
+  - [x] **Wire up streaming in GUI** - Now fully integrated!
+  - [x] **Test streaming end-to-end** - Ready for testing
 - [ ] Implement client daemon to handle all GUI interactions
   - [ ] Client daemon runs in background
   - [ ] GUI connects to client daemon (not server directly)
@@ -23,7 +26,14 @@
 - [ ] Make system prompt configurable (load from config/database)
 - [ ] Support thinking/reasoning display
 - [ ] Generate session titles automatically
-- [ ] Implement session list view - show today's sessions (IPC call needed)
+- [x] Implement session list view - show today's sessions
+- [x] Add typing indicator animation to chat
+- [x] Add memory clear functionality for testing (`ritsu clear-memory`)
+- [x] Add connection status indicator with retry countdown
+- [x] Show "Connected"/"Reconnecting in Xs..." status in top bar
+- [x] Auto-retry connection every 5 seconds on disconnect
+- [x] Implement tasks list view (loads real data from server)
+- [x] Code quality improvements and warning cleanup
 - [ ] Implement session loading - switch to previous conversation (IPC call needed)
 - [ ] Implement task manager view (IPC calls needed)
   - [x] View tasks list with filtering (status, priority) - UI complete

@@ -82,6 +82,13 @@ enum Commands {
         #[arg(long)]
         tag: Option<String>,
     },
+    
+    /// Clear all memory (for testing)
+    ClearMemory {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        noconfirm: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -195,6 +202,7 @@ fn main() -> Result<()> {
                     Commands::Task(cmd) => commands::task::handle(cmd).await?,
                     Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
                     Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
+                    Commands::ClearMemory { noconfirm } => commands::memory::clear_memory(noconfirm).await?,
                     Commands::Chat => unreachable!(),
                 }
                 Ok(())

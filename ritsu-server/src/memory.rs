@@ -552,4 +552,20 @@ impl MemoryManager {
         
         Ok(summary)
     }
+
+    /// Clear all memory tables (for testing)
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn clear_all(&self) -> Result<()> {
+        let conn = self.conn.lock().await;
+        
+        conn.execute("DELETE FROM notes", [])?;
+        conn.execute("DELETE FROM daily_conversations", [])?;
+        conn.execute("DELETE FROM daily_summaries", [])?;
+        conn.execute("DELETE FROM monthly_summaries", [])?;
+        conn.execute("DELETE FROM idle_analyses", [])?;
+        conn.execute("DELETE FROM tool_usage", [])?;
+        
+        info!("Cleared all memory tables");
+        Ok(())
+    }
 }

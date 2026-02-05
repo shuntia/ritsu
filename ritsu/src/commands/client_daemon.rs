@@ -44,6 +44,11 @@ async fn handle_push(push: ServerPush) -> Result<()> {
             info!("Server timeout context: {}", context);
             Ok(())
         }
+        ServerPush::MessageChunk { .. } => {
+            // Message chunks are handled by the GUI directly
+            // Client daemon doesn't need to process them
+            Ok(())
+        }
     }
 }
 

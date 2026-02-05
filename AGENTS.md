@@ -62,10 +62,20 @@
    - Keep README.md current with usage examples
 
 7. **Local Development Dependencies**
-   - **llm crate clone**: A local clone of the `llm` crate exists in `~/llm/`
-   - This allows for modifications and enhancements to the LLM integration
-   - May be used for implementing streaming responses or other features
-   - When making changes to llm integration, consider if local crate modifications are needed
+   - **llm crate clone**: A local clone of the `llm` crate exists in `/home/shuntia/projects/ritsu-sonnet/llm/`
+   - Referenced as path dependency in `ritsu-server/Cargo.toml`
+   - Used for streaming response implementation
+   - Provides `chat_stream()` method for token-by-token streaming
+
+8. **Streaming Implementation** 
+   - **Architecture**: LLM → `generate_streaming()` → tokio mpsc → `ServerPush::MessageChunk` → GUI appends tokens
+   - **Key Files**:
+     - `ritsu-server/src/llm.rs`: Added `generate_streaming()` method
+     - `ritsu-server/src/ipc.rs`: Added `handle_send_message_streaming()`
+     - `ritsu/src/ipc.rs`: Added `send_message_streaming()` client method
+     - `ritsu-common/src/protocol.rs`: Added `MessageChunk` to `ServerPush`
+     - `ritsu/src/gui.rs`: Added `MessageChunk` handling for real-time token appending
+   - **Flow**: GUI sends message → server streams LLM response → chunks sent as push notifications → GUI appends tokens as they arrive → final chunk signals completion
 
 ### Workflow
 
