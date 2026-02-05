@@ -8,6 +8,7 @@ use iced::{
     widget::{button, column, container, row, scrollable, text, text_input},
     Element, Task, Theme,
 };
+use std::time::Duration;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -16,6 +17,7 @@ pub enum Message {
     SendMessage,
     MessageReceived(String),
     ServerResponse(Result<String, String>),
+    Tick,
 }
 
 pub struct RitsuGui {
@@ -23,6 +25,7 @@ pub struct RitsuGui {
     messages: Vec<ChatMessage>,
     session_id: String,
     is_loading: bool,
+    animation_frame: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +44,7 @@ impl RitsuGui {
                 messages: Vec::new(),
                 session_id,
                 is_loading: false,
+                animation_frame: 0,
             },
             Task::none(),
         )
@@ -54,6 +58,7 @@ impl Default for RitsuGui {
             messages: Vec::new(),
             session_id: format!("gui_session_{}", chrono::Utc::now().timestamp()),
             is_loading: false,
+            animation_frame: 0,
         }
     }
 }
@@ -65,6 +70,19 @@ impl RitsuGui {
                 self.input = value;
                 Task::none()
             }
+            Message::Tick => {
+                if self.is_loading {
+                    self.animation_frame = (self.animation_frame + 1) % 4;
+                    Task::perform(
+                        async {
+                            tokio::time::sleep(Duration::from_millis(250)).await;
+                        },
+                        |()| Message::Tick,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
             Message::SendMessage => {
                 if !self.input.is_empty() && !self.is_loading {
                     let content = self.input.clone();
@@ -75,32 +93,36 @@ impl RitsuGui {
                     });
                     self.input.clear();
                     self.is_loading = true;
+                    self.animation_frame = 0;
 
-                    Task::perform(
-                        async move {
-                            let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
-                            let request = ritsu_common::protocol::ClientRequest::SendMessage {
-                                content: content.clone(),
-                                session_id: Some(session_id),
-                            };
-                            client.send_request(request).await
-                        },
-                        |result| match result {
-                            Ok(response) => match response {
-                                ritsu_common::protocol::ServerResponse::Message { content } => {
-                                    Message::MessageReceived(content)
-                                }
-                                ritsu_common::protocol::ServerResponse::Ok => {
-                                    Message::ServerResponse(Ok("Message sent".to_string()))
-                                }
-                                ritsu_common::protocol::ServerResponse::Error { message } => {
-                                    Message::ServerResponse(Err(message))
-                                }
-                                _ => Message::ServerResponse(Err("Unexpected response".to_string())),
+                    Task::batch([
+                        Task::perform(
+                            async move {
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let request = ritsu_common::protocol::ClientRequest::SendMessage {
+                                    content: content.clone(),
+                                    session_id: Some(session_id),
+                                };
+                                client.send_request(request).await
                             },
-                            Err(e) => Message::ServerResponse(Err(format!("IPC error: {e}"))),
-                        },
-                    )
+                            |result| match result {
+                                Ok(response) => match response {
+                                    ritsu_common::protocol::ServerResponse::Message { content } => {
+                                        Message::MessageReceived(content)
+                                    }
+                                    ritsu_common::protocol::ServerResponse::Ok => {
+                                        Message::ServerResponse(Ok("Message sent".to_string()))
+                                    }
+                                    ritsu_common::protocol::ServerResponse::Error { message } => {
+                                        Message::ServerResponse(Err(message))
+                                    }
+                                    _ => Message::ServerResponse(Err("Unexpected response".to_string())),
+                                },
+                                Err(e) => Message::ServerResponse(Err(format!("IPC error: {e}"))),
+                            },
+                        ),
+                        Task::perform(async {}, |()| Message::Tick),
+                    ])
                 } else {
                     Task::none()
                 }
@@ -145,6 +167,9 @@ impl RitsuGui {
             input_field = input_field.on_submit(Message::SendMessage);
         }
 
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸"];
+        let spinner = spinner_frames[self.animation_frame % spinner_frames.len()];
+        
         let input_area = row![
             input_field,
             if !self.is_loading {
@@ -152,7 +177,7 @@ impl RitsuGui {
                     .on_press(Message::SendMessage)
                     .padding(10)
             } else {
-                button(text("⏳"))
+                button(text(spinner))
                     .padding(10)
                     .style(|theme: &iced::Theme, _status| {
                         button::Style {
