@@ -7,8 +7,11 @@
 use iced::{
     widget::{button, column, container, row, scrollable, text, text_input},
     Element, Subscription, Task, Theme,
+    futures,
+    stream,
 };
 use std::time::Duration;
+use futures::StreamExt;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +72,7 @@ pub struct RitsuGui {
     sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
     connection_status: ConnectionStatus,
     retry_countdown: Option<u32>, // Seconds until retry
+    streaming_message_index: Option<usize>, // Index of message being streamed to
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +108,7 @@ impl RitsuGui {
                 sidebar_animation: 0.0,
                 connection_status: ConnectionStatus::Disconnected,
                 retry_countdown: None,
+                streaming_message_index: None,
             },
             // Test connection on startup
             Task::perform(
@@ -138,6 +143,7 @@ impl Default for RitsuGui {
             sidebar_animation: 0.0,
             connection_status: ConnectionStatus::Disconnected,
             retry_countdown: None,
+            streaming_message_index: None,
         }
     }
 }
@@ -210,31 +216,42 @@ impl RitsuGui {
                     self.is_loading = true;
                     self.animation_frame = 0;
 
-                    // Use streaming (collects chunks then displays full response)
+                    // Add empty assistant message that will be streamed to
+                    self.messages.push(ChatMessage {
+                        content: String::new(),
+                        is_user: false,
+                        opacity: 1.0,
+                    });
+                    self.streaming_message_index = Some(self.messages.len() - 1);
+
+                    // Start streaming using stream-based task
                     Task::batch([
-                        Task::perform(
-                            async move {
-                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
-                                match client.send_message_streaming(content, Some(session_id)).await {
-                                    Ok(mut rx) => {
-                                        let mut full_response = String::new();
-                                        while let Some(push) = rx.recv().await {
-                                            if let ritsu_common::protocol::ServerPush::MessageChunk { content, is_final } = push {
-                                                full_response.push_str(&content);
-                                                if is_final {
-                                                    break;
+                        Task::run(
+                            {
+                                let content = content.clone();
+                                let session_id = session_id.clone();
+                                stream::channel(100, move |mut sender: futures::channel::mpsc::Sender<Message>| async move {
+                                    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                    match client.send_message_streaming(content, Some(session_id)).await {
+                                        Ok(mut rx) => {
+                                            while let Some(push) = rx.recv().await {
+                                                if let ritsu_common::protocol::ServerPush::MessageChunk { content, is_final } = push {
+                                                    let _ = sender.try_send(Message::MessageChunk(content.clone(), is_final));
+                                                    if is_final {
+                                                        break;
+                                                    }
                                                 }
                                             }
                                         }
-                                        Ok(full_response)
+                                        Err(e) => {
+                                            let _ = sender.try_send(Message::ConnectionStatusChanged(
+                                                ConnectionStatus::Error(format!("Failed to start streaming: {}", e))
+                                            ));
+                                        }
                                     }
-                                    Err(e) => Err(format!("Streaming error: {}", e)),
-                                }
+                                })
                             },
-                            |result| match result {
-                                Ok(content) => Message::MessageReceived(content),
-                                Err(e) => Message::ConnectionStatusChanged(ConnectionStatus::Error(e)),
-                            },
+                            |stream| stream,
                         ),
                         Task::perform(async {}, |()| Message::Tick),
                     ])
@@ -243,44 +260,28 @@ impl RitsuGui {
                 }
             }
             Message::StreamingStarted => {
-                // Currently unused - placeholder for future real-time streaming
+                // Streaming channel is now active via subscription
                 Task::none()
             }
-            Message::MessageReceived(content) => {
-                self.messages.push(ChatMessage {
-                    content,
-                    is_user: false,
-                    opacity: 0.0, // Start invisible for fade-in
-                });
+            Message::MessageReceived(_content) => {
+                // Legacy handler - no longer used with streaming
                 self.is_loading = false;
                 Task::none()
             }
             Message::MessageChunk(chunk, is_final) => {
+                // Append chunk to the streaming message
+                if let Some(idx) = self.streaming_message_index {
+                    if let Some(msg) = self.messages.get_mut(idx) {
+                        msg.content.push_str(&chunk);
+                    }
+                }
+                
                 if is_final {
                     // Streaming complete
                     self.is_loading = false;
-                } else {
-                    // Append to the last assistant message, or create a new one
-                    if let Some(last_msg) = self.messages.last_mut() {
-                        if !last_msg.is_user {
-                            last_msg.content.push_str(&chunk);
-                        } else {
-                            // Last message was user, create new assistant message
-                            self.messages.push(ChatMessage {
-                                content: chunk,
-                                is_user: false,
-                                opacity: 1.0, // Immediately visible for streaming
-                            });
-                        }
-                    } else {
-                        // No messages yet, create first assistant message
-                        self.messages.push(ChatMessage {
-                            content: chunk,
-                            is_user: false,
-                            opacity: 1.0,
-                        });
-                    }
+                    self.streaming_message_index = None;
                 }
+                
                 Task::none()
             }
             Message::ServerResponse(result) => {
