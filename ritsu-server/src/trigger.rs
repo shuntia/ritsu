@@ -620,7 +620,19 @@ pub async fn run_trigger_loop(
         }
 
         if let Some((instant, trigger)) = next_trigger {
-            info!("Next trigger: {} at {:?}", trigger.name, instant);
+            // Calculate human-readable time from Instant
+            let now = std::time::SystemTime::now();
+            let duration_until = instant.duration_since(tokio::time::Instant::now());
+            let trigger_time = now + duration_until;
+            
+            let datetime: chrono::DateTime<chrono::Local> = trigger_time.into();
+            let formatted_time = datetime.format("%Y-%m-%d %H:%M:%S");
+            
+            info!("Next trigger: {} at {} (in {:.1}s)", 
+                trigger.name, 
+                formatted_time,
+                duration_until.as_secs_f64()
+            );
             sleep_until(instant).await;
             
             // Execute the trigger

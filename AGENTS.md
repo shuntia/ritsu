@@ -61,6 +61,12 @@
    - Document all public functions with rustdoc
    - Keep README.md current with usage examples
 
+7. **Local Development Dependencies**
+   - **llm crate clone**: A local clone of the `llm` crate exists in `~/llm/`
+   - This allows for modifications and enhancements to the LLM integration
+   - May be used for implementing streaming responses or other features
+   - When making changes to llm integration, consider if local crate modifications are needed
+
 ### Workflow
 
 1. Read TODO.md to understand current state

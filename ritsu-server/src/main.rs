@@ -37,12 +37,13 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
+    // Initialize tracing with human-readable timestamps
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
+        .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
         .init();
 
     let cli = Cli::parse();

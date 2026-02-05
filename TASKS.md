@@ -8,6 +8,11 @@
 - [x] Make sidebar collapsible with hamburger menu (hidden by default)
 - [x] Improve theming and styling for iced application
 - [x] Add more GUI animations (sidebar slide, message fade-in)
+- [ ] **IMPLEMENT STREAMING RESPONSES** (currently not streaming!)
+  - [ ] Add streaming support to LLM client
+  - [ ] Stream tokens via ServerPush messages
+  - [ ] GUI appends tokens to current message
+  - [ ] Show typing indicator while streaming
 - [ ] Implement client daemon to handle all GUI interactions
   - [ ] Client daemon runs in background
   - [ ] GUI connects to client daemon (not server directly)
