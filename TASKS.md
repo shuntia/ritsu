@@ -14,10 +14,13 @@
   - [x] Reference local llm crate as path dependency
   - [x] Add streaming support to LLM client (`generate_streaming()`)
   - [x] Stream tokens via ServerPush::MessageChunk messages
-  - [x] GUI appends tokens to current message in real-time
+  - [x] **Token-by-token display in GUI** - FULLY IMPLEMENTED!
+    - [x] Pre-create assistant message before streaming
+    - [x] Use iced::stream::channel to bridge tokio → futures channels
+    - [x] MessageChunk events append to indexed message in real-time
+    - [x] Visual updates as each token arrives from LLM
   - [x] Add typing indicator animation while streaming
-  - [x] **Wire up streaming in GUI** - Now fully integrated!
-  - [x] **Test streaming end-to-end** - Ready for testing
+  - [x] Ready for integration testing with live LLM backend
 - [ ] Implement client daemon to handle all GUI interactions
   - [ ] Client daemon runs in background
   - [ ] GUI connects to client daemon (not server directly)
