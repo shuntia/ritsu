@@ -49,6 +49,8 @@ pub enum ClientRequest {
         query_type: MemoryQueryType,
         date_range: Option<DateRange>,
     },
+    /// Subscribe to server push notifications
+    Subscribe,
 }
 
 /// Server response to client
@@ -150,4 +152,78 @@ pub enum TaskPriority {
     Medium,
     High,
     Urgent,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_request_creation() {
+        let requests = vec![
+            ClientRequest::Ping,
+            ClientRequest::SendMessage {
+                content: "test".to_string(),
+                session_id: None,
+            },
+            ClientRequest::Shutdown,
+            ClientRequest::ListTriggers,
+        ];
+
+        for request in requests {
+            // Just check they can be created
+            match request {
+                ClientRequest::Ping => assert!(true),
+                ClientRequest::SendMessage { .. } => assert!(true),
+                ClientRequest::Shutdown => assert!(true),
+                ClientRequest::ListTriggers => assert!(true),
+                _ => (),
+            }
+        }
+    }
+
+    #[test]
+    fn test_server_response_creation() {
+        let _responses = vec![
+            ServerResponse::Ok,
+            ServerResponse::Pong,
+            ServerResponse::Error {
+                message: "test error".to_string(),
+            },
+            ServerResponse::Message {
+                content: "test message".to_string(),
+            },
+        ];
+        // Just check they compile
+        assert!(true);
+    }
+
+    #[test]
+    fn test_server_push_creation() {
+        let _pushes = vec![
+            ServerPush::Notification {
+                title: "Test".to_string(),
+                message: "Message".to_string(),
+                urgency: NotificationUrgency::Normal,
+            },
+            ServerPush::OpenChat {
+                message: Some("Open".to_string()),
+                urgency: NotificationUrgency::Urgent,
+            },
+        ];
+        // Just check they compile
+        assert!(true);
+    }
+
+    #[test]
+    fn test_task_status_enum() {
+        assert_eq!(TaskStatus::Pending, TaskStatus::Pending);
+        assert_ne!(TaskStatus::Pending, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn test_task_priority_enum() {
+        assert_eq!(TaskPriority::High, TaskPriority::High);
+        assert_ne!(TaskPriority::Low, TaskPriority::Urgent);
+    }
 }

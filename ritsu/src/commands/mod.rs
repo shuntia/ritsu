@@ -3,6 +3,7 @@
 #![allow(clippy::unnecessary_wraps)]
 
 pub mod daemon;
+pub mod client_daemon;
 pub mod send;
 pub mod trigger;
 pub mod task;

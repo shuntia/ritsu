@@ -1,6 +1,8 @@
 //! Ritsu Server - Self-triggering AI agent daemon
 
 use anyhow::Result;
+use clap::Parser;
+use std::path::PathBuf;
 use tracing::info;
 
 mod config;
@@ -15,6 +17,24 @@ mod tasks;
 mod tools;
 mod trigger;
 
+#[derive(Parser)]
+#[command(name = "ritsu-server")]
+#[command(about = "Ritsu server daemon - Self-triggering AI agent", long_about = None)]
+#[command(version)]
+struct Cli {
+    /// Path to configuration file
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    /// Socket path for IPC (overrides config file)
+    #[arg(short, long, value_name = "PATH")]
+    socket: Option<String>,
+
+    /// Database path (overrides config file)
+    #[arg(short, long, value_name = "PATH")]
+    database: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
@@ -25,14 +45,32 @@ async fn main() -> Result<()> {
         )
         .init();
 
+    let cli = Cli::parse();
+
     info!("Starting ritsu-server v{}", env!("CARGO_PKG_VERSION"));
 
     // Auto-start Ollama if installed but not running
     start_ollama_if_needed().await;
 
     // Load configuration
-    let config = config::Config::load()?;
-    info!("Configuration loaded from: {:?}", config::Config::config_file_path());
+    let mut config = if let Some(config_path) = cli.config {
+        info!("Loading configuration from: {}", config_path.display());
+        config::Config::load_from_path(&config_path)?
+    } else {
+        let default_path = config::Config::config_file_path();
+        info!("Loading configuration from default path: {}", default_path.display());
+        config::Config::load()?
+    };
+
+    // Apply CLI overrides
+    if let Some(socket_path) = cli.socket {
+        info!("Overriding socket path to: {}", socket_path);
+        config.server.socket_path = socket_path;
+    }
+    if let Some(database_path) = cli.database {
+        info!("Overriding database path to: {}", database_path);
+        config.server.database_path = database_path;
+    }
 
     // Initialize database
     let db = database::Database::new(&config.server.database_path)?;
@@ -104,9 +142,37 @@ async fn main() -> Result<()> {
 
     info!("ritsu-server started successfully");
 
-    // Keep server running
-    tokio::signal::ctrl_c().await?;
-    info!("Shutting down ritsu-server");
+    // Set up graceful shutdown with signal handling
+    let shutdown_flag = std::sync::Arc::new(tokio::sync::Notify::new());
+    let shutdown_flag_clone = shutdown_flag.clone();
+
+    tokio::spawn(async move {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {
+                info!("Received SIGINT! Shutting down gracefully...");
+                shutdown_flag_clone.notify_waiters();
+            }
+            Err(e) => {
+                tracing::error!("Failed to listen for SIGINT: {}", e);
+            }
+        }
+    });
+
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let shutdown_flag_clone = shutdown_flag.clone();
+        tokio::spawn(async move {
+            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
+            sigterm.recv().await;
+            info!("Received SIGTERM! Shutting down gracefully...");
+            shutdown_flag_clone.notify_waiters();
+        });
+    }
+
+    // Wait for shutdown signal
+    shutdown_flag.notified().await;
+    info!("Shutting down ritsu... Good night!");
 
     Ok(())
 }
@@ -140,12 +206,26 @@ async fn start_ollama_if_needed() {
     }
     
     // Start Ollama in background
-    tracing::info!("Starting Ollama server...");
+    tracing::info!("Starting Ollama server (output: /tmp/ritsu-ollama.log)...");
+    
+    // Open log file
+    let log_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/ritsu-ollama.log")
+    {
+        Ok(file) => file,
+        Err(e) => {
+            tracing::warn!("Failed to open /tmp/ritsu-ollama.log: {}", e);
+            return;
+        }
+    };
+    
     let result = tokio::process::Command::new("ollama")
         .arg("serve")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(log_file.try_clone().unwrap())
+        .stderr(log_file)
         .spawn();
     
     match result {

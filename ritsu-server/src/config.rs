@@ -107,19 +107,23 @@ impl Config {
     /// Load configuration from file or use defaults
     pub fn load() -> Result<Self> {
         let config_path = Self::config_file_path();
-        
-        if config_path.exists() {
-            let contents = std::fs::read_to_string(&config_path)
-                .context("Failed to read config file")?;
+        Self::load_from_path(&config_path)
+    }
+
+    /// Load configuration from a specific path
+    pub fn load_from_path(path: &PathBuf) -> Result<Self> {
+        if path.exists() {
+            let contents = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
-                .context("Failed to parse config file")?;
+                .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
             Ok(config)
         } else {
             Ok(Self::default())
         }
     }
 
-    /// Get configuration file path
+    /// Get default configuration file path
     #[must_use]
     pub fn config_file_path() -> PathBuf {
         dirs::config_dir()

@@ -188,3 +188,88 @@ impl ConversationManager {
         Ok(deleted)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn create_test_db() -> Arc<Mutex<Connection>> {
+        let conn = Connection::open_in_memory().unwrap();
+        
+        // Create minimal schema for testing
+        conn.execute(
+            "CREATE TABLE conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT UNIQUE NOT NULL,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                turn_count INTEGER DEFAULT 0,
+                metadata TEXT
+            )",
+            [],
+        ).unwrap();
+        
+        conn.execute(
+            "CREATE TABLE conversation_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                turn_number INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tool_calls TEXT,
+                tool_results TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES conversations(session_id) ON DELETE CASCADE
+            )",
+            [],
+        ).unwrap();
+        
+        Arc::new(Mutex::new(conn))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_session() {
+        let db = create_test_db().await;
+        let manager = ConversationManager::new(db);
+        
+        let session = manager.get_or_create_session("test_session").await.unwrap();
+        assert_eq!(session.session_id, "test_session");
+        assert_eq!(session.turn_count, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_add_turn() {
+        let db = create_test_db().await;
+        let manager = ConversationManager::new(db);
+        
+        let _session = manager.get_or_create_session("test_session").await.unwrap();
+        
+        let turn_number = manager.add_turn(
+            "test_session",
+            "user",
+            "Hello",
+            None,
+            None,
+        ).await.unwrap();
+        
+        assert_eq!(turn_number, 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_history() {
+        let db = create_test_db().await;
+        let manager = ConversationManager::new(db);
+        
+        let _session = manager.get_or_create_session("test_session").await.unwrap();
+        
+        manager.add_turn("test_session", "user", "Hello", None, None).await.unwrap();
+        manager.add_turn("test_session", "assistant", "Hi there!", None, None).await.unwrap();
+        
+        let history = manager.get_history("test_session", 10).await.unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].content, "Hello");
+        assert_eq!(history[1].role, "assistant");
+        assert_eq!(history[1].content, "Hi there!");
+    }
+}

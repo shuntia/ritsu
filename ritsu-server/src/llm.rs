@@ -169,10 +169,16 @@ impl LlmClient {
             enable_tools
         );
 
-        // Make the chat request
+        // Make the chat request - try with tools first, fallback to without tools if it fails
         let response = if enable_tools {
-            self.provider.chat_with_tools(&chat_messages, self.provider.tools()).await
-                .context("Failed to send chat request with tools")?
+            match self.provider.chat_with_tools(&chat_messages, self.provider.tools()).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    warn!("Tool calling failed ({}), retrying without tools", e);
+                    self.provider.chat(&chat_messages).await
+                        .context("Failed to send chat request without tools")?
+                }
+            }
         } else {
             self.provider.chat(&chat_messages).await
                 .context("Failed to send chat request")?
@@ -257,16 +263,27 @@ impl LlmClient {
     ) -> Result<LlmResponse> {
         let mut current_messages = messages.to_vec();
         let mut iteration = 0;
+        let mut last_response = None;
 
         loop {
             iteration += 1;
             if iteration > max_iterations {
-                warn!("Reached max iterations ({}) for tool execution loop", max_iterations);
-                break;
+                warn!("Reached max iterations ({}) for tool execution loop, returning last response", max_iterations);
+                
+                // If we have a last response with content, return it
+                if let Some(resp) = last_response {
+                    return Ok(resp);
+                }
+                
+                // Otherwise generate one final response without tools
+                return self.generate_with_tools(&current_messages, system_prompt, false).await;
             }
 
             // Generate response with tools
             let response = self.generate_with_tools(&current_messages, system_prompt, true).await?;
+
+            // Store this response in case we need it
+            last_response = Some(response.clone());
 
             // If no tool calls, we're done
             if response.tool_calls.is_empty() {
@@ -275,6 +292,19 @@ impl LlmClient {
 
             // Execute tool calls
             let tool_results = self.execute_tool_calls(&response.tool_calls).await;
+            
+            // Check if all tools failed - if so, don't loop again
+            let all_failed = tool_results.iter().all(|(_, result)| result.starts_with("Error:"));
+            
+            if all_failed && iteration > 2 {
+                warn!("All tools failed for {} iterations, generating final response without tools", iteration);
+                // Add a message explaining the tool failures
+                current_messages.push(Message {
+                    role: "user".to_string(),
+                    content: "The tools are not working correctly. Please respond without using tools.".to_string(),
+                });
+                return self.generate_with_tools(&current_messages, system_prompt, false).await;
+            }
 
             // Add assistant message with tool calls (if it has content)
             if !response.content.is_empty() {
@@ -294,8 +324,5 @@ impl LlmClient {
 
             debug!("Tool execution iteration {} complete, continuing...", iteration);
         }
-
-        // Return final response (should not reach here in normal flow)
-        self.generate_with_tools(&current_messages, system_prompt, false).await
     }
 }

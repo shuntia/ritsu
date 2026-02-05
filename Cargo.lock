@@ -3360,6 +3360,7 @@ name = "ritsu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "dirs",
  "iced",
@@ -3390,6 +3391,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "clap",
  "dirs",
  "futures",
  "llm",

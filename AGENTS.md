@@ -2,6 +2,87 @@
 
 **Ritsu** is an autonomous AI agent that can schedule and trigger itself arbitrarily. It maintains memory through SQLite, compacts conversations into summaries, and can execute tools based on context and scheduled triggers.
 
+---
+
+## AI Agent Development Guidelines
+
+**You are a professional, pedantic developer strictly following best practices.**
+
+### Core Principles
+
+1. **Follow Best Practices Religiously**
+   - Write clean, maintainable, well-documented code
+   - Follow SOLID principles and DRY
+   - Use proper error handling (no unwrap/expect/panic)
+   - Write comprehensive tests for all features
+   - Follow Rust idioms and conventions
+
+2. **TODO.md is Your Source of Truth**
+   - **ALWAYS** check TODO.md before starting work
+   - **ALWAYS** update TODO.md as you complete tasks
+   - Break down large features into small, testable increments
+   - Mark tasks as complete with [x] when done
+   - Add new discovered tasks as they arise
+
+3. **Commit Frequently Without GPG Signing**
+   - Make small, atomic commits for each logical change
+   - Use clear, descriptive commit messages
+   - Always commit with `--no-gpg-sign` flag
+   - Commit after each completed subtask or bug fix
+   - Never bundle unrelated changes in one commit
+
+4. **Quality Gates Before Every Commit**
+   ```bash
+   # 1. Run clippy with strict lints
+   cargo clippy --all-features --all-targets -- -D warnings
+   
+   # 2. Run all tests
+   cargo test --all-features
+   
+   # 3. Only commit if both pass
+   git add -A
+   git commit --no-gpg-sign -m "Clear, concise message"
+   ```
+
+5. **Code Review Standards**
+   - No hard-coded values (use config, constants, or enums)
+   - No `.unwrap()`, `.expect()`, or `panic!()`
+   - All errors properly propagated with context
+   - Timeouts on all blocking operations
+   - Loose coupling via traits/interfaces
+   - Comprehensive documentation for public APIs
+   - Tests for all new functionality
+
+6. **Documentation Requirements**
+   - Update AGENTS.md for architecture changes
+   - Update TODO.md for task progress
+   - Add inline comments for complex logic
+   - Document all public functions with rustdoc
+   - Keep README.md current with usage examples
+
+### Workflow
+
+1. Read TODO.md to understand current state
+2. Pick next uncompleted task
+3. Implement with tests
+4. Run quality gates (clippy + tests)
+5. Update TODO.md marking task complete
+6. Commit with --no-gpg-sign
+7. Repeat
+
+### Commit Message Format
+```
+<type>: <short summary>
+
+<optional detailed description>
+
+Related task: <TODO.md reference>
+```
+
+Types: feat, fix, refactor, test, docs, chore
+
+---
+
 ## Architecture Overview
 
 ### Components
@@ -20,11 +101,19 @@
    - **Chat GUI**: `ritsu chat` (launches iced-based GUI)
    - **Quick messages**: `ritsu send "message"`
 
+3. **Client Daemon (ritsu)**: Background process for UI interactions:
+   - **Notification daemon**: `ritsu start-client-daemon`
+   - Subscribes to server push notifications
+   - Displays system notifications via notify-rust
+   - Launches GUI windows on demand
+   - Runs separately from server for clean separation
+
 ### Communication
-- Server-client communication via IPC (Unix domain sockets or TCP)
+- Server-client communication via IPC (Unix domain sockets)
 - CLI subcommands send admin/query requests to server
+- Client daemon subscribes to push notifications (ServerPush protocol)
 - `ritsu chat` launches GUI for interactive conversations
-- Server can launch GUI via `ritsu chat` when needed (AI-initiated)
+- Server broadcasts to client daemon for notifications and GUI launches
 
 ## Core Technologies
 

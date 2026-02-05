@@ -5,13 +5,13 @@
 #![allow(clippy::match_same_arms)]
 #![allow(clippy::format_push_string)]
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use ritsu_common::protocol::{ClientRequest, ServerResponse, ServerPush};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::conversations::ConversationManager;
 use crate::llm::LlmClient;
@@ -138,6 +138,8 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
     }
 
     let len = u32::from_be_bytes(len_buf) as usize;
+    debug!("Reading request of {} bytes", len);
+    
     if len > 10_000_000 {
         anyhow::bail!("Message too large: {} bytes", len);
     }
@@ -146,7 +148,12 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).await?;
 
-    let request: ClientRequest = postcard::from_bytes(&buf)?;
+    debug!("Deserializing {} bytes: {:?}", buf.len(), &buf[..buf.len().min(100)]);
+    
+    let request: ClientRequest = postcard::from_bytes(&buf)
+        .with_context(|| format!("Failed to deserialize {} bytes", buf.len()))?;
+    
+    debug!("Successfully deserialized request: {:?}", request);
     Ok(Some(request))
 }
 
@@ -484,6 +491,13 @@ async fn handle_request(
             };
             
             ServerResponse::Memory { content: result }
+        }
+        
+        ClientRequest::Subscribe => {
+            // Client is subscribing for push notifications only
+            // Just acknowledge the subscription - pushes are handled via the channel
+            info!("Client subscribed for push notifications");
+            ServerResponse::Ok
         }
     }
 }

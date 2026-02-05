@@ -60,6 +60,11 @@ impl ToolRegistry {
     }
 
     #[allow(dead_code)]
+    pub async fn tool_count(&self) -> usize {
+        self.tools.read().await.len()
+    }
+
+    #[allow(dead_code)]
     pub async fn execute(&self, name: &str, args: HashMap<String, String>) -> Result<ToolResult> {
         let start = std::time::Instant::now();
         let tools = self.tools.read().await;
@@ -860,4 +865,76 @@ pub async fn register_all_tools(
     registry.register(tool_impls::set_preference(preferences.clone())).await;
     
     info!("Registered {} tools", 10);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_tool_registration() {
+        let registry = ToolRegistry::new();
+        
+        let tool = Tool {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            tags: vec!["test".to_string()],
+            parameters: vec![],
+            handler: Arc::new(|_args| {
+                Box::pin(async { ToolResult::success("test".to_string()) })
+            }),
+        };
+        
+        registry.register(tool).await;
+        
+        let count = registry.tool_count().await;
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution() {
+        let registry = ToolRegistry::new();
+        
+        let tool = Tool {
+            name: "echo".to_string(),
+            description: "Echo tool".to_string(),
+            tags: vec![],
+            parameters: vec![],
+            handler: Arc::new(|args| {
+                Box::pin(async move {
+                    let msg = args.get("message").cloned().unwrap_or_default();
+                    ToolResult::success(msg)
+                })
+            }),
+        };
+        
+        registry.register(tool).await;
+        
+        let mut args = HashMap::new();
+        args.insert("message".to_string(), "hello".to_string());
+        
+        let result = registry.execute("echo", args).await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.output, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_tool_not_found() {
+        let registry = ToolRegistry::new();
+        
+        let result = registry.execute("nonexistent", HashMap::new()).await.unwrap();
+        assert!(!result.success);
+        assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_tool_result_creation() {
+        let success = ToolResult::success("worked".to_string());
+        assert!(success.success);
+        assert_eq!(success.output, "worked");
+        
+        let error = ToolResult::error("failed".to_string());
+        assert!(!error.success);
+        assert_eq!(error.error, Some("failed".to_string()));
+    }
 }

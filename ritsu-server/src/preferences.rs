@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preference {
     pub category: String,
@@ -49,6 +50,7 @@ impl PreferencesManager {
     }
 
     /// Get a specific preference
+    #[allow(dead_code)]
     pub async fn get_preference(&self, category: &str, key: &str) -> Result<Option<Preference>> {
         let conn = self.db.lock().await;
         
@@ -76,6 +78,7 @@ impl PreferencesManager {
     }
 
     /// Get all preferences in a category
+    #[allow(dead_code)]
     pub async fn get_category(&self, category: &str) -> Result<Vec<Preference>> {
         let conn = self.db.lock().await;
         
@@ -101,6 +104,7 @@ impl PreferencesManager {
     }
 
     /// Get all preferences as a map
+    #[allow(dead_code)]
     pub async fn get_all(&self) -> Result<HashMap<String, HashMap<String, String>>> {
         let conn = self.db.lock().await;
         
@@ -127,6 +131,7 @@ impl PreferencesManager {
     }
 
     /// Format preferences for system prompt
+    #[allow(dead_code)]
     pub async fn format_for_prompt(&self) -> Result<String> {
         let prefs = self.get_all().await?;
         
@@ -147,6 +152,7 @@ impl PreferencesManager {
     }
 
     /// Remove a preference
+    #[allow(dead_code)]
     pub async fn remove_preference(&self, category: &str, key: &str) -> Result<bool> {
         let conn = self.db.lock().await;
         
@@ -159,6 +165,7 @@ impl PreferencesManager {
     }
 
     /// Clear all preferences in a category
+    #[allow(dead_code)]
     pub async fn clear_category(&self, category: &str) -> Result<usize> {
         let conn = self.db.lock().await;
         
@@ -169,5 +176,85 @@ impl PreferencesManager {
         
         info!("Cleared {} preferences from category: {}", rows, category);
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn create_test_db() -> Arc<Mutex<Connection>> {
+        let conn = Connection::open_in_memory().unwrap();
+        
+        conn.execute(
+            "CREATE TABLE preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                source TEXT,
+                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(category, key)
+            )",
+            [],
+        ).unwrap();
+        
+        Arc::new(Mutex::new(conn))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_set_and_get_preference() {
+        let db = create_test_db().await;
+        let manager = PreferencesManager::new(db);
+        
+        manager.set_preference("schedule", "wake_time", "7:00AM", 0.9, Some("user")).await.unwrap();
+        
+        let pref = manager.get_preference("schedule", "wake_time").await.unwrap();
+        assert!(pref.is_some());
+        let pref = pref.unwrap();
+        assert_eq!(pref.value, "7:00AM");
+        assert_eq!(pref.confidence, 0.9);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_category() {
+        let db = create_test_db().await;
+        let manager = PreferencesManager::new(db);
+        
+        manager.set_preference("schedule", "wake_time", "7:00AM", 1.0, None).await.unwrap();
+        manager.set_preference("schedule", "work_start", "9:00AM", 1.0, None).await.unwrap();
+        manager.set_preference("communication", "style", "formal", 1.0, None).await.unwrap();
+        
+        let schedule_prefs = manager.get_category("schedule").await.unwrap();
+        assert_eq!(schedule_prefs.len(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_format_for_prompt() {
+        let db = create_test_db().await;
+        let manager = PreferencesManager::new(db);
+        
+        manager.set_preference("schedule", "wake_time", "7:00AM", 1.0, None).await.unwrap();
+        
+        let formatted = manager.format_for_prompt().await.unwrap();
+        assert!(formatted.contains("## User Preferences"));
+        assert!(formatted.contains("schedule"));
+        assert!(formatted.contains("wake_time"));
+        assert!(formatted.contains("7:00AM"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_remove_preference() {
+        let db = create_test_db().await;
+        let manager = PreferencesManager::new(db);
+        
+        manager.set_preference("test", "key", "value", 1.0, None).await.unwrap();
+        let removed = manager.remove_preference("test", "key").await.unwrap();
+        assert!(removed);
+        
+        let pref = manager.get_preference("test", "key").await.unwrap();
+        assert!(pref.is_none());
     }
 }

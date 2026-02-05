@@ -21,6 +21,8 @@ pub enum Message {
 pub struct RitsuGui {
     input: String,
     messages: Vec<ChatMessage>,
+    session_id: String,
+    is_loading: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -30,11 +32,15 @@ struct ChatMessage {
 }
 
 impl RitsuGui {
+    #[allow(dead_code)]
     fn new() -> (Self, Task<Message>) {
+        let session_id = format!("gui_session_{}", chrono::Utc::now().timestamp());
         (
             Self {
                 input: String::new(),
                 messages: Vec::new(),
+                session_id,
+                is_loading: false,
             },
             Task::none(),
         )
@@ -46,6 +52,8 @@ impl Default for RitsuGui {
         Self {
             input: String::new(),
             messages: Vec::new(),
+            session_id: format!("gui_session_{}", chrono::Utc::now().timestamp()),
+            is_loading: false,
         }
     }
 }
@@ -58,25 +66,30 @@ impl RitsuGui {
                 Task::none()
             }
             Message::SendMessage => {
-                if !self.input.is_empty() {
+                if !self.input.is_empty() && !self.is_loading {
                     let content = self.input.clone();
+                    let session_id = self.session_id.clone();
                     self.messages.push(ChatMessage {
                         content: content.clone(),
                         is_user: true,
                     });
                     self.input.clear();
+                    self.is_loading = true;
 
                     Task::perform(
                         async move {
                             let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
                             let request = ritsu_common::protocol::ClientRequest::SendMessage {
                                 content: content.clone(),
-                                session_id: None,
+                                session_id: Some(session_id),
                             };
                             client.send_request(request).await
                         },
                         |result| match result {
                             Ok(response) => match response {
+                                ritsu_common::protocol::ServerResponse::Message { content } => {
+                                    Message::MessageReceived(content)
+                                }
                                 ritsu_common::protocol::ServerResponse::Ok => {
                                     Message::ServerResponse(Ok("Message sent".to_string()))
                                 }
@@ -97,6 +110,7 @@ impl RitsuGui {
                     content,
                     is_user: false,
                 });
+                self.is_loading = false;
                 Task::none()
             }
             Message::ServerResponse(result) => {
@@ -104,6 +118,7 @@ impl RitsuGui {
                     Ok(msg) => println!("✓ {msg}"),
                     Err(e) => eprintln!("✗ Error: {e}"),
                 }
+                self.is_loading = false;
                 Task::none()
             }
         }
@@ -122,14 +137,31 @@ impl RitsuGui {
             }
         );
 
+        let mut input_field = text_input("Type your message...", &self.input)
+            .on_input(Message::InputChanged)
+            .padding(10);
+        
+        if !self.is_loading {
+            input_field = input_field.on_submit(Message::SendMessage);
+        }
+
         let input_area = row![
-            text_input("Type your message...", &self.input)
-                .on_input(Message::InputChanged)
-                .on_submit(Message::SendMessage)
-                .padding(10),
-            button("Send")
-                .on_press(Message::SendMessage)
-                .padding(10),
+            input_field,
+            if !self.is_loading {
+                button("Send")
+                    .on_press(Message::SendMessage)
+                    .padding(10)
+            } else {
+                button(text("⏳"))
+                    .padding(10)
+                    .style(|theme: &iced::Theme, _status| {
+                        button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.5, 0.5, 0.5))),
+                            text_color: theme.palette().text,
+                            ..button::Style::default()
+                        }
+                    })
+            }
         ]
         .spacing(10);
 
@@ -155,7 +187,7 @@ fn view(state: &RitsuGui) -> Element<'_, Message> {
     state.view()
 }
 
-pub async fn run() -> anyhow::Result<()> {
+pub fn run_blocking() -> anyhow::Result<()> {
     iced::application(
         RitsuGui::default,
         update,

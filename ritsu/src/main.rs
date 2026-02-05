@@ -22,7 +22,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the ritsu server daemon
-    Start,
+    Start {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+    },
     
     /// Stop the ritsu server daemon
     Stop,
@@ -31,7 +35,18 @@ enum Commands {
     Status,
     
     /// Restart the server daemon
-    Restart,
+    Restart {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+    
+    /// Forcefully halt server or client processes
+    #[command(subcommand)]
+    Halt(HaltCommands),
+    
+    /// Start the client daemon (handles notifications and GUI)
+    StartClientDaemon,
     
     /// Open chat GUI interface
     Chat,
@@ -40,6 +55,10 @@ enum Commands {
     Send {
         /// Message to send
         message: String,
+        
+        /// Start a new session (don't continue previous conversation)
+        #[arg(short, long)]
+        new_session: bool,
     },
     
     /// Manage triggers
@@ -62,6 +81,23 @@ enum Commands {
         /// Filter by tag
         #[arg(long)]
         tag: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HaltCommands {
+    /// Halt the server daemon (forceful shutdown)
+    Server {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        noconfirm: bool,
+    },
+    
+    /// Halt client processes (GUI windows)
+    Client {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        noconfirm: bool,
     },
 }
 
@@ -127,8 +163,7 @@ enum TaskCommands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -140,20 +175,30 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start => commands::daemon::start().await?,
-        Commands::Stop => commands::daemon::stop().await?,
-        Commands::Status => commands::daemon::status().await?,
-        Commands::Restart => commands::daemon::restart().await?,
         Commands::Chat => {
             println!("Starting Ritsu GUI...");
-            gui::run().await?;
+            // Run GUI - it creates its own runtime
+            gui::run_blocking()
         }
-        Commands::Send { message } => commands::send::send_message(&message).await?,
-        Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
-        Commands::Task(cmd) => commands::task::handle(cmd).await?,
-        Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
-        Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
+        // All other commands need async runtime
+        _ => {
+            tokio::runtime::Runtime::new()?.block_on(async {
+                match cli.command {
+                    Commands::Start { config } => commands::daemon::start(config.as_deref()).await?,
+                    Commands::Stop => commands::daemon::stop().await?,
+                    Commands::Status => commands::daemon::status().await?,
+                    Commands::Restart { config } => commands::daemon::restart(config.as_deref()).await?,
+                    Commands::Halt(cmd) => commands::daemon::handle_halt(cmd).await?,
+                    Commands::StartClientDaemon => commands::client_daemon::run().await?,
+                    Commands::Send { message, new_session } => commands::send::send_message(&message, new_session).await?,
+                    Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
+                    Commands::Task(cmd) => commands::task::handle(cmd).await?,
+                    Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
+                    Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
+                    Commands::Chat => unreachable!(),
+                }
+                Ok(())
+            })
+        }
     }
-
-    Ok(())
 }

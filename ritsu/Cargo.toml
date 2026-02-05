@@ -25,6 +25,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 postcard.workspace = true
 dirs = "6.0"
+chrono = "0.4"
 
 # GUI dependencies
 iced.workspace = true

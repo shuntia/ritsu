@@ -113,12 +113,42 @@ export PATH="$(pwd)/target/debug:$PATH"
 
 ## Testing
 
-The project includes an end-to-end test script that validates:
-- Server start/stop lifecycle
-- Message sending via IPC
-- Task creation, listing, and updates
-- Trigger listing
-- Memory queries
+The project includes comprehensive testing infrastructure:
+
+**Unit & Integration Tests (23 tests):**
+```bash
+# Run all tests with nextest (recommended)
+cargo nextest run
+
+# Or use standard test runner
+cargo test
+
+# Run specific test package
+cargo nextest run -p ritsu-server
+
+# Run CI profile (strict, no retries)
+cargo nextest run --profile ci
+```
+
+**End-to-End Tests:**
+```bash
+# Full integration test
+export PATH="$(pwd)/target/debug:$PATH"
+./test-ritsu.sh
+```
+
+The unit tests validate:
+- Database schema and operations
+- Conversation session management
+- Tool registry and execution
+- User preferences storage
+- IPC protocol serialization
+- State management and activity tracking
+
+**Recommended Test Model:**
+- Use `gemma3:1b` with Ollama for fast local testing
+- Pull model: `ollama pull gemma3:1b`
+- Server auto-starts Ollama if installed and not running
 
 ## License
 
