@@ -31,6 +31,7 @@ pub enum Message {
     LoadSession(String),
     SessionsLoaded(Vec<SessionInfo>),
     TasksLoaded(Vec<TaskInfo>),
+    ToggleSidebar,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +61,7 @@ pub struct RitsuGui {
     current_view: ViewState,
     sessions: Vec<SessionInfo>,
     tasks: Vec<TaskInfo>,
+    sidebar_visible: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +84,7 @@ impl RitsuGui {
                 current_view: ViewState::Chat,
                 sessions: Vec::new(),
                 tasks: Vec::new(),
+                sidebar_visible: false,
             },
             Task::none(),
         )
@@ -99,6 +102,7 @@ impl Default for RitsuGui {
             current_view: ViewState::Chat,
             sessions: Vec::new(),
             tasks: Vec::new(),
+            sidebar_visible: false,
         }
     }
 }
@@ -226,68 +230,27 @@ impl RitsuGui {
                 self.tasks = tasks;
                 Task::none()
             }
+            Message::ToggleSidebar => {
+                self.sidebar_visible = !self.sidebar_visible;
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
-        // Sidebar with view switcher
-        let sidebar = column![
-            button("💬 Chat")
-                .on_press(Message::SwitchView(ViewState::Chat))
-                .width(iced::Length::Fill)
-                .padding(10)
-                .style(if self.current_view == ViewState::Chat {
-                    |theme: &iced::Theme, status| button::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.5, 0.8))),
-                        text_color: theme.palette().text,
-                        ..button::primary(theme, status)
-                    }
-                } else {
-                    button::secondary
-                }),
-            button("📜 Sessions")
-                .on_press(Message::SwitchView(ViewState::Sessions))
-                .width(iced::Length::Fill)
-                .padding(10)
-                .style(if self.current_view == ViewState::Sessions {
-                    |theme: &iced::Theme, status| button::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.5, 0.8))),
-                        text_color: theme.palette().text,
-                        ..button::primary(theme, status)
-                    }
-                } else {
-                    button::secondary
-                }),
-            button("✓ Tasks")
-                .on_press(Message::SwitchView(ViewState::Tasks))
-                .width(iced::Length::Fill)
-                .padding(10)
-                .style(if self.current_view == ViewState::Tasks {
-                    |theme: &iced::Theme, status| button::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.5, 0.8))),
-                        text_color: theme.palette().text,
-                        ..button::primary(theme, status)
-                    }
-                } else {
-                    button::secondary
-                }),
-            button("🧠 Memory")
-                .on_press(Message::SwitchView(ViewState::Memory))
-                .width(iced::Length::Fill)
-                .padding(10)
-                .style(if self.current_view == ViewState::Memory {
-                    |theme: &iced::Theme, status| button::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.5, 0.8))),
-                        text_color: theme.palette().text,
-                        ..button::primary(theme, status)
-                    }
-                } else {
-                    button::secondary
-                }),
-        ]
-        .spacing(5)
-        .padding(10)
-        .width(iced::Length::Fixed(150.0));
+        // Hamburger menu button
+        let menu_button = button(text("☰").size(24))
+            .on_press(Message::ToggleSidebar)
+            .padding(10)
+            .style(|theme: &iced::Theme, status| button::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.2, 0.25))),
+                text_color: theme.palette().text,
+                border: iced::Border {
+                    radius: 8.0.into(),
+                    ..Default::default()
+                },
+                ..button::primary(theme, status)
+            });
 
         // Main content based on current view
         let main_content = match self.current_view {
@@ -297,9 +260,140 @@ impl RitsuGui {
             ViewState::Memory => self.view_memory(),
         };
 
-        // Layout: sidebar | main content
-        let layout = row![sidebar, main_content]
-            .spacing(0);
+        // If sidebar visible, show it
+        let layout = if self.sidebar_visible {
+            // Sidebar with view switcher
+            let sidebar = column![
+                button("💬 Chat")
+                    .on_press(Message::SwitchView(ViewState::Chat))
+                    .width(iced::Length::Fill)
+                    .padding(10)
+                    .style(if self.current_view == ViewState::Chat {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                            text_color: theme.palette().text,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::primary(theme, status)
+                        }
+                    } else {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::secondary(theme, status)
+                        }
+                    }),
+                button("📜 Sessions")
+                    .on_press(Message::SwitchView(ViewState::Sessions))
+                    .width(iced::Length::Fill)
+                    .padding(10)
+                    .style(if self.current_view == ViewState::Sessions {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                            text_color: theme.palette().text,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::primary(theme, status)
+                        }
+                    } else {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::secondary(theme, status)
+                        }
+                    }),
+                button("✓ Tasks")
+                    .on_press(Message::SwitchView(ViewState::Tasks))
+                    .width(iced::Length::Fill)
+                    .padding(10)
+                    .style(if self.current_view == ViewState::Tasks {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                            text_color: theme.palette().text,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::primary(theme, status)
+                        }
+                    } else {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::secondary(theme, status)
+                        }
+                    }),
+                button("🧠 Memory")
+                    .on_press(Message::SwitchView(ViewState::Memory))
+                    .width(iced::Length::Fill)
+                    .padding(10)
+                    .style(if self.current_view == ViewState::Memory {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                            text_color: theme.palette().text,
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::primary(theme, status)
+                        }
+                    } else {
+                        |theme: &iced::Theme, status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..button::secondary(theme, status)
+                        }
+                    }),
+            ]
+            .spacing(8)
+            .padding(15)
+            .width(iced::Length::Fixed(180.0));
+
+            let sidebar_container = container(sidebar)
+                .style(|_theme: &iced::Theme| container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.12, 0.12, 0.15))),
+                    border: iced::Border {
+                        width: 0.0,
+                        color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                        radius: 0.0.into(),
+                    },
+                    ..container::Style::default()
+                })
+                .height(iced::Length::Fill);
+
+            row![
+                column![menu_button, sidebar_container].spacing(0),
+                main_content
+            ]
+            .spacing(0)
+        } else {
+            // Just menu button and content
+            row![
+                column![menu_button].width(iced::Length::Fixed(50.0)),
+                main_content
+            ]
+            .spacing(0)
+        };
 
         container(layout)
             .width(iced::Length::Fill)
@@ -309,20 +403,40 @@ impl RitsuGui {
 
     fn view_chat(&self) -> Element<'_, Message> {
         let messages_view = self.messages.iter().fold(
-            column![].spacing(10),
+            column![].spacing(12),
             |col, msg| {
-                let message_text = if msg.is_user {
-                    text(format!("You: {}", msg.content))
+                let (bg_color, text_color, align) = if msg.is_user {
+                    (iced::Color::from_rgb(0.2, 0.35, 0.6), iced::Color::WHITE, iced::alignment::Horizontal::Right)
                 } else {
-                    text(format!("Ritsu: {}", msg.content))
+                    (iced::Color::from_rgb(0.18, 0.18, 0.22), iced::Color::from_rgb(0.9, 0.9, 0.95), iced::alignment::Horizontal::Left)
                 };
-                col.push(message_text)
+                
+                let message_container = container(
+                    text(&msg.content)
+                        .size(14)
+                        .color(text_color)
+                )
+                .padding(12)
+                .style(move |_theme: &iced::Theme| container::Style {
+                    background: Some(iced::Background::Color(bg_color)),
+                    border: iced::Border {
+                        radius: 12.0.into(),
+                        ..Default::default()
+                    },
+                    ..container::Style::default()
+                })
+                .max_width(600);
+                
+                let row_content = row![container(message_container).width(iced::Length::Fill).align_x(align)];
+                
+                col.push(row_content)
             }
         );
 
         let mut input_field = text_input("Type your message...", &self.input)
             .on_input(Message::InputChanged)
-            .padding(10);
+            .padding(12)
+            .size(14);
         
         if !self.is_loading {
             input_field = input_field.on_submit(Message::SendMessage);
@@ -331,25 +445,37 @@ impl RitsuGui {
         let spinner_frames = ["⠋", "⠙", "⠹", "⠸"];
         let spinner = spinner_frames[self.animation_frame % spinner_frames.len()];
         
-        let input_area = row![
-            input_field,
-            if !self.is_loading {
-                button("Send")
-                    .on_press(Message::SendMessage)
-                    .padding(10)
-            } else {
-                button(text(spinner))
-                    .padding(10)
-                    .style(|theme: &iced::Theme, _status| {
-                        button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.5, 0.5, 0.5))),
-                            text_color: theme.palette().text,
-                            ..button::Style::default()
-                        }
-                    })
-            }
-        ]
-        .spacing(10);
+        let send_button = if !self.is_loading {
+            button("Send")
+                .on_press(Message::SendMessage)
+                .padding(12)
+                .style(|theme: &iced::Theme, status| button::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                    text_color: theme.palette().text,
+                    border: iced::Border {
+                        radius: 8.0.into(),
+                        ..Default::default()
+                    },
+                    ..button::primary(theme, status)
+                })
+        } else {
+            button(text(spinner).size(16))
+                .padding(12)
+                .style(|_theme: &iced::Theme, _status| {
+                    button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.4, 0.4, 0.45))),
+                        text_color: iced::Color::WHITE,
+                        border: iced::Border {
+                            radius: 8.0.into(),
+                            ..Default::default()
+                        },
+                        ..button::Style::default()
+                    }
+                })
+        };
+        
+        let input_area = row![input_field, send_button]
+            .spacing(10);
 
         let content = column![
             scrollable(messages_view).height(iced::Length::Fill),

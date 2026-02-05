@@ -5,6 +5,11 @@
 ### High Priority
 - [x] Implement animated loading indicator (throbber) in chat GUI
 - [x] Add side panel with view switcher (Chat, Sessions, Tasks, Memory)
+- [x] Make sidebar collapsible with hamburger menu (hidden by default)
+- [x] Improve theming and styling for iced application
+- [ ] Make system prompt configurable (load from config/database)
+- [ ] Support thinking/reasoning display
+- [ ] Generate session titles automatically
 - [ ] Implement session list view - show today's sessions (IPC call needed)
 - [ ] Implement session loading - switch to previous conversation (IPC call needed)
 - [ ] Implement task manager view (IPC calls needed)
