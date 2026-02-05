@@ -17,12 +17,13 @@
    - Write comprehensive tests for all features
    - Follow Rust idioms and conventions
 
-2. **TODO.md is Your Source of Truth**
-   - **ALWAYS** check TODO.md before starting work
-   - **ALWAYS** update TODO.md as you complete tasks
+2. **TASKS.md is Your Source of Truth**
+   - **ALWAYS** check TASKS.md before starting work
+   - **ALWAYS** write new tasks to TASKS.md when they arise
+   - **ALWAYS** update TASKS.md as you complete tasks
    - Break down large features into small, testable increments
    - Mark tasks as complete with [x] when done
-   - Add new discovered tasks as they arise
+   - Keep TASKS.md current with project status
 
 3. **Commit Frequently Without GPG Signing**
    - Make small, atomic commits for each logical change
@@ -55,7 +56,7 @@
 
 6. **Documentation Requirements**
    - Update AGENTS.md for architecture changes
-   - Update TODO.md for task progress
+   - Update TASKS.md for task progress and new tasks
    - Add inline comments for complex logic
    - Document all public functions with rustdoc
    - Keep README.md current with usage examples
