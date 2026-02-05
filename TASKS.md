@@ -7,6 +7,12 @@
 - [x] Add side panel with view switcher (Chat, Sessions, Tasks, Memory)
 - [x] Make sidebar collapsible with hamburger menu (hidden by default)
 - [x] Improve theming and styling for iced application
+- [x] Add more GUI animations (sidebar slide, message fade-in)
+- [ ] Implement client daemon to handle all GUI interactions
+  - [ ] Client daemon runs in background
+  - [ ] GUI connects to client daemon (not server directly)
+  - [ ] Client daemon proxies requests to server
+  - [ ] Client daemon handles notifications and window management
 - [ ] Make system prompt configurable (load from config/database)
 - [ ] Support thinking/reasoning display
 - [ ] Generate session titles automatically

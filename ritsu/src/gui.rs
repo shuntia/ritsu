@@ -62,12 +62,15 @@ pub struct RitsuGui {
     sessions: Vec<SessionInfo>,
     tasks: Vec<TaskInfo>,
     sidebar_visible: bool,
+    sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
+    message_appear_frames: Vec<f32>, // Fade-in animation per message
 }
 
 #[derive(Debug, Clone)]
 struct ChatMessage {
     content: String,
     is_user: bool,
+    opacity: f32, // For fade-in animation
 }
 
 impl RitsuGui {
@@ -85,6 +88,8 @@ impl RitsuGui {
                 sessions: Vec::new(),
                 tasks: Vec::new(),
                 sidebar_visible: false,
+                sidebar_animation: 0.0,
+                message_appear_frames: Vec::new(),
             },
             Task::none(),
         )
@@ -103,6 +108,8 @@ impl Default for RitsuGui {
             sessions: Vec::new(),
             tasks: Vec::new(),
             sidebar_visible: false,
+            sidebar_animation: 0.0,
+            message_appear_frames: Vec::new(),
         }
     }
 }
@@ -115,11 +122,35 @@ impl RitsuGui {
                 Task::none()
             }
             Message::Tick => {
+                let mut needs_animation = false;
+                
+                // Animate spinner if loading
                 if self.is_loading {
                     self.animation_frame = (self.animation_frame + 1) % 4;
+                    needs_animation = true;
+                }
+                
+                // Animate sidebar transition
+                if self.sidebar_visible && self.sidebar_animation < 1.0 {
+                    self.sidebar_animation = (self.sidebar_animation + 0.15).min(1.0);
+                    needs_animation = true;
+                } else if !self.sidebar_visible && self.sidebar_animation > 0.0 {
+                    self.sidebar_animation = (self.sidebar_animation - 0.15).max(0.0);
+                    needs_animation = true;
+                }
+                
+                // Animate message fade-ins
+                for (_i, msg) in self.messages.iter_mut().enumerate() {
+                    if msg.opacity < 1.0 {
+                        msg.opacity = (msg.opacity + 0.1).min(1.0);
+                        needs_animation = true;
+                    }
+                }
+                
+                if needs_animation {
                     Task::perform(
                         async {
-                            tokio::time::sleep(Duration::from_millis(250)).await;
+                            tokio::time::sleep(Duration::from_millis(16)).await; // ~60 FPS
                         },
                         |()| Message::Tick,
                     )
@@ -134,6 +165,7 @@ impl RitsuGui {
                     self.messages.push(ChatMessage {
                         content: content.clone(),
                         is_user: true,
+                        opacity: 0.0, // Start invisible for fade-in
                     });
                     self.input.clear();
                     self.is_loading = true;
@@ -175,6 +207,7 @@ impl RitsuGui {
                 self.messages.push(ChatMessage {
                     content,
                     is_user: false,
+                    opacity: 0.0, // Start invisible for fade-in
                 });
                 self.is_loading = false;
                 Task::none()
@@ -232,7 +265,8 @@ impl RitsuGui {
             }
             Message::ToggleSidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
-                Task::none()
+                // Start animation
+                Task::perform(async {}, |()| Message::Tick)
             }
         }
     }
@@ -260,8 +294,11 @@ impl RitsuGui {
             ViewState::Memory => self.view_memory(),
         };
 
-        // If sidebar visible, show it
-        let layout = if self.sidebar_visible {
+        // Animate sidebar width
+        let sidebar_width = 180.0 * self.sidebar_animation;
+        
+        // If sidebar has any visibility, show it
+        let layout = if self.sidebar_animation > 0.01 {
             // Sidebar with view switcher
             let sidebar = column![
                 button("💬 Chat")
@@ -367,17 +404,22 @@ impl RitsuGui {
             ]
             .spacing(8)
             .padding(15)
-            .width(iced::Length::Fixed(180.0));
+            .width(iced::Length::Fixed(sidebar_width));
 
+            let sidebar_animation = self.sidebar_animation;
             let sidebar_container = container(sidebar)
-                .style(|_theme: &iced::Theme| container::Style {
-                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.12, 0.12, 0.15))),
-                    border: iced::Border {
-                        width: 0.0,
-                        color: iced::Color::from_rgb(0.3, 0.3, 0.35),
-                        radius: 0.0.into(),
-                    },
-                    ..container::Style::default()
+                .style(move |_theme: &iced::Theme| {
+                    let mut color = iced::Color::from_rgb(0.12, 0.12, 0.15);
+                    color.a = sidebar_animation;
+                    container::Style {
+                        background: Some(iced::Background::Color(color)),
+                        border: iced::Border {
+                            width: 0.0,
+                            color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                            radius: 0.0.into(),
+                        },
+                        ..container::Style::default()
+                    }
                 })
                 .height(iced::Length::Fill);
 
@@ -405,16 +447,23 @@ impl RitsuGui {
         let messages_view = self.messages.iter().fold(
             column![].spacing(12),
             |col, msg| {
-                let (bg_color, text_color, align) = if msg.is_user {
+                let opacity = msg.opacity;
+                let (mut bg_color, text_color, align) = if msg.is_user {
                     (iced::Color::from_rgb(0.2, 0.35, 0.6), iced::Color::WHITE, iced::alignment::Horizontal::Right)
                 } else {
                     (iced::Color::from_rgb(0.18, 0.18, 0.22), iced::Color::from_rgb(0.9, 0.9, 0.95), iced::alignment::Horizontal::Left)
                 };
                 
+                // Apply opacity to background
+                bg_color.a = opacity;
+                
+                let mut final_text_color = text_color;
+                final_text_color.a = opacity;
+                
                 let message_container = container(
                     text(&msg.content)
                         .size(14)
-                        .color(text_color)
+                        .color(final_text_color)
                 )
                 .padding(12)
                 .style(move |_theme: &iced::Theme| container::Style {
