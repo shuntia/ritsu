@@ -233,11 +233,26 @@ async fn handle_request(
                 }
             };
 
-            // Add current message
+            // Build enhanced user message with context
+            let now = chrono::Local::now();
+            let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
+            
+            // Get task count
+            let task_summary = task_manager.get_task_summary().await
+                .unwrap_or_else(|_| "Unable to retrieve task summary".to_string());
+            
+            let enhanced_content = format!(
+                "[Current Time: {}]\n[{}]\n\n{}",
+                time_str,
+                task_summary,
+                content
+            );
+
+            // Add current message with context
             let mut messages = history;
             messages.push(crate::llm::Message {
                 role: "user".to_string(),
-                content: content.clone(),
+                content: enhanced_content,
             });
 
             // Generate response with tool execution

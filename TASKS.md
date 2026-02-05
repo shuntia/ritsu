@@ -55,6 +55,8 @@
 
 ## Bug Fixes
 - [x] Fixed query_memory tool - use correct column names (timestamp vs created_at)
+- [x] Removed unused llm_old.rs file
+- [x] Enhanced AI context - always provide current time and task summary
 - [ ] Fix trigger execution - no user notification/interaction when triggers fire
 - [ ] Add IPC protocol for sessions/tasks data loading in GUI
 
