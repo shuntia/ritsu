@@ -142,7 +142,7 @@ impl RitsuGui {
             // Test connection on startup
             Task::perform(
                 async {
-                    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                     client.ping().await
                 },
                 |result| {
@@ -268,7 +268,7 @@ impl RitsuGui {
                         Task::run(
                             {
                                 stream::channel(100, move |mut sender: futures::channel::mpsc::Sender<Message>| async move {
-                                    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                                     match client.send_message_streaming(content, Some(session_id)).await {
                                         Ok(mut rx) => {
                                             while let Some(push) = rx.recv().await {
@@ -336,7 +336,7 @@ impl RitsuGui {
                         // Fetch today's sessions
                         Task::perform(
                             async {
-                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                                 let request = ritsu_common::protocol::ClientRequest::ListSessions {
                                     limit: Some(20),
                                 };
@@ -373,7 +373,7 @@ impl RitsuGui {
                         // Fetch tasks
                         Task::perform(
                             async {
-                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                                 let request = ritsu_common::protocol::ClientRequest::ListTasks {
                                     filter: None,
                                 };
@@ -401,7 +401,7 @@ impl RitsuGui {
                         // Fetch memory (notes and recent summaries)
                         Task::perform(
                             async {
-                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                                 let request = ritsu_common::protocol::ClientRequest::QueryMemory {
                                     query_type: ritsu_common::protocol::MemoryQueryType::Notes,
                                     date_range: None,
@@ -432,7 +432,7 @@ impl RitsuGui {
                 
                 Task::perform(
                     async move {
-                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                         client.get_conversation_history(sid, 100).await
                     },
                     |result| match result {
@@ -484,7 +484,7 @@ impl RitsuGui {
                 // Send update request to server
                 Task::perform(
                     async move {
-                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                         let status = match new_status.as_str() {
                             "in_progress" => ritsu_common::protocol::TaskStatus::InProgress,
                             "completed" => ritsu_common::protocol::TaskStatus::Completed,
@@ -512,7 +512,7 @@ impl RitsuGui {
                 // Send delete request to server
                 Task::perform(
                     async move {
-                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                         let request = ritsu_common::protocol::ClientRequest::DeleteTask { id: task_id };
                         
                         match client.send_request(request).await {
@@ -531,7 +531,7 @@ impl RitsuGui {
                         // Reload tasks to reflect changes
                         Task::perform(
                             async {
-                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                                 let request = ritsu_common::protocol::ClientRequest::ListTasks { filter: None };
                                 client.send_request(request).await
                             },
@@ -615,7 +615,7 @@ impl RitsuGui {
                 
                 Task::perform(
                     async move {
-                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                         let request = ritsu_common::protocol::ClientRequest::CreateTask {
                             title,
                             description,
@@ -686,7 +686,7 @@ impl RitsuGui {
                 self.connection_status = ConnectionStatus::Reconnecting;
                 Task::perform(
                     async {
-                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                         client.ping().await
                     },
                     |result| {

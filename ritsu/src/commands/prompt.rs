@@ -91,10 +91,10 @@ async fn edit_prompt() -> Result<()> {
     
     match response {
         ServerResponse::Success { message } => {
-            let msg = if new_content != current_content {
-                message
-            } else {
+            let msg = if new_content == current_content {
                 "No changes made".to_string()
+            } else {
+                message
             };
             println!("{}", msg);
             Ok(())
