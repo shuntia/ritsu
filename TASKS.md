@@ -38,11 +38,15 @@
   - [x] Title, description, priority fields
   - [x] Submit sends CreateTask IPC request
   - [x] Dialog state management
-- [ ] Implement client daemon to handle all GUI interactions
-  - [ ] Client daemon runs in background
-  - [ ] GUI connects to client daemon (not server directly)
-  - [ ] Client daemon proxies requests to server
-  - [ ] Client daemon handles notifications and window management
+- [x] Implement client daemon to handle all GUI interactions **IN PROGRESS**
+  - [x] Protocol definitions (ServerToClientRequest, ClientToServerResponse)
+  - [x] Client daemon runs in background listening on /tmp/ritsu-client.sock
+  - [x] GUI connects to client daemon (not server directly)
+  - [x] Client daemon proxies requests to server
+  - [x] Client daemon handles tool calls (notifications, GUI launch, focus)
+  - [ ] Update server tools to send requests to client daemon
+  - [ ] End-to-end testing
+  - [ ] Update CLI daemon management commands
 - [x] Make system prompt configurable (load from config/database) **DONE**
   - [x] CLI commands: show, set, edit
   - [x] IPC protocol support
