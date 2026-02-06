@@ -301,19 +301,27 @@ async fn handle_send_message_streaming(
     };
 
     let mut full_response = String::new();
+    let mut chunk_count = 0;
 
     // Stream chunks to client
     while let Some(chunk_result) = stream_rx.recv().await {
         match chunk_result {
             Ok(chunk) => {
-                full_response.push_str(&chunk);
+                chunk_count += 1;
+                debug!("Received chunk #{}: {} bytes", chunk_count, chunk.len());
                 
-                // Send chunk as push notification
-                let push = ServerPush::MessageChunk {
-                    content: chunk,
-                    is_final: false,
-                };
-                send_push(stream, push).await?;
+                if !chunk.is_empty() {
+                    full_response.push_str(&chunk);
+                    
+                    // Send chunk as push notification
+                    let push = ServerPush::MessageChunk {
+                        content: chunk,
+                        is_final: false,
+                    };
+                    send_push(stream, push).await?;
+                } else {
+                    debug!("Skipping empty chunk");
+                }
             }
             Err(e) => {
                 error!("Streaming error during LLM response: {}", e);
@@ -327,6 +335,8 @@ async fn handle_send_message_streaming(
         }
     }
 
+    info!("Streaming complete: {} chunks received, {} bytes total", chunk_count, full_response.len());
+
     // Send final marker
     let push = ServerPush::MessageChunk {
         content: String::new(),
@@ -334,7 +344,7 @@ async fn handle_send_message_streaming(
     };
     send_push(stream, push).await?;
 
-    info!("Streaming complete, {} bytes total", full_response.len());
+    info!("Streaming complete: {} chunks received, {} bytes total", chunk_count, full_response.len());
 
     // Store assistant response
     if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None, None).await {

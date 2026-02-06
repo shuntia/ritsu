@@ -127,6 +127,44 @@ impl LlmClient {
         Ok(provider)
     }
 
+    /// Get tools in llm crate format
+    async fn get_llm_tools(&self) -> Vec<llm::chat::Tool> {
+        let tools_info = self.tool_registry.get_tools_for_ai().await;
+        
+        tools_info.iter().map(|tool_info| {
+            // Convert parameters to JSON schema
+            let mut properties = serde_json::Map::new();
+            let mut required = Vec::new();
+            
+            for param in &tool_info.parameters {
+                // Build property schema
+                let mut prop = serde_json::Map::new();
+                prop.insert("type".to_string(), serde_json::json!(param.param_type));
+                prop.insert("description".to_string(), serde_json::json!(param.description));
+                properties.insert(param.name.clone(), serde_json::Value::Object(prop));
+                
+                if param.required {
+                    required.push(param.name.clone());
+                }
+            }
+            
+            let parameters = serde_json::json!({
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            });
+            
+            llm::chat::Tool {
+                tool_type: "function".to_string(),
+                function: llm::chat::FunctionTool {
+                    name: tool_info.name.clone(),
+                    description: tool_info.description.clone(),
+                    parameters,
+                },
+            }
+        }).collect()
+    }
+
     /// Generate response with optional tool calling support
     pub async fn generate(
         &self,
@@ -369,18 +407,51 @@ impl LlmClient {
         // Create a channel for streaming chunks
         let (tx, rx) = mpsc::channel(32);
 
-        // Get the provider's streaming response
-        let mut stream = self.provider.chat_stream(&chat_messages).await
+        // Get tools in llm crate format
+        let tools = self.get_llm_tools().await;
+        let tool_count = tools.len();
+        debug!("Streaming with {} tools available", tool_count);
+
+        // Get the provider's streaming response with tools
+        let mut stream = self.provider.chat_stream_with_tools(&chat_messages, Some(&tools)).await
             .context("Failed to start streaming chat with LLM provider")?;
 
         // Spawn a task to forward stream items to the channel
         tokio::spawn(async move {
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
-                    Ok(text) => {
-                        if tx.send(Ok(text)).await.is_err() {
-                            // Receiver dropped, stop streaming
-                            break;
+                    Ok(chunk) => {
+                        use llm::chat::StreamChunk;
+                        
+                        match chunk {
+                            StreamChunk::Text(text) => {
+                                if tx.send(Ok(text)).await.is_err() {
+                                    // Receiver dropped, stop streaming
+                                    break;
+                                }
+                            }
+                            StreamChunk::ToolUseComplete { index, tool_call } => {
+                                // For now, just log tool calls but don't send them to the stream
+                                // Tool execution will be handled in non-streaming mode
+                                tracing::debug!("Tool call received in stream (#{index}): {} with args: {}",
+                                    tool_call.function.name, tool_call.function.arguments);
+                                
+                                // Send a placeholder message to user indicating tool is being called
+                                let tool_msg = format!("\n\n🔧 Calling tool: {}\n", tool_call.function.name);
+                                if tx.send(Ok(tool_msg)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            StreamChunk::ToolUseStart { index, id, name } => {
+                                tracing::debug!("Tool use started: {} (#{index}, id: {id})", name);
+                            }
+                            StreamChunk::ToolUseInputDelta { index, partial_json } => {
+                                tracing::debug!("Tool input delta (#{index}): {}", partial_json);
+                            }
+                            StreamChunk::Done { stop_reason } => {
+                                tracing::debug!("Stream done: {}", stop_reason);
+                                break;
+                            }
                         }
                     }
                     Err(e) => {
