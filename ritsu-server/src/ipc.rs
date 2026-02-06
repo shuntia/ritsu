@@ -258,13 +258,45 @@ async fn handle_send_message_streaming(
         Ok(rx) => rx,
         Err(e) => {
             error!("Failed to start streaming: {}", e);
-            // Send error as a message chunk so GUI knows what happened
+            
+            // Fallback: Try non-streaming request
+            warn!("Attempting fallback to non-streaming request...");
             let push = ServerPush::MessageChunk {
-                content: format!("❌ Failed to connect to LLM: {}\n\nPlease check that Ollama is running and the model is available.", e),
-                is_final: true,
+                content: "⚠️ Streaming failed, trying non-streaming mode...\n\n".to_string(),
+                is_final: false,
             };
             send_push(stream, push).await?;
-            return Err(e);
+            
+            match llm_client.generate(&messages, system_prompt.as_deref()).await {
+                Ok(response) => {
+                    info!("Non-streaming fallback succeeded");
+                    let push = ServerPush::MessageChunk {
+                        content: response.content.clone(),
+                        is_final: true,
+                    };
+                    send_push(stream, push).await?;
+                    
+                    // Store the response
+                    let full_response = format!("⚠️ Streaming failed, trying non-streaming mode...\n\n{}", response.content);
+                    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None, None).await {
+                        warn!("Failed to store assistant turn: {}", e);
+                    }
+                    if let Err(e) = memory.store_conversation("assistant", &full_response).await {
+                        warn!("Failed to store assistant response: {}", e);
+                    }
+                    
+                    return Ok(());
+                }
+                Err(fallback_error) => {
+                    error!("Non-streaming fallback also failed: {}", fallback_error);
+                    let push = ServerPush::MessageChunk {
+                        content: format!("❌ Both streaming and non-streaming failed.\n\nStreaming error: {}\nFallback error: {}\n\nPlease check that Ollama is running and the model is available.", e, fallback_error),
+                        is_final: true,
+                    };
+                    send_push(stream, push).await?;
+                    return Err(e.context(format!("Fallback also failed: {}", fallback_error)));
+                }
+            }
         }
     };
 
