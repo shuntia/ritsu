@@ -344,7 +344,6 @@ impl LlmClient {
         // Add conversation messages
         for (i, msg) in messages.iter().enumerate() {
             let message_builder = match msg.role.as_str() {
-                "user" => ChatMessage::user(),
                 "assistant" => ChatMessage::assistant(),
                 _ => ChatMessage::user(),
             };
@@ -382,7 +381,7 @@ impl LlmClient {
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(Err(anyhow::anyhow!("Streaming error: {}", e))).await;
+                        let _ = tx.send(Err(anyhow::anyhow!("Streaming error: {e}"))).await;
                         break;
                     }
                 }

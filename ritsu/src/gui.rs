@@ -96,7 +96,7 @@ pub struct RitsuGui {
     streaming_message_index: Option<usize>, // Index of message being streamed to
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionStatus {
     Connected,
     Disconnected,
@@ -190,12 +190,11 @@ impl RitsuGui {
                 Task::none()
             }
             Message::Tick => {
-                let mut needs_animation = false;
-                
                 // Animate spinner if loading
+                let mut needs_animation = self.is_loading;
+                
                 if self.is_loading {
                     self.animation_frame = (self.animation_frame + 1) % 4;
-                    needs_animation = true;
                 }
                 
                 // Animate sidebar transition
@@ -208,7 +207,7 @@ impl RitsuGui {
                 }
                 
                 // Animate message fade-ins
-                for (_i, msg) in self.messages.iter_mut().enumerate() {
+                for msg in &mut self.messages {
                     if msg.opacity < 1.0 {
                         msg.opacity = (msg.opacity + 0.1).min(1.0);
                         needs_animation = true;
@@ -268,8 +267,6 @@ impl RitsuGui {
                     Task::batch([
                         Task::run(
                             {
-                                let content = content.clone();
-                                let session_id = session_id.clone();
                                 stream::channel(100, move |mut sender: futures::channel::mpsc::Sender<Message>| async move {
                                     let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
                                     match client.send_message_streaming(content, Some(session_id)).await {
@@ -418,11 +415,11 @@ impl RitsuGui {
                                 Ok(ritsu_common::protocol::ServerResponse::Error { message }) => {
                                     Message::MemoryLoaded(Err(message))
                                 }
-                                _ => Message::MemoryLoaded(Err("Unexpected response".to_string())),
+                                Ok(_) | Err(_) => Message::MemoryLoaded(Err("Unexpected response".to_string())),
                             },
                         )
                     }
-                    _ => Task::none(),
+                    ViewState::Chat => Task::none(),
                 }
             }
             Message::LoadSession(session_id) => {
@@ -489,7 +486,6 @@ impl RitsuGui {
                     async move {
                         let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
                         let status = match new_status.as_str() {
-                            "pending" => ritsu_common::protocol::TaskStatus::Pending,
                             "in_progress" => ritsu_common::protocol::TaskStatus::InProgress,
                             "completed" => ritsu_common::protocol::TaskStatus::Completed,
                             "cancelled" => ritsu_common::protocol::TaskStatus::Cancelled,
@@ -744,11 +740,10 @@ impl RitsuGui {
         let status_text = match &self.connection_status {
             ConnectionStatus::Connected => "Connected".to_string(),
             ConnectionStatus::Disconnected => {
-                if let Some(countdown) = self.retry_countdown {
-                    format!("Reconnecting in {}s...", countdown)
-                } else {
-                    "Disconnected".to_string()
-                }
+                self.retry_countdown.map_or_else(
+                    || "Disconnected".to_string(),
+                    |countdown| format!("Reconnecting in {countdown}s...")
+                )
             }
             ConnectionStatus::Reconnecting => "Connecting...".to_string(),
             ConnectionStatus::Error(msg) => format!("Error: {}", msg),
@@ -1130,17 +1125,63 @@ impl RitsuGui {
                             }
                         });
                     
+                    // Build message column with optional thinking section
+                    let mut message_col = column![
+                        text(&msg.content)
+                            .size(14)
+                            .color(final_text_color),
+                        text(time_str)
+                            .size(11)
+                            .color(timestamp_color)
+                    ]
+                    .spacing(4);
+                    
+                    // Add thinking section if present
+                    if let Some(thinking_text) = &msg.thinking {
+                        let thinking_button_color = text_color; // Copy for closure
+                        let thinking_toggle_btn = button(text(if msg.show_thinking { "🧠 Hide thinking" } else { "🧠 Show thinking" }).size(11))
+                            .on_press(Message::ToggleThinking(idx))
+                            .padding([2, 6])
+                            .style(move |_theme: &iced::Theme, _status| {
+                                button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.05))),
+                                    text_color: thinking_button_color,
+                                    border: iced::Border {
+                                        radius: 4.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::Style::default()
+                                }
+                            });
+                        
+                        message_col = message_col.push(thinking_toggle_btn);
+                        
+                        if msg.show_thinking {
+                            let mut thinking_text_color = text_color;
+                            thinking_text_color.a = opacity * 0.7;
+                            
+                            message_col = message_col.push(
+                                container(
+                                    text(thinking_text)
+                                        .size(13)
+                                        .color(thinking_text_color)
+                                        .font(iced::Font::MONOSPACE)
+                                )
+                                .padding(8)
+                                .style(move |_theme: &iced::Theme| container::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.2))),
+                                    border: iced::Border {
+                                        radius: 6.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..container::Style::default()
+                                })
+                            );
+                        }
+                    }
+                    
                     row![
-                        column![
-                            text(&msg.content)
-                                .size(14)
-                                .color(final_text_color),
-                            text(time_str)
-                                .size(11)
-                                .color(timestamp_color)
-                        ]
-                        .spacing(4)
-                        .width(iced::Length::Fill),
+                        message_col.width(iced::Length::Fill),
                         copy_btn,
                     ]
                     .spacing(8)

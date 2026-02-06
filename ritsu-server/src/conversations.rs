@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationTurn {
@@ -224,7 +224,10 @@ impl ConversationManager {
             // Build context from turns
             let mut context = String::new();
             for (role, content) in &turns {
-                context.push_str(&format!("{}: {}\n", role, content));
+                context.push_str(role);
+                context.push_str(": ");
+                context.push_str(content);
+                context.push('\n');
             }
             
             context
@@ -235,8 +238,7 @@ impl ConversationManager {
             crate::llm::Message {
                 role: "user".to_string(),
                 content: format!(
-                    "Based on this conversation start, generate a very short title (2-5 words max):\n\n{}\n\nTitle:",
-                    context
+                    "Based on this conversation start, generate a very short title (2-5 words max):\n\n{context}\n\nTitle:"
                 ),
             }
         ];
@@ -349,6 +351,7 @@ mod tests {
             "test_session",
             "user",
             "Hello",
+            None,
             None,
             None,
         ).await.unwrap();

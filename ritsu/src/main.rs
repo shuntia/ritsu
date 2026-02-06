@@ -236,7 +236,7 @@ fn main() -> Result<()> {
                     Commands::Task(cmd) => commands::task::handle(cmd).await?,
                     Commands::Prompt(cmd) => commands::prompt::handle(cmd).await?,
                     Commands::Export { session, output, format } => {
-                        commands::export::export_conversation(session.as_deref(), &output, &format).await?
+                        commands::export::export_conversation(session.as_deref(), &output, &format).await?;
                     }
                     Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
                     Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,

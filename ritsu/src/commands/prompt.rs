@@ -84,24 +84,24 @@ async fn edit_prompt() -> Result<()> {
     let new_content = std::fs::read_to_string(&temp_path)
         .context("Failed to read edited prompt")?;
     
-    // Send to server if changed
-    if new_content != current_content {
-        let response = client.send_request(ClientRequest::SetSystemPrompt { 
-            content: new_content 
-        }).await?;
-        
-        match response {
-            ServerResponse::Success { message } => {
-                println!("{}", message);
-                Ok(())
-            }
-            ServerResponse::Error { message } => {
-                anyhow::bail!("Failed to update system prompt: {}", message);
-            }
-            _ => anyhow::bail!("Unexpected response from server"),
+    // Send to server
+    let response = client.send_request(ClientRequest::SetSystemPrompt { 
+        content: new_content.clone()
+    }).await?;
+    
+    match response {
+        ServerResponse::Success { message } => {
+            let msg = if new_content != current_content {
+                message
+            } else {
+                "No changes made".to_string()
+            };
+            println!("{}", msg);
+            Ok(())
         }
-    } else {
-        println!("No changes made.");
-        Ok(())
+        ServerResponse::Error { message } => {
+            anyhow::bail!("Failed to update system prompt: {}", message);
+        }
+        _ => anyhow::bail!("Unexpected response from server"),
     }
 }
