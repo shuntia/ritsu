@@ -145,23 +145,23 @@ async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
     let mut server_stream = connect_to_server().await?;
 
     loop {
-        // Read request from GUI
+        // Read request from GUI (using big-endian to match IpcClient)
         let mut len_buf = [0u8; 4];
         if stream.read_exact(&mut len_buf).await.is_err() {
             break; // GUI disconnected
         }
 
-        let len = u32::from_le_bytes(len_buf) as usize;
+        let len = u32::from_be_bytes(len_buf) as usize;
         if len > 10_000_000 {
-            warn!("Message too large from GUI");
+            warn!("Message too large from GUI: {} bytes", len);
             break;
         }
 
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf).await?;
 
-        // Proxy to server
-        let len_bytes = (buf.len() as u32).to_le_bytes();
+        // Proxy to server (keep big-endian)
+        let len_bytes = (buf.len() as u32).to_be_bytes();
         server_stream.write_all(&len_bytes).await?;
         server_stream.write_all(&buf).await?;
         server_stream.flush().await?;
@@ -170,12 +170,12 @@ async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
         let mut len_buf = [0u8; 4];
         server_stream.read_exact(&mut len_buf).await?;
 
-        let len = u32::from_le_bytes(len_buf) as usize;
+        let len = u32::from_be_bytes(len_buf) as usize;
         let mut buf = vec![0u8; len];
         server_stream.read_exact(&mut buf).await?;
 
         // Forward to GUI
-        let len_bytes = (buf.len() as u32).to_le_bytes();
+        let len_bytes = (buf.len() as u32).to_be_bytes();
         stream.write_all(&len_bytes).await?;
         stream.write_all(&buf).await?;
         stream.flush().await?;
