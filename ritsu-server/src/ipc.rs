@@ -33,6 +33,7 @@ pub struct IpcServer {
 }
 
 impl IpcServer {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         socket_path: String,
         memory: Arc<MemoryManager>,
@@ -89,6 +90,7 @@ impl IpcServer {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_client(
     mut stream: UnixStream,
     memory: Arc<MemoryManager>,
@@ -191,6 +193,7 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
     Ok(Some(request))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_send_message_streaming(
     stream: &mut UnixStream,
     content: String,
@@ -354,7 +357,9 @@ async fn handle_send_message_streaming(
                 chunk_count += 1;
                 debug!("Received chunk #{}: {} bytes", chunk_count, chunk.len());
                 
-                if !chunk.is_empty() {
+                if chunk.is_empty() {
+                    debug!("Skipping empty chunk");
+                } else {
                     full_response.push_str(&chunk);
                     
                     // Send chunk as push notification
@@ -363,8 +368,6 @@ async fn handle_send_message_streaming(
                         is_final: false,
                     };
                     send_push(stream, push).await?;
-                } else {
-                    debug!("Skipping empty chunk");
                 }
             }
             Err(e) => {
