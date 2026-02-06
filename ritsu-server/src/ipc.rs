@@ -691,6 +691,28 @@ async fn handle_request(
             }
         }
         
+        ClientRequest::GetConversationHistory { session_id, limit } => {
+            match conversation_manager.get_history(&session_id, limit).await {
+                Ok(turns) => {
+                    let turn_infos = turns
+                        .into_iter()
+                        .map(|t| ritsu_common::protocol::ConversationTurn {
+                            turn_number: t.turn_number,
+                            role: t.role,
+                            content: t.content,
+                            tool_calls: t.tool_calls,
+                            tool_results: t.tool_results,
+                        })
+                        .collect();
+                    
+                    ServerResponse::ConversationHistory { turns: turn_infos }
+                }
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to get conversation history: {}", e),
+                },
+            }
+        }
+        
         ClientRequest::ClearMemory { confirm } => {
             if !confirm {
                 return ServerResponse::Error {

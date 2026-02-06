@@ -34,6 +34,7 @@ pub enum Message {
     SwitchView(ViewState),
     LoadSession(String),
     SessionsLoaded(Vec<SessionInfo>),
+    ConversationHistoryLoaded(Result<Vec<ritsu_common::protocol::ConversationTurn>, String>),
     TasksLoaded(Vec<TaskInfo>),
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
@@ -362,10 +363,47 @@ impl RitsuGui {
                 }
             }
             Message::LoadSession(session_id) => {
-                // TODO: Load conversation history for this session
+                // Load conversation history for this session
+                let sid = session_id.clone();
                 self.session_id = session_id;
                 self.messages.clear();
                 self.current_view = ViewState::Chat;
+                self.is_loading = true;
+                
+                Task::perform(
+                    async move {
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        client.get_conversation_history(sid, 100).await
+                    },
+                    |result| match result {
+                        Ok(turns) => Message::ConversationHistoryLoaded(Ok(turns)),
+                        Err(e) => Message::ConversationHistoryLoaded(Err(e.to_string())),
+                    },
+                )
+            }
+            Message::ConversationHistoryLoaded(result) => {
+                self.is_loading = false;
+                match result {
+                    Ok(turns) => {
+                        // Convert conversation turns to chat messages
+                        for turn in turns {
+                            let is_user = turn.role == "user";
+                            self.messages.push(ChatMessage {
+                                content: turn.content,
+                                is_user,
+                                opacity: 1.0, // No fade-in for loaded messages
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        // Show error message in chat
+                        self.messages.push(ChatMessage {
+                            content: format!("Error loading conversation history: {}", e),
+                            is_user: false,
+                            opacity: 1.0,
+                        });
+                    }
+                }
                 Task::none()
             }
             Message::SessionsLoaded(sessions) => {

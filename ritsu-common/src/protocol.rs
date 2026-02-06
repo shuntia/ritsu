@@ -60,6 +60,11 @@ pub enum ClientRequest {
     },
     /// Subscribe to server push notifications
     Subscribe,
+    /// Get conversation history for a session
+    GetConversationHistory {
+        session_id: String,
+        limit: i64,
+    },
 }
 
 /// Server response to client
@@ -81,6 +86,8 @@ pub enum ServerResponse {
     Memory { content: String },
     /// List of conversation sessions
     Sessions { sessions: Vec<SessionInfo> },
+    /// Conversation history (list of turns)
+    ConversationHistory { turns: Vec<ConversationTurn> },
 }
 
 /// Server push notification to client
@@ -139,6 +146,15 @@ pub struct SessionInfo {
     pub started_at: String,
     pub last_activity: String,
     pub turn_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationTurn {
+    pub turn_number: i64,
+    pub role: String,
+    pub content: String,
+    pub tool_calls: Option<String>,
+    pub tool_results: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

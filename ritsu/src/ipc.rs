@@ -48,6 +48,20 @@ impl IpcClient {
         }
     }
     
+    /// Get conversation history for a session
+    pub async fn get_conversation_history(
+        &self,
+        session_id: String,
+        limit: i64,
+    ) -> Result<Vec<ritsu_common::protocol::ConversationTurn>> {
+        let request = ClientRequest::GetConversationHistory { session_id, limit };
+        match self.send_request(request).await? {
+            ServerResponse::ConversationHistory { turns } => Ok(turns),
+            ServerResponse::Error { message } => anyhow::bail!(message),
+            _ => anyhow::bail!("Unexpected response type"),
+        }
+    }
+    
     /// Send a message and subscribe to streaming responses
     /// Returns a channel receiver that yields message chunks
     pub async fn send_message_streaming(
