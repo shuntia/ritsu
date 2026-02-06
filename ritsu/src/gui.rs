@@ -11,7 +11,6 @@ use iced::{
     stream,
 };
 use std::time::Duration;
-use futures::StreamExt;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
