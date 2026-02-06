@@ -50,10 +50,7 @@ async fn main() -> Result<()> {
 
     info!("Starting ritsu-server v{}", env!("CARGO_PKG_VERSION"));
 
-    // Auto-start Ollama if installed but not running
-    start_ollama_if_needed().await;
-
-    // Load configuration
+    // Load configuration first to get model name for Ollama warmup
     let mut config = if let Some(config_path) = cli.config {
         info!("Loading configuration from: {}", config_path.display());
         config::Config::load_from_path(&config_path)?
@@ -72,6 +69,11 @@ async fn main() -> Result<()> {
         info!("Overriding database path to: {}", database_path);
         config.server.database_path = database_path;
     }
+
+    // Auto-start Ollama if installed but not running (with model name from config)
+    let model_name = config.llm.backends.first()
+        .map_or("llama3.2:3b", |b| b.model.as_str()); // Fallback only if no backends configured
+    start_ollama_if_needed(model_name).await;
 
     // Initialize database
     let db = database::Database::new(&config.server.database_path)?;
@@ -181,7 +183,7 @@ async fn main() -> Result<()> {
 }
 
 /// Check if Ollama is installed and start it if not already running
-async fn start_ollama_if_needed() {
+async fn start_ollama_if_needed(model_name: &str) {
     use std::process::Command;
     
     // Check if ollama is installed
@@ -274,7 +276,10 @@ async fn start_ollama_if_needed() {
             }
             
             // Now do a warmup request to ensure the model is actually loaded
-            tracing::info!("Warming up Ollama model (this may take 5-10 seconds)...");
+            tracing::info!("Warming up Ollama model '{model_name}' (this may take 5-10 seconds)...");
+            let warmup_body = format!(
+                r#"{{"model":"{model_name}","messages":[{{"role":"user","content":"hi"}}],"stream":false}}"#
+            );
             let warmup = tokio::time::timeout(
                 tokio::time::Duration::from_secs(60),
                 tokio::process::Command::new("curl")
@@ -282,7 +287,7 @@ async fn start_ollama_if_needed() {
                         "-s",
                         "-X", "POST",
                         "http://localhost:11434/api/chat",
-                        "-d", r#"{"model":"llama3.2:3b","messages":[{"role":"user","content":"hi"}],"stream":false}"#,
+                        "-d", &warmup_body,
                         "-H", "Content-Type: application/json"
                     ])
                     .output()
