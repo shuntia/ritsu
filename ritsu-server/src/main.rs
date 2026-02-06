@@ -247,8 +247,29 @@ async fn start_ollama_if_needed() {
     match result {
         Ok(_child) => {
             tracing::info!("Ollama server started in background");
-            // Give it a moment to start
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            // Wait for Ollama to be ready (can take several seconds to load model)
+            tracing::info!("Waiting for Ollama to be ready...");
+            for attempt in 1..=15 {
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                
+                let health_check = tokio::process::Command::new("curl")
+                    .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:11434/"])
+                    .output()
+                    .await;
+                
+                if let Ok(output) = health_check {
+                    let status_code = String::from_utf8_lossy(&output.stdout);
+                    if status_code == "200" {
+                        tracing::info!("Ollama ready after {} seconds", attempt * 2);
+                        return;
+                    }
+                }
+                
+                if attempt < 15 {
+                    tracing::debug!("Ollama not ready yet, retrying... (attempt {}/15)", attempt);
+                }
+            }
+            tracing::warn!("Ollama failed to become ready after 30 seconds");
         }
         Err(e) => {
             tracing::warn!("Failed to start Ollama server: {}", e);
