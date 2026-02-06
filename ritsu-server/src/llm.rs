@@ -90,7 +90,8 @@ impl LlmClient {
             .backend(provider_type)
             .model(&backend.model)
             .max_tokens(2048)
-            .temperature(0.7);
+            .temperature(0.7)
+            .timeout_seconds(120); // 2 minutes timeout for streaming (default is 30s)
 
         if !api_key.is_empty() {
             builder = builder.api_key(api_key);
