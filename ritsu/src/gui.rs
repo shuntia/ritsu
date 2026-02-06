@@ -47,6 +47,7 @@ pub enum Message {
     TaskPrioritySelected(String),
     CreateTaskSubmit,
     CancelTaskCreate,
+    CopyMessage(usize),
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
     RetryConnection,
@@ -106,6 +107,7 @@ struct ChatMessage {
     content: String,
     is_user: bool,
     opacity: f32, // For fade-in animation
+    timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 impl RitsuGui {
@@ -239,6 +241,7 @@ impl RitsuGui {
                         content: content.clone(),
                         is_user: true,
                         opacity: 0.0, // Start invisible for fade-in
+                        timestamp: chrono::Utc::now(),
                     });
                     self.input.clear();
                     self.is_loading = true;
@@ -249,6 +252,7 @@ impl RitsuGui {
                         content: String::new(),
                         is_user: false,
                         opacity: 1.0,
+                        timestamp: chrono::Utc::now(),
                     });
                     self.streaming_message_index = Some(self.messages.len() - 1);
 
@@ -443,6 +447,7 @@ impl RitsuGui {
                                 content: turn.content,
                                 is_user,
                                 opacity: 1.0, // No fade-in for loaded messages
+                                timestamp: chrono::Utc::now(), // Use current time as fallback
                             });
                         }
                     }
@@ -452,6 +457,7 @@ impl RitsuGui {
                             content: format!("Error loading conversation history: {}", e),
                             is_user: false,
                             opacity: 1.0,
+                            timestamp: chrono::Utc::now(),
                         });
                     }
                 }
@@ -641,6 +647,7 @@ impl RitsuGui {
                         content: "✓ Connected to server".to_string(),
                         is_user: false,
                         opacity: 0.0,
+                        timestamp: chrono::Utc::now(),
                     });
                 }
                 
@@ -650,6 +657,13 @@ impl RitsuGui {
                     return Task::perform(async {}, |()| Message::Tick);
                 }
                 
+                Task::none()
+            }
+            Message::CopyMessage(idx) => {
+                if let Some(msg) = self.messages.get(idx) {
+                    // Use iced clipboard
+                    return iced::clipboard::write(msg.content.clone());
+                }
                 Task::none()
             }
             Message::RetryConnection => {
@@ -1020,9 +1034,9 @@ impl RitsuGui {
     }
 
     fn view_chat(&self) -> Element<'_, Message> {
-        let mut messages_view = self.messages.iter().fold(
+        let mut messages_view = self.messages.iter().enumerate().fold(
             column![].spacing(12),
-            |col, msg| {
+            |col, (idx, msg)| {
                 let opacity = msg.opacity;
                 let (mut bg_color, text_color, align) = if msg.is_user {
                     (iced::Color::from_rgb(0.2, 0.35, 0.6), iced::Color::WHITE, iced::alignment::Horizontal::Right)
@@ -1036,21 +1050,72 @@ impl RitsuGui {
                 let mut final_text_color = text_color;
                 final_text_color.a = opacity;
                 
-                let message_container = container(
-                    text(&msg.content)
-                        .size(14)
-                        .color(final_text_color)
-                )
-                .padding(12)
-                .style(move |_theme: &iced::Theme| container::Style {
-                    background: Some(iced::Background::Color(bg_color)),
-                    border: iced::Border {
-                        radius: 12.0.into(),
-                        ..Default::default()
-                    },
-                    ..container::Style::default()
-                })
-                .max_width(600);
+                // Format timestamp
+                let local_time: chrono::DateTime<chrono::Local> = msg.timestamp.into();
+                let time_str = local_time.format("%H:%M").to_string();
+                
+                // Create timestamp color
+                let mut timestamp_color = text_color;
+                timestamp_color.a = opacity * 0.6;
+                
+                // Add copy button for assistant messages
+                let message_with_copy: Element<'_, Message> = if !msg.is_user {
+                    let button_text_color = text_color; // Copy for closure
+                    let copy_btn = button(text("📋").size(12))
+                        .on_press(Message::CopyMessage(idx))
+                        .padding(4)
+                        .style(move |_theme: &iced::Theme, _status| {
+                            button::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.1))),
+                                text_color: button_text_color,
+                                border: iced::Border {
+                                    radius: 4.0.into(),
+                                    ..Default::default()
+                                },
+                                ..button::Style::default()
+                            }
+                        });
+                    
+                    row![
+                        column![
+                            text(&msg.content)
+                                .size(14)
+                                .color(final_text_color),
+                            text(time_str)
+                                .size(11)
+                                .color(timestamp_color)
+                        ]
+                        .spacing(4)
+                        .width(iced::Length::Fill),
+                        copy_btn,
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Start)
+                    .into()
+                } else {
+                    column![
+                        text(&msg.content)
+                            .size(14)
+                            .color(final_text_color),
+                        text(time_str)
+                            .size(11)
+                            .color(timestamp_color)
+                    ]
+                    .spacing(4)
+                    .into()
+                };
+                
+                let message_container = container(message_with_copy)
+                    .padding(12)
+                    .style(move |_theme: &iced::Theme| container::Style {
+                        background: Some(iced::Background::Color(bg_color)),
+                        border: iced::Border {
+                            radius: 12.0.into(),
+                            ..Default::default()
+                        },
+                        ..container::Style::default()
+                    })
+                    .max_width(600);
                 
                 let row_content = row![container(message_container).width(iced::Length::Fill).align_x(align)];
                 
