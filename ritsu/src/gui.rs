@@ -271,6 +271,11 @@ impl RitsuGui {
                                     let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
                                     match client.send_message_streaming(content, Some(session_id)).await {
                                         Ok(mut rx) => {
+                                            // Streaming started successfully - update connection status
+                                            let _ = sender.try_send(Message::ConnectionStatusChanged(
+                                                ConnectionStatus::Connected
+                                            ));
+                                            
                                             while let Some(push) = rx.recv().await {
                                                 if let ritsu_common::protocol::ServerPush::MessageChunk { content, is_final } = push {
                                                     let _ = sender.try_send(Message::MessageChunk(content.clone(), is_final));
@@ -445,6 +450,9 @@ impl RitsuGui {
                 self.is_loading = false;
                 match result {
                     Ok(turns) => {
+                        // Connection successful
+                        self.connection_status = ConnectionStatus::Connected;
+                        
                         // Convert conversation turns to chat messages
                         for turn in turns {
                             let is_user = turn.role == "user";
@@ -473,11 +481,21 @@ impl RitsuGui {
                 Task::none()
             }
             Message::SessionsLoaded(sessions) => {
+                // Sessions loaded successfully - update connection status
+                let should_update = !sessions.is_empty() || matches!(self.connection_status, ConnectionStatus::Disconnected | ConnectionStatus::Error(_));
                 self.sessions = sessions;
+                if should_update {
+                    self.connection_status = ConnectionStatus::Connected;
+                }
                 Task::none()
             }
             Message::TasksLoaded(tasks) => {
+                // Tasks loaded successfully - update connection status
+                let should_update = !tasks.is_empty() || matches!(self.connection_status, ConnectionStatus::Disconnected | ConnectionStatus::Error(_));
                 self.tasks = tasks;
+                if should_update {
+                    self.connection_status = ConnectionStatus::Connected;
+                }
                 Task::none()
             }
             Message::TaskStatusChanged(task_id, new_status) => {
