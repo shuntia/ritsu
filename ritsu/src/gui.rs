@@ -39,6 +39,7 @@ pub enum Message {
     TaskStatusChanged(i64, String), // task_id, new_status
     TaskDeleted(i64), // task_id
     TaskOperationComplete(Result<(), String>),
+    MemoryLoaded(Result<String, String>), // Memory query result
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
     RetryConnection,
@@ -71,6 +72,7 @@ pub struct RitsuGui {
     current_view: ViewState,
     sessions: Vec<SessionInfo>,
     tasks: Vec<TaskInfo>,
+    memory_content: String, // Loaded memory/notes content
     sidebar_visible: bool,
     sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
     connection_status: ConnectionStatus,
@@ -107,6 +109,7 @@ impl RitsuGui {
                 current_view: ViewState::Chat,
                 sessions: Vec::new(),
                 tasks: Vec::new(),
+                memory_content: String::new(),
                 sidebar_visible: false,
                 sidebar_animation: 0.0,
                 connection_status: ConnectionStatus::Disconnected,
@@ -142,6 +145,7 @@ impl Default for RitsuGui {
             current_view: ViewState::Chat,
             sessions: Vec::new(),
             tasks: Vec::new(),
+            memory_content: String::new(),
             sidebar_visible: false,
             sidebar_animation: 0.0,
             connection_status: ConnectionStatus::Disconnected,
@@ -362,6 +366,28 @@ impl RitsuGui {
                             },
                         )
                     }
+                    ViewState::Memory => {
+                        // Fetch memory (notes and recent summaries)
+                        Task::perform(
+                            async {
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let request = ritsu_common::protocol::ClientRequest::QueryMemory {
+                                    query_type: ritsu_common::protocol::MemoryQueryType::Notes,
+                                    date_range: None,
+                                };
+                                client.send_request(request).await
+                            },
+                            |result| match result {
+                                Ok(ritsu_common::protocol::ServerResponse::Memory { content }) => {
+                                    Message::MemoryLoaded(Ok(content))
+                                }
+                                Ok(ritsu_common::protocol::ServerResponse::Error { message }) => {
+                                    Message::MemoryLoaded(Err(message))
+                                }
+                                _ => Message::MemoryLoaded(Err("Unexpected response".to_string())),
+                            },
+                        )
+                    }
                     _ => Task::none(),
                 }
             }
@@ -496,6 +522,17 @@ impl RitsuGui {
                         Task::none()
                     }
                 }
+            }
+            Message::MemoryLoaded(result) => {
+                match result {
+                    Ok(content) => {
+                        self.memory_content = content;
+                    }
+                    Err(e) => {
+                        self.memory_content = format!("Error loading memory: {}", e);
+                    }
+                }
+                Task::none()
             }
             Message::ToggleSidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
@@ -1009,21 +1046,24 @@ impl RitsuGui {
     fn view_memory(&self) -> Element<'_, Message> {
         let header = text("Memory & Notes").size(24);
         
-        let memory_content = column![
-            text("Notes:").size(18),
-            text("(Coming soon: View and manage your notes)").size(14),
-            text("").size(10),
-            text("Daily Summaries:").size(18),
-            text("(Coming soon: View daily conversation summaries)").size(14),
-            text("").size(10),
-            text("Monthly Summaries:").size(18),
-            text("(Coming soon: View monthly summaries)").size(14),
-        ]
-        .spacing(10);
+        let memory_content = if self.memory_content.is_empty() {
+            column![
+                text("Loading memory...").size(14),
+            ]
+        } else {
+            column![
+                scrollable(
+                    text(&self.memory_content)
+                        .size(14)
+                        .width(iced::Length::Fill)
+                )
+                .height(iced::Length::Fill)
+            ]
+        };
 
         let content = column![
             header,
-            scrollable(memory_content).height(iced::Length::Fill),
+            memory_content,
         ]
         .spacing(20)
         .padding(20);
