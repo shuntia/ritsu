@@ -45,7 +45,10 @@
   - [ ] Client daemon handles notifications and window management
 - [ ] Make system prompt configurable (load from config/database)
 - [ ] Support thinking/reasoning display
-- [ ] Generate session titles automatically
+- [x] Generate session titles automatically **DONE**
+  - [x] Add title column to conversations table
+  - [x] Generate titles after 2nd turn using LLM
+  - [x] Display in sessions view
 - [x] Implement session list view - show today's sessions
 - [x] Add typing indicator animation to chat
 - [x] Add memory clear functionality for testing (`ritsu clear-memory`)
