@@ -40,6 +40,13 @@ pub enum Message {
     TaskDeleted(i64), // task_id
     TaskOperationComplete(Result<(), String>),
     MemoryLoaded(Result<String, String>), // Memory query result
+    // Task creation dialog
+    ShowTaskCreateDialog,
+    TaskTitleChanged(String),
+    TaskDescriptionChanged(String),
+    TaskPrioritySelected(String),
+    CreateTaskSubmit,
+    CancelTaskCreate,
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
     RetryConnection,
@@ -73,6 +80,11 @@ pub struct RitsuGui {
     sessions: Vec<SessionInfo>,
     tasks: Vec<TaskInfo>,
     memory_content: String, // Loaded memory/notes content
+    // Task creation dialog state
+    show_task_dialog: bool,
+    task_title_input: String,
+    task_description_input: String,
+    task_priority_input: String,
     sidebar_visible: bool,
     sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
     connection_status: ConnectionStatus,
@@ -110,6 +122,10 @@ impl RitsuGui {
                 sessions: Vec::new(),
                 tasks: Vec::new(),
                 memory_content: String::new(),
+                show_task_dialog: false,
+                task_title_input: String::new(),
+                task_description_input: String::new(),
+                task_priority_input: "medium".to_string(),
                 sidebar_visible: false,
                 sidebar_animation: 0.0,
                 connection_status: ConnectionStatus::Disconnected,
@@ -146,6 +162,10 @@ impl Default for RitsuGui {
             sessions: Vec::new(),
             tasks: Vec::new(),
             memory_content: String::new(),
+            show_task_dialog: false,
+            task_title_input: String::new(),
+            task_description_input: String::new(),
+            task_priority_input: "medium".to_string(),
             sidebar_visible: false,
             sidebar_animation: 0.0,
             connection_status: ConnectionStatus::Disconnected,
@@ -534,6 +554,74 @@ impl RitsuGui {
                 }
                 Task::none()
             }
+            Message::ShowTaskCreateDialog => {
+                self.show_task_dialog = true;
+                // Reset form fields
+                self.task_title_input.clear();
+                self.task_description_input.clear();
+                self.task_priority_input = "medium".to_string();
+                Task::none()
+            }
+            Message::TaskTitleChanged(title) => {
+                self.task_title_input = title;
+                Task::none()
+            }
+            Message::TaskDescriptionChanged(desc) => {
+                self.task_description_input = desc;
+                Task::none()
+            }
+            Message::TaskPrioritySelected(priority) => {
+                self.task_priority_input = priority;
+                Task::none()
+            }
+            Message::CreateTaskSubmit => {
+                if self.task_title_input.trim().is_empty() {
+                    // Don't create empty tasks
+                    return Task::none();
+                }
+                
+                // Close dialog
+                self.show_task_dialog = false;
+                
+                // Send create request
+                let title = self.task_title_input.clone();
+                let description = if self.task_description_input.trim().is_empty() {
+                    None
+                } else {
+                    Some(self.task_description_input.clone())
+                };
+                let priority = match self.task_priority_input.as_str() {
+                    "low" => ritsu_common::protocol::TaskPriority::Low,
+                    "high" => ritsu_common::protocol::TaskPriority::High,
+                    "urgent" => ritsu_common::protocol::TaskPriority::Urgent,
+                    _ => ritsu_common::protocol::TaskPriority::Medium,
+                };
+                
+                Task::perform(
+                    async move {
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let request = ritsu_common::protocol::ClientRequest::CreateTask {
+                            title,
+                            description,
+                            priority,
+                            due_date: None,
+                            tags: Vec::new(),
+                        };
+                        
+                        match client.send_request(request).await {
+                            Ok(ritsu_common::protocol::ServerResponse::Ok) => Ok(()),
+                            Ok(ritsu_common::protocol::ServerResponse::Error { message }) => Err(message),
+                            Err(e) => Err(e.to_string()),
+                            _ => Err("Unexpected response".to_string()),
+                        }
+                    },
+                    Message::TaskOperationComplete,
+                )
+            }
+            Message::CancelTaskCreate => {
+                self.show_task_dialog = false;
+                Task::none()
+            }
             Message::ToggleSidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
                 // Start animation
@@ -784,9 +872,148 @@ impl RitsuGui {
         let main_layout = column![top_bar, layout]
             .spacing(0);
 
-        container(main_layout)
+        // Add task creation dialog overlay if visible
+        if self.show_task_dialog {
+            let dialog = self.view_task_create_dialog();
+            iced::widget::stack![
+                container(main_layout)
+                    .width(iced::Length::Fill)
+                    .height(iced::Length::Fill),
+                dialog,
+            ]
+            .into()
+        } else {
+            container(main_layout)
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill)
+                .into()
+        }
+    }
+    
+    fn view_task_create_dialog(&self) -> Element<'_, Message> {
+        let dialog_content = column![
+            text("Create New Task").size(20),
+            text("Title:").size(14),
+            text_input("Task title...", &self.task_title_input)
+                .on_input(Message::TaskTitleChanged)
+                .padding(10),
+            text("Description (optional):").size(14),
+            text_input("Task description...", &self.task_description_input)
+                .on_input(Message::TaskDescriptionChanged)
+                .padding(10),
+            text("Priority:").size(14),
+            row![
+                button(text("Low"))
+                    .on_press(Message::TaskPrioritySelected("low".to_string()))
+                    .padding(8)
+                    .style(if self.task_priority_input == "low" {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.6, 0.9))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    } else {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.3, 0.35))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    }),
+                button(text("Medium"))
+                    .on_press(Message::TaskPrioritySelected("medium".to_string()))
+                    .padding(8)
+                    .style(if self.task_priority_input == "medium" {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.6, 0.9))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    } else {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.3, 0.35))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    }),
+                button(text("High"))
+                    .on_press(Message::TaskPrioritySelected("high".to_string()))
+                    .padding(8)
+                    .style(if self.task_priority_input == "high" {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.9, 0.6, 0.2))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    } else {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.3, 0.35))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    }),
+                button(text("Urgent"))
+                    .on_press(Message::TaskPrioritySelected("urgent".to_string()))
+                    .padding(8)
+                    .style(if self.task_priority_input == "urgent" {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.9, 0.2, 0.2))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    } else {
+                        |_theme: &iced::Theme, _status| button::Style {
+                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.3, 0.3, 0.35))),
+                            text_color: iced::Color::WHITE,
+                            ..button::Style::default()
+                        }
+                    }),
+            ]
+            .spacing(10),
+            row![
+                button(text("Cancel"))
+                    .on_press(Message::CancelTaskCreate)
+                    .padding(10)
+                    .style(|_theme: &iced::Theme, _status| button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.4, 0.4, 0.45))),
+                        text_color: iced::Color::WHITE,
+                        ..button::Style::default()
+                    }),
+                button(text("Create"))
+                    .on_press(Message::CreateTaskSubmit)
+                    .padding(10)
+                    .style(|_theme: &iced::Theme, _status| button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.7, 0.3))),
+                        text_color: iced::Color::WHITE,
+                        ..button::Style::default()
+                    }),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(15)
+        .padding(30);
+        
+        let dialog_box = container(dialog_content)
+            .width(500)
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                border: iced::Border {
+                    color: iced::Color::from_rgb(0.3, 0.3, 0.4),
+                    width: 2.0,
+                    radius: 12.0.into(),
+                },
+                ..container::Style::default()
+            });
+        
+        // Center the dialog with a semi-transparent backdrop
+        container(dialog_box)
             .width(iced::Length::Fill)
             .height(iced::Length::Fill)
+            .center(iced::Length::Fill)
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                ..container::Style::default()
+            })
             .into()
     }
 
@@ -955,7 +1182,25 @@ impl RitsuGui {
     }
 
     fn view_tasks(&self) -> Element<'_, Message> {
-        let header = text("Task Manager").size(24);
+        let header = row![
+            text("Task Manager").size(24),
+            button(text("+ New Task").size(14))
+                .on_press(Message::ShowTaskCreateDialog)
+                .padding(8)
+                .style(|_theme: &iced::Theme, _status| {
+                    button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.6, 0.9))),
+                        text_color: iced::Color::WHITE,
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            ..Default::default()
+                        },
+                        ..button::Style::default()
+                    }
+                }),
+        ]
+        .spacing(20)
+        .align_y(iced::Alignment::Center);
         
         let tasks_list = if self.tasks.is_empty() {
             column![text("No tasks found. Create one from chat or memory view.")]
