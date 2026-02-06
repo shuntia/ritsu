@@ -176,7 +176,7 @@ impl Default for ToolRegistry {
 mod tool_impls {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tracing::info;
+    use tracing::{info, warn};
     
     use super::{Tool, ToolParameter};
     use ritsu_common::ToolResult;
@@ -215,19 +215,33 @@ mod tool_impls {
 
                     let urgency = match urgency_str.as_str() {
                         "low" => ritsu_common::protocol::NotificationUrgency::Low,
-                        "urgent" => ritsu_common::protocol::NotificationUrgency::Critical,
+                        "critical" | "urgent" => ritsu_common::protocol::NotificationUrgency::Critical,
                         _ => ritsu_common::protocol::NotificationUrgency::Normal,
                     };
 
-                    state.broadcast_push(ritsu_common::protocol::ServerPush::Notification {
+                    // Send to client daemon instead of broadcast
+                    let request = ritsu_common::protocol::ServerToClientRequest::NotifyUser {
                         title: title.clone(),
                         message: message.clone(),
                         urgency,
-                    }).await;
+                    };
 
-                    info!("Notification sent: [{urgency_str}] {title}: {message}");
-                    
-                    ToolResult::success(format!("Notification sent: {title}"))
+                    match state.send_to_client_daemon(request).await {
+                        Ok(()) => {
+                            info!("Notification sent to client daemon: [{urgency_str}] {title}: {message}");
+                            ToolResult::success(format!("Notification sent: {title}"))
+                        }
+                        Err(e) => {
+                            warn!("Failed to send notification to client daemon: {}", e);
+                            // Fallback to broadcast for backwards compatibility
+                            state.broadcast_push(ritsu_common::protocol::ServerPush::Notification {
+                                title: title.clone(),
+                                message: message.clone(),
+                                urgency,
+                            }).await;
+                            ToolResult::success(format!("Notification sent (fallback): {title}"))
+                        }
+                    }
                 })
             }),
         }
@@ -546,25 +560,32 @@ mod tool_impls {
                 let state = state.clone();
                 Box::pin(async move {
                     let message = args.get("message").cloned();
-                    let urgency_str = args.get("urgency").cloned().unwrap_or_else(|| "normal".to_string());
-
-                    let urgency = match urgency_str.as_str() {
-                        "low" => ritsu_common::protocol::NotificationUrgency::Low,
-                        "urgent" => ritsu_common::protocol::NotificationUrgency::Critical,
-                        _ => ritsu_common::protocol::NotificationUrgency::Normal,
+                    
+                    // Send to client daemon
+                    let request = ritsu_common::protocol::ServerToClientRequest::OpenChat {
+                        message: message.clone(),
+                        session_id: None,
                     };
 
-                    state.broadcast_push(ritsu_common::protocol::ServerPush::OpenChat {
-                        message: message.clone(),
-                        urgency,
-                    }).await;
-
-                    info!("Opening chat with urgency: {urgency_str}");
-                    if let Some(msg) = &message {
-                        info!("With message: {msg}");
+                    match state.send_to_client_daemon(request).await {
+                        Ok(()) => {
+                            info!("Chat window open requested via client daemon");
+                            if let Some(msg) = &message {
+                                info!("With message: {msg}");
+                            }
+                            ToolResult::success("Chat window opened".to_string())
+                        }
+                        Err(e) => {
+                            warn!("Failed to open chat via client daemon: {}", e);
+                            // Fallback to broadcast
+                            let urgency = ritsu_common::protocol::NotificationUrgency::Normal;
+                            state.broadcast_push(ritsu_common::protocol::ServerPush::OpenChat {
+                                message: message.clone(),
+                                urgency,
+                            }).await;
+                            ToolResult::success("Chat window opened (fallback)".to_string())
+                        }
                     }
-                    
-                    ToolResult::success("Chat window opened".to_string())
                 })
             }),
         }
