@@ -60,9 +60,12 @@ pub async fn run() -> Result<()> {
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
+                info!("New GUI connection accepted");
                 tokio::spawn(async move {
                     if let Err(e) = handle_gui_connection(stream).await {
                         error!("Error handling GUI connection: {}", e);
+                    } else {
+                        info!("GUI connection closed gracefully");
                     }
                 });
             }
@@ -141,14 +144,16 @@ async fn handle_tool_request(request: ServerToClientRequest) -> Result<()> {
 }
 
 async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
-    // Connect to server
+    info!("Handling new GUI connection, connecting to server...");
     let mut server_stream = connect_to_server().await?;
+    info!("Connected to server, starting proxy loop");
 
     loop {
         // Read request from GUI (using big-endian to match IpcClient)
         let mut len_buf = [0u8; 4];
         if stream.read_exact(&mut len_buf).await.is_err() {
-            break; // GUI disconnected
+            info!("GUI disconnected");
+            break;
         }
 
         let len = u32::from_be_bytes(len_buf) as usize;
@@ -157,6 +162,7 @@ async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
             break;
         }
 
+        info!("Received {} bytes from GUI, proxying to server", len);
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf).await?;
 
@@ -167,10 +173,12 @@ async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
         server_stream.flush().await?;
 
         // Read response from server
+        info!("Waiting for server response...");
         let mut len_buf = [0u8; 4];
         server_stream.read_exact(&mut len_buf).await?;
 
         let len = u32::from_be_bytes(len_buf) as usize;
+        info!("Server responded with {} bytes, forwarding to GUI", len);
         let mut buf = vec![0u8; len];
         server_stream.read_exact(&mut buf).await?;
 
@@ -179,6 +187,7 @@ async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
         stream.write_all(&len_bytes).await?;
         stream.write_all(&buf).await?;
         stream.flush().await?;
+        info!("Response forwarded successfully");
     }
 
     Ok(())
