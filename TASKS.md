@@ -51,8 +51,9 @@
 - [x] Code quality improvements and warning cleanup
 - [x] Implement session loading - switch to previous conversation (IPC call) **DONE**
 - [x] Implement task status change UI **DONE**
+- [x] Implement task deletion backend **DONE**
+- [x] Implement memory view functionality **DONE**
 - [ ] Implement task create dialog in GUI
-- [ ] Implement memory view - show notes and summaries
 - [x] Implement memory view placeholder
 - [ ] Add streaming responses from LLM (incremental display)
 - [ ] Add connection status indicator in GUI
@@ -106,6 +107,8 @@
 - [x] Removed unused import warning
 - [x] Implemented session loading with conversation history
 - [x] Added task status change and delete UI
+- [x] Completed task deletion backend (full IPC implementation)
+- [x] Implemented memory view with notes display
 - [x] Created session summary documentation
 
 ## Technical Debt
