@@ -92,7 +92,7 @@ pub struct RitsuGui {
     sidebar_visible: bool,
     sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
     connection_status: ConnectionStatus,
-    retry_countdown: Option<u32>, // Seconds until retry
+    retry_countdown_frames: Option<u32>, // Frames until retry (20 FPS = 100 frames = 5 seconds)
     streaming_message_index: Option<usize>, // Index of message being streamed to
 }
 
@@ -136,7 +136,7 @@ impl RitsuGui {
                 sidebar_visible: false,
                 sidebar_animation: 0.0,
                 connection_status: ConnectionStatus::Disconnected,
-                retry_countdown: None,
+                retry_countdown_frames: None,
                 streaming_message_index: None,
             },
             // Test connection on startup
@@ -176,7 +176,7 @@ impl Default for RitsuGui {
             sidebar_visible: false,
             sidebar_animation: 0.0,
             connection_status: ConnectionStatus::Disconnected,
-            retry_countdown: None,
+            retry_countdown_frames: None,
             streaming_message_index: None,
         }
     }
@@ -214,13 +214,13 @@ impl RitsuGui {
                     }
                 }
                 
-                // Countdown retry timer
-                if let Some(countdown) = self.retry_countdown.as_mut() {
-                    if *countdown > 0 {
-                        *countdown -= 1;
+                // Countdown retry timer (20 FPS = 100 frames = 5 seconds)
+                if let Some(frames) = self.retry_countdown_frames.as_mut() {
+                    if *frames > 0 {
+                        *frames -= 1;
                         needs_animation = true;
                     } else {
-                        self.retry_countdown = None;
+                        self.retry_countdown_frames = None;
                         return Task::perform(async {}, |()| Message::RetryConnection);
                     }
                 }
@@ -228,7 +228,7 @@ impl RitsuGui {
                 if needs_animation {
                     Task::perform(
                         async {
-                            tokio::time::sleep(Duration::from_millis(1000)).await; // 1 FPS for countdown
+                            tokio::time::sleep(Duration::from_millis(50)).await; // 20 FPS for smooth animation
                         },
                         |()| Message::Tick,
                     )
@@ -667,21 +667,27 @@ impl RitsuGui {
                 
                 self.connection_status = status;
                 
-                // If we just reconnected, show success message
+                // If we just reconnected, show system notification
                 if was_disconnected && now_connected {
-                    self.messages.push(ChatMessage {
-                        content: "✓ Connected to server".to_string(),
-                        is_user: false,
-                        opacity: 0.0,
-                        timestamp: chrono::Utc::now(),
-                        thinking: None,
-                        show_thinking: false,
-                    });
+                    #[cfg(target_os = "linux")]
+                    {
+                        use notify_rust::{Notification, Timeout};
+                        let _ = Notification::new()
+                            .summary("Ritsu")
+                            .body("Connected to server")
+                            .timeout(Timeout::Milliseconds(3000))
+                            .show();
+                    }
+                    
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        eprintln!("✓ Connected to server");
+                    }
                 }
                 
                 // If disconnected, start retry countdown
                 if matches!(self.connection_status, ConnectionStatus::Disconnected) {
-                    self.retry_countdown = Some(5); // Retry in 5 seconds
+                    self.retry_countdown_frames = Some(100); // Retry in 5 seconds (100 frames at 20 FPS)
                     return Task::perform(async {}, |()| Message::Tick);
                 }
                 
@@ -758,9 +764,9 @@ impl RitsuGui {
         let status_text = match &self.connection_status {
             ConnectionStatus::Connected => "Connected".to_string(),
             ConnectionStatus::Disconnected => {
-                self.retry_countdown.map_or_else(
+                self.retry_countdown_frames.map_or_else(
                     || "Disconnected".to_string(),
-                    |countdown| format!("Reconnecting in {countdown}s...")
+                    |frames| format!("Reconnecting in {}s...", frames.div_ceil(20)) // Convert frames to seconds (round up)
                 )
             }
             ConnectionStatus::Reconnecting => "Connecting...".to_string(),
