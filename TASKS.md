@@ -73,8 +73,8 @@
 
 ### Medium Priority
 - [ ] Add auto-scroll to latest message
-- [ ] Add timestamps to chat messages
-- [ ] Add copy button for assistant messages
+- [x] Add timestamps to chat messages **DONE**
+- [x] Add copy button for assistant messages **DONE**
 - [ ] Add keyboard shortcuts (Ctrl+Enter to send, etc.)
 - [ ] Add configuration UI for preferences
 - [ ] Add trigger management UI
