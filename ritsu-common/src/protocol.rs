@@ -150,6 +150,7 @@ pub struct SessionInfo {
     pub started_at: String,
     pub last_activity: String,
     pub turn_count: i64,
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -298,6 +298,16 @@ async fn handle_send_message_streaming(
         warn!("Failed to store assistant response: {}", e);
     }
 
+    // Check if we need to generate a title for this session
+    if let Ok(needs_title) = conversation_manager.needs_title_generation(&session_id).await {
+        if needs_title {
+            info!("Generating title for session {}", session_id);
+            if let Err(e) = conversation_manager.generate_title(&session_id, llm_client).await {
+                warn!("Failed to generate session title: {}", e);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -689,6 +699,7 @@ async fn handle_request(
                             started_at: s.started_at,
                             last_activity: s.last_activity,
                             turn_count: s.turn_count,
+                            title: s.title,
                         })
                         .collect();
                     

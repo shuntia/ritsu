@@ -3,11 +3,11 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationTurn {
@@ -24,6 +24,7 @@ pub struct ConversationSession {
     pub turn_count: i64,
     pub started_at: String,
     pub last_activity: String,
+    pub title: Option<String>,
 }
 
 pub struct ConversationManager {
@@ -42,7 +43,7 @@ impl ConversationManager {
         
         // Try to get existing session
         let mut stmt = conn.prepare(
-            "SELECT session_id, turn_count, started_at, last_activity 
+            "SELECT session_id, turn_count, started_at, last_activity, title 
              FROM conversations WHERE session_id = ?"
         )?;
         
@@ -52,6 +53,7 @@ impl ConversationManager {
                 turn_count: row.get(1)?,
                 started_at: row.get(2)?,
                 last_activity: row.get(3)?,
+                title: row.get(4)?,
             })
         });
         
@@ -74,6 +76,7 @@ impl ConversationManager {
                 turn_count: 0,
                 started_at: chrono::Utc::now().to_rfc3339(),
                 last_activity: chrono::Utc::now().to_rfc3339(),
+                title: None,
             })
         }
     }
@@ -153,7 +156,7 @@ impl ConversationManager {
         let conn = self.db.lock().await;
         
         let mut stmt = conn.prepare(
-            "SELECT session_id, turn_count, started_at, last_activity 
+            "SELECT session_id, turn_count, started_at, last_activity, title 
              FROM conversations 
              WHERE last_activity > datetime('now', '-1 day')
              ORDER BY last_activity DESC"
@@ -165,6 +168,7 @@ impl ConversationManager {
                 turn_count: row.get(1)?,
                 started_at: row.get(2)?,
                 last_activity: row.get(3)?,
+                title: row.get(4)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -188,6 +192,85 @@ impl ConversationManager {
         }
         
         Ok(deleted)
+    }
+
+    /// Generate a title for a session based on first few turns
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn generate_title(&self, session_id: &str, llm_client: &crate::llm::LlmClient) -> Result<String> {
+        // Build context from first few turns
+        let context = {
+            let conn = self.db.lock().await;
+            
+            // Get first 2-3 turns to generate title from
+            let mut stmt = conn.prepare(
+                "SELECT role, content FROM conversation_turns 
+                 WHERE session_id = ? 
+                 ORDER BY turn_number 
+                 LIMIT 4"
+            )?;
+            
+            let turns: Vec<(String, String)> = stmt.query_map([session_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+            
+            if turns.is_empty() {
+                return Ok("New Conversation".to_string());
+            }
+            
+            // Build context from turns
+            let mut context = String::new();
+            for (role, content) in &turns {
+                context.push_str(&format!("{}: {}\n", role, content));
+            }
+            
+            context
+        }; // conn and stmt dropped here
+        
+        // Ask LLM to generate a short title
+        let messages = vec![
+            crate::llm::Message {
+                role: "user".to_string(),
+                content: format!(
+                    "Based on this conversation start, generate a very short title (2-5 words max):\n\n{}\n\nTitle:",
+                    context
+                ),
+            }
+        ];
+        
+        let response = llm_client.generate(&messages, None).await?;
+        
+        let title = response.content
+            .trim()
+            .trim_matches('"')
+            .to_string();
+        
+        // Store the title
+        let conn = self.db.lock().await;
+        conn.execute(
+            "UPDATE conversations SET title = ? WHERE session_id = ?",
+            [&title, session_id],
+        )?;
+        
+        Ok(title)
+    }
+
+    /// Check if session needs title generation (has turns but no title)
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn needs_title_generation(&self, session_id: &str) -> Result<bool> {
+        let conn = self.db.lock().await;
+        
+        let result: Option<(i64, Option<String>)> = conn.query_row(
+            "SELECT turn_count, title FROM conversations WHERE session_id = ?",
+            [session_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+        ).optional()?;
+        
+        if let Some((turn_count, title)) = result {
+            Ok(turn_count >= 2 && title.is_none())
+        } else {
+            Ok(false)
+        }
     }
 
     /// Clear all conversations and turns (for testing)

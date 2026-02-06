@@ -59,6 +59,7 @@ pub struct SessionInfo {
     started_at: String,
     last_activity: String,
     turn_count: i64,
+    title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -342,6 +343,7 @@ impl RitsuGui {
                                                 started_at: s.started_at,
                                                 last_activity: s.last_activity,
                                                 turn_count: s.turn_count,
+                                                title: s.title,
                                             })
                                             .collect(),
                                     )
@@ -1151,11 +1153,14 @@ impl RitsuGui {
             self.sessions.iter().fold(
                 column![].spacing(10),
                 |col, session| {
+                    let title = session.title.as_ref()
+                        .unwrap_or(&session.session_id);
+                    
                     let session_button = button(
                         column![
-                            text(&session.session_id).size(14),
-                            text(format!("Started: {}", session.started_at)).size(12),
-                            text(format!("{} turns", session.turn_count)).size(12),
+                            text(title).size(16),
+                            text(format!("Started: {}", session.started_at)).size(11),
+                            text(format!("{} turns", session.turn_count)).size(11),
                         ]
                         .spacing(5)
                     )

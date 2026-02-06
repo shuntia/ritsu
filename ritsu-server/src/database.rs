@@ -194,6 +194,7 @@ impl Database {
                 started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 turn_count INTEGER DEFAULT 0,
+                title TEXT,
                 metadata TEXT
             )",
             [],
@@ -226,6 +227,16 @@ impl Database {
              ON conversation_turns(session_id, turn_number)",
             [],
         )?;
+
+        // Migration: Add title column to existing conversations table
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(conversations)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        
+        if !columns.contains(&"title".to_string()) {
+            conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT", [])?;
+        }
 
         // User preferences table
         conn.execute(
