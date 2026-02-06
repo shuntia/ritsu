@@ -215,7 +215,7 @@ mod tool_impls {
 
                     let urgency = match urgency_str.as_str() {
                         "low" => ritsu_common::protocol::NotificationUrgency::Low,
-                        "urgent" => ritsu_common::protocol::NotificationUrgency::Urgent,
+                        "urgent" => ritsu_common::protocol::NotificationUrgency::Critical,
                         _ => ritsu_common::protocol::NotificationUrgency::Normal,
                     };
 
@@ -550,7 +550,7 @@ mod tool_impls {
 
                     let urgency = match urgency_str.as_str() {
                         "low" => ritsu_common::protocol::NotificationUrgency::Low,
-                        "urgent" => ritsu_common::protocol::NotificationUrgency::Urgent,
+                        "urgent" => ritsu_common::protocol::NotificationUrgency::Critical,
                         _ => ritsu_common::protocol::NotificationUrgency::Normal,
                     };
 

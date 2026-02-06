@@ -187,11 +187,45 @@ pub struct DateRange {
     pub end: String,
 }
 
+// ============================================================================
+// Server to Client Daemon Protocol
+// ============================================================================
+
+/// Requests sent from server to client daemon for OS-level interactions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServerToClientRequest {
+    /// Display an OS notification
+    NotifyUser {
+        title: String,
+        message: String,
+        urgency: NotificationUrgency,
+    },
+    /// Open the chat GUI window
+    OpenChat {
+        /// Optional initial message to send
+        message: Option<String>,
+        /// Optional session to load
+        session_id: Option<String>,
+    },
+    /// Bring the chat GUI window to focus
+    FocusChat,
+}
+
+/// Response from client daemon to server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ClientToServerResponse {
+    /// Request completed successfully
+    Success,
+    /// Request failed
+    Error { message: String },
+}
+
+/// Notification urgency level
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum NotificationUrgency {
     Low,
     Normal,
-    Urgent,
+    Critical,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -265,7 +299,7 @@ mod tests {
             },
             ServerPush::OpenChat {
                 message: Some("Open".to_string()),
-                urgency: NotificationUrgency::Urgent,
+                urgency: NotificationUrgency::Critical,
             },
         ];
         // Just check they compile

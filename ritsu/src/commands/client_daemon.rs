@@ -62,7 +62,7 @@ async fn handle_notification(title: &str, message: &str, urgency: NotificationUr
         let urgency_level = match urgency {
             NotificationUrgency::Low => Urgency::Low,
             NotificationUrgency::Normal => Urgency::Normal,
-            NotificationUrgency::Urgent => Urgency::Critical,
+            NotificationUrgency::Critical => Urgency::Critical,
         };
         
         Notification::new()
