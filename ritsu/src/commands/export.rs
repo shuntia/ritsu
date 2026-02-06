@@ -11,7 +11,7 @@ pub async fn export_conversation(session_id: Option<&str>, output_path: &str, fo
         sid.to_string()
     } else {
         // Get sessions list
-        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+        let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
         let response = client.send_request(ClientRequest::ListSessions { limit: Some(1) }).await?;
         
         match response {
@@ -29,7 +29,7 @@ pub async fn export_conversation(session_id: Option<&str>, output_path: &str, fo
     };
     
     // Get conversation history
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
     let response = client.send_request(ClientRequest::GetConversationHistory {
         session_id: session_to_export.clone(),
         limit: 10000, // Large number to get all

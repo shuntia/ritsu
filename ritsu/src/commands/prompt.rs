@@ -14,7 +14,7 @@ pub async fn handle(cmd: PromptCommands) -> Result<()> {
 }
 
 async fn show_prompt() -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
     let response = client.send_request(ClientRequest::GetSystemPrompt).await?;
     
     match response {
@@ -33,7 +33,7 @@ async fn set_prompt(path: &str) -> Result<()> {
     let content = std::fs::read_to_string(path)
         .context("Failed to read prompt file")?;
     
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
     let response = client.send_request(ClientRequest::SetSystemPrompt { 
         content: content.clone() 
     }).await?;
@@ -51,7 +51,7 @@ async fn set_prompt(path: &str) -> Result<()> {
 }
 
 async fn edit_prompt() -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
     
     // Get current prompt
     let response = client.send_request(ClientRequest::GetSystemPrompt).await?;
