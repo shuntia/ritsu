@@ -23,6 +23,10 @@ pub struct LlmConfig {
     pub default_backend: String,
     #[serde(default)]
     pub backends: Vec<LlmBackend>,
+    /// Disable streaming responses (use non-streaming mode for all requests)
+    /// Useful for models that struggle with tool calls in streaming mode
+    #[serde(default)]
+    pub disable_streaming: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +75,7 @@ impl Default for LlmConfig {
                 model: "llama3.2".to_string(),
                 api_key_env: None,
             }],
+            disable_streaming: false,
         }
     }
 }

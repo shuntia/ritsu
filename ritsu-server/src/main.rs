@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::info;
 
 mod config;
@@ -136,6 +137,7 @@ async fn main() -> Result<()> {
         trigger_registry.clone(),
         llm_client.clone(),
         server_state.clone(),
+        Arc::new(config.clone()),
     );
     tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {

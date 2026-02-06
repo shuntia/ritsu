@@ -13,6 +13,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use crate::config::Config;
 use crate::conversations::ConversationManager;
 use crate::llm::LlmClient;
 use crate::memory::MemoryManager;
@@ -28,6 +29,7 @@ pub struct IpcServer {
     trigger_registry: Arc<TriggerRegistry>,
     llm_client: Arc<LlmClient>,
     state: Arc<ServerState>,
+    config: Arc<Config>,
 }
 
 impl IpcServer {
@@ -39,6 +41,7 @@ impl IpcServer {
         trigger_registry: Arc<TriggerRegistry>,
         llm_client: Arc<LlmClient>,
         state: Arc<ServerState>,
+        config: Arc<Config>,
     ) -> Self {
         Self {
             socket_path,
@@ -48,6 +51,7 @@ impl IpcServer {
             trigger_registry,
             llm_client,
             state,
+            config,
         }
     }
 
@@ -69,9 +73,10 @@ impl IpcServer {
                     let trigger_registry = self.trigger_registry.clone();
                     let llm_client = self.llm_client.clone();
                     let state = self.state.clone();
+                    let config = self.config.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, memory, conversation_manager, task_manager, trigger_registry, llm_client, state).await {
+                        if let Err(e) = handle_client(stream, memory, conversation_manager, task_manager, trigger_registry, llm_client, state, config).await {
                             error!("Client handler error: {}", e);
                         }
                     });
@@ -92,6 +97,7 @@ async fn handle_client(
     trigger_registry: Arc<TriggerRegistry>,
     llm_client: Arc<LlmClient>,
     state: Arc<ServerState>,
+    config: Arc<Config>,
 ) -> Result<()> {
     // Register this client for push notifications
     let (push_tx, mut push_rx) = mpsc::unbounded_channel();
@@ -115,6 +121,7 @@ async fn handle_client(
                                 &conversation_manager,
                                 &task_manager,
                                 &llm_client,
+                                config.llm.disable_streaming,
                             ).await {
                                 error!("Error handling streaming message: {}", e);
                                 let error_response = ServerResponse::Error {
@@ -191,6 +198,7 @@ async fn handle_send_message_streaming(
     conversation_manager: &ConversationManager,
     task_manager: &TaskManager,
     llm_client: &LlmClient,
+    disable_streaming: bool,
 ) -> Result<()> {
     // Get or create conversation session
     let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
@@ -249,6 +257,40 @@ async fn handle_send_message_streaming(
         role: "user".to_string(),
         content: enhanced_content,
     });
+
+    // Check if streaming is disabled in config
+    if disable_streaming {
+        info!("Streaming disabled in config, using non-streaming mode");
+        match llm_client.generate(&messages, system_prompt.as_deref()).await {
+            Ok(response) => {
+                info!("Non-streaming request succeeded");
+                let push = ServerPush::MessageChunk {
+                    content: response.content.clone(),
+                    is_final: true,
+                };
+                send_push(stream, push).await?;
+
+                // Store assistant response
+                if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &response.content, None, None, None).await {
+                    warn!("Failed to store assistant turn: {}", e);
+                }
+                if let Err(e) = memory.store_conversation("assistant", &response.content).await {
+                    warn!("Failed to store in conversations: {}", e);
+                }
+
+                return Ok(());
+            }
+            Err(e) => {
+                error!("Non-streaming request failed: {}", e);
+                let push = ServerPush::MessageChunk {
+                    content: format!("\n\n❌ Error: {}\n\nPlease check if Ollama is running and the model is available.", e),
+                    is_final: true,
+                };
+                send_push(stream, push).await?;
+                return Err(e);
+            }
+        }
+    }
 
     // Start streaming
     info!("Starting streaming response");

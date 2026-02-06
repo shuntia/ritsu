@@ -3,6 +3,9 @@
 
 [llm]
 default_backend = "ollama"
+# Disable streaming responses (useful for smaller models that struggle with tool calls)
+# Set to true to always use non-streaming mode
+disable_streaming = false
 
 [[llm.backends]]
 name = "ollama"
