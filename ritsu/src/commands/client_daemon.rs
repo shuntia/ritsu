@@ -267,3 +267,71 @@ async fn handle_focus_chat() -> Result<()> {
     warn!("Window focus not supported on this platform or window not found");
     Ok(())
 }
+
+pub async fn stop() -> Result<()> {
+    println!("Stopping client daemon...");
+    
+    // Check if daemon is running by checking socket
+    if !Path::new(CLIENT_DAEMON_SOCKET).exists() {
+        println!("Client daemon is not running");
+        return Ok(());
+    }
+    
+    // Find and kill the process
+    let output = Command::new("pgrep")
+        .args(["-f", "ritsu.*start"])
+        .output()?;
+    
+    if output.status.success() {
+        let pids = String::from_utf8_lossy(&output.stdout);
+        for pid in pids.lines() {
+            if let Ok(pid_num) = pid.parse::<i32>() {
+                let _ = Command::new("kill")
+                    .arg(pid_num.to_string())
+                    .status();
+                println!("Stopped client daemon (PID: {})", pid_num);
+            }
+        }
+    } else {
+        println!("Client daemon process not found");
+    }
+    
+    // Clean up socket in both cases
+    let _ = std::fs::remove_file(CLIENT_DAEMON_SOCKET);
+    
+    Ok(())
+}
+
+pub async fn status() -> Result<()> {
+    if Path::new(CLIENT_DAEMON_SOCKET).exists() {
+        // Try to connect to verify it's actually running
+        match UnixStream::connect(CLIENT_DAEMON_SOCKET).await {
+            Ok(_) => {
+                println!("Client daemon: Running");
+                println!("Socket: {}", CLIENT_DAEMON_SOCKET);
+            }
+            Err(_) => {
+                println!("Client daemon: Socket exists but not responding (stale?)");
+            }
+        }
+    } else {
+        println!("Client daemon: Not running");
+    }
+    
+    Ok(())
+}
+
+pub async fn restart() -> Result<()> {
+    println!("Restarting client daemon...");
+    stop().await?;
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    
+    // Spawn as background process
+    Command::new("ritsu")
+        .arg("start")
+        .spawn()
+        .context("Failed to spawn client daemon")?;
+    
+    println!("Client daemon restarting in background");
+    Ok(())
+}

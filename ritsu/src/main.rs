@@ -21,32 +21,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the ritsu server daemon
-    Start {
-        /// Path to configuration file
-        #[arg(short, long)]
-        config: Option<String>,
-    },
+    /// Start the client daemon (handles notifications and GUI)
+    Start,
     
-    /// Stop the ritsu server daemon
+    /// Stop the client daemon
     Stop,
     
-    /// Check server status
+    /// Check client daemon status
     Status,
     
-    /// Restart the server daemon
-    Restart {
-        /// Path to configuration file
-        #[arg(short, long)]
-        config: Option<String>,
-    },
+    /// Restart the client daemon
+    Restart,
     
-    /// Forcefully halt server or client processes
+    /// Manage the ritsu-server daemon
+    #[command(subcommand)]
+    Server(ServerCommands),
+    
+    /// Forcefully halt processes
     #[command(subcommand)]
     Halt(HaltCommands),
-    
-    /// Start the client daemon (handles notifications and GUI)
-    StartClientDaemon,
     
     /// Open chat GUI interface
     Chat,
@@ -107,6 +100,29 @@ enum Commands {
         /// Skip confirmation prompt
         #[arg(long)]
         noconfirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServerCommands {
+    /// Start the ritsu-server daemon
+    Start {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+    
+    /// Stop the ritsu-server daemon
+    Stop,
+    
+    /// Check ritsu-server status
+    Status,
+    
+    /// Restart the ritsu-server daemon
+    Restart {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
     },
 }
 
@@ -225,12 +241,17 @@ fn main() -> Result<()> {
         _ => {
             tokio::runtime::Runtime::new()?.block_on(async {
                 match cli.command {
-                    Commands::Start { config } => commands::daemon::start(config.as_deref()).await?,
-                    Commands::Stop => commands::daemon::stop().await?,
-                    Commands::Status => commands::daemon::status().await?,
-                    Commands::Restart { config } => commands::daemon::restart(config.as_deref()).await?,
+                    Commands::Start => commands::client_daemon::run().await?,
+                    Commands::Stop => commands::client_daemon::stop().await?,
+                    Commands::Status => commands::client_daemon::status().await?,
+                    Commands::Restart => commands::client_daemon::restart().await?,
+                    Commands::Server(cmd) => match cmd {
+                        ServerCommands::Start { config } => commands::daemon::start(config.as_deref()).await?,
+                        ServerCommands::Stop => commands::daemon::stop().await?,
+                        ServerCommands::Status => commands::daemon::status().await?,
+                        ServerCommands::Restart { config } => commands::daemon::restart(config.as_deref()).await?,
+                    },
                     Commands::Halt(cmd) => commands::daemon::handle_halt(cmd).await?,
-                    Commands::StartClientDaemon => commands::client_daemon::run().await?,
                     Commands::Send { message, new_session } => commands::send::send_message(&message, new_session).await?,
                     Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
                     Commands::Task(cmd) => commands::task::handle(cmd).await?,
