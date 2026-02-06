@@ -47,7 +47,12 @@
   - [x] CLI commands: show, set, edit
   - [x] IPC protocol support
   - [x] Load from file or database
-- [ ] Support thinking/reasoning display
+- [x] Support thinking/reasoning display **DONE**
+  - [x] Database schema and migration
+  - [x] ConversationTurn struct includes thinking field
+  - [x] GUI ChatMessage with thinking and show_thinking fields
+  - [x] Toggle button to show/hide thinking per message
+  - [x] Collapsible display with monospace font
 - [x] Generate session titles automatically **DONE**
   - [x] Add title column to conversations table
   - [x] Generate titles after 2nd turn using LLM
@@ -84,7 +89,10 @@
 
 ### Low Priority
 - [ ] Add message search functionality
-- [ ] Add export chat history feature
+- [x] Add export chat history feature **DONE**
+  - [x] CLI command `ritsu export`
+  - [x] Supports txt, json, markdown formats
+  - [x] Auto-selects most recent session if not specified
 - [ ] Add themes/dark mode toggle
 - [ ] Add notification settings in GUI
 - [ ] Add system tray integration
