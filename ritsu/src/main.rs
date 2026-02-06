@@ -73,6 +73,21 @@ enum Commands {
     #[command(subcommand)]
     Prompt(PromptCommands),
     
+    /// Export conversation history
+    Export {
+        /// Session ID to export (defaults to current session)
+        #[arg(long)]
+        session: Option<String>,
+        
+        /// Output file path
+        #[arg(short, long, default_value = "conversation.txt")]
+        output: String,
+        
+        /// Export format (txt, json, md)
+        #[arg(short, long, default_value = "txt")]
+        format: String,
+    },
+    
     /// Query memory
     Memory {
         /// Number of days to query
@@ -220,6 +235,9 @@ fn main() -> Result<()> {
                     Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
                     Commands::Task(cmd) => commands::task::handle(cmd).await?,
                     Commands::Prompt(cmd) => commands::prompt::handle(cmd).await?,
+                    Commands::Export { session, output, format } => {
+                        commands::export::export_conversation(session.as_deref(), &output, &format).await?
+                    }
                     Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
                     Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
                     Commands::ClearMemory { noconfirm } => commands::memory::clear_memory(noconfirm).await?,
