@@ -252,7 +252,21 @@ async fn handle_send_message_streaming(
 
     // Start streaming
     info!("Starting streaming response");
-    let mut stream_rx = llm_client.generate_streaming(&messages, system_prompt.as_deref()).await?;
+    let stream_rx_result = llm_client.generate_streaming(&messages, system_prompt.as_deref()).await;
+    
+    let mut stream_rx = match stream_rx_result {
+        Ok(rx) => rx,
+        Err(e) => {
+            error!("Failed to start streaming: {}", e);
+            // Send error as a message chunk so GUI knows what happened
+            let push = ServerPush::MessageChunk {
+                content: format!("❌ Failed to connect to LLM: {}\n\nPlease check that Ollama is running and the model is available.", e),
+                is_final: true,
+            };
+            send_push(stream, push).await?;
+            return Err(e);
+        }
+    };
 
     let mut full_response = String::new();
 
@@ -270,9 +284,9 @@ async fn handle_send_message_streaming(
                 send_push(stream, push).await?;
             }
             Err(e) => {
-                error!("Streaming error: {}", e);
+                error!("Streaming error during LLM response: {}", e);
                 let push = ServerPush::MessageChunk {
-                    content: format!("\n\n[Error: {}]", e),
+                    content: format!("\n\n❌ Error during streaming: {}\n\nThe connection to the LLM may have been interrupted.", e),
                     is_final: true,
                 };
                 send_push(stream, push).await?;
