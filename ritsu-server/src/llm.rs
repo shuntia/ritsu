@@ -339,6 +339,17 @@ impl LlmClient {
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<mpsc::Receiver<Result<String>>> {
+        self.generate_streaming_with_tools(messages, system_prompt, false).await
+    }
+
+    /// Generate streaming response with optional tool support
+    /// Note: Tool calls in streaming responses are not yet fully supported by the llm crate
+    pub async fn generate_streaming_with_tools(
+        &self,
+        messages: &[Message],
+        system_prompt: Option<&str>,
+        _enable_tools: bool,  // Not yet implemented - tools break Ollama streaming parser
+    ) -> Result<mpsc::Receiver<Result<String>>> {
         // Convert our messages to llm crate format
         let mut chat_messages = Vec::new();
         
@@ -368,6 +379,8 @@ impl LlmClient {
         let (tx, rx) = mpsc::channel(32);
 
         // Get the provider's streaming response
+        // Note: Tools are disabled for streaming because the llm crate's Ollama backend
+        // doesn't properly handle tool_calls in streaming responses yet
         let mut stream = self.provider.chat_stream(&chat_messages).await
             .context("Failed to start streaming chat with LLM provider")?;
 
