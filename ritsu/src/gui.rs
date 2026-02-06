@@ -36,6 +36,9 @@ pub enum Message {
     SessionsLoaded(Vec<SessionInfo>),
     ConversationHistoryLoaded(Result<Vec<ritsu_common::protocol::ConversationTurn>, String>),
     TasksLoaded(Vec<TaskInfo>),
+    TaskStatusChanged(i64, String), // task_id, new_status
+    TaskDeleted(i64), // task_id
+    TaskOperationComplete(Result<(), String>),
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
     RetryConnection,
@@ -413,6 +416,75 @@ impl RitsuGui {
             Message::TasksLoaded(tasks) => {
                 self.tasks = tasks;
                 Task::none()
+            }
+            Message::TaskStatusChanged(task_id, new_status) => {
+                // Send update request to server
+                Task::perform(
+                    async move {
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let status = match new_status.as_str() {
+                            "pending" => ritsu_common::protocol::TaskStatus::Pending,
+                            "in_progress" => ritsu_common::protocol::TaskStatus::InProgress,
+                            "completed" => ritsu_common::protocol::TaskStatus::Completed,
+                            "cancelled" => ritsu_common::protocol::TaskStatus::Cancelled,
+                            _ => ritsu_common::protocol::TaskStatus::Pending,
+                        };
+                        
+                        let request = ritsu_common::protocol::ClientRequest::UpdateTask {
+                            id: task_id,
+                            status: Some(status),
+                            priority: None,
+                        };
+                        
+                        match client.send_request(request).await {
+                            Ok(ritsu_common::protocol::ServerResponse::Ok) => Ok(()),
+                            Ok(ritsu_common::protocol::ServerResponse::Error { message }) => Err(message),
+                            Err(e) => Err(e.to_string()),
+                            _ => Err("Unexpected response".to_string()),
+                        }
+                    },
+                    Message::TaskOperationComplete,
+                )
+            }
+            Message::TaskDeleted(task_id) => {
+                // For now, just remove from local list
+                // TODO: Add IPC request for task deletion
+                self.tasks.retain(|t| t.id != task_id);
+                Task::none()
+            }
+            Message::TaskOperationComplete(result) => {
+                match result {
+                    Ok(()) => {
+                        // Reload tasks to reflect changes
+                        Task::perform(
+                            async {
+                                let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                                let request = ritsu_common::protocol::ClientRequest::ListTasks { filter: None };
+                                client.send_request(request).await
+                            },
+                            |result| match result {
+                                Ok(ritsu_common::protocol::ServerResponse::Tasks { tasks }) => {
+                                    Message::TasksLoaded(
+                                        tasks
+                                            .into_iter()
+                                            .map(|t| TaskInfo {
+                                                id: t.id,
+                                                title: t.title,
+                                                status: format!("{:?}", t.status).to_lowercase(),
+                                                priority: format!("{:?}", t.priority).to_lowercase(),
+                                            })
+                                            .collect(),
+                                    )
+                                }
+                                _ => Message::TasksLoaded(Vec::new()),
+                            },
+                        )
+                    }
+                    Err(e) => {
+                        tracing::error!("Task operation failed: {}", e);
+                        Task::none()
+                    }
+                }
             }
             Message::ToggleSidebar => {
                 self.sidebar_visible = !self.sidebar_visible;
@@ -856,6 +928,30 @@ impl RitsuGui {
                         _ => "○",
                     };
                     
+                    // Status cycle buttons
+                    let next_status = match task.status.as_str() {
+                        "pending" => ("Start", "in_progress"),
+                        "in_progress" => ("Complete", "completed"),
+                        "completed" => ("Reopen", "pending"),
+                        _ => ("Start", "pending"),
+                    };
+                    
+                    let task_id = task.id;
+                    let status_button = button(text(next_status.0).size(12))
+                        .on_press(Message::TaskStatusChanged(task_id, next_status.1.to_string()))
+                        .padding(5);
+                    
+                    let delete_button = button(text("×").size(16))
+                        .on_press(Message::TaskDeleted(task_id))
+                        .padding(5)
+                        .style(|_theme: &iced::Theme, _status| {
+                            button::Style {
+                                background: Some(iced::Background::Color(iced::Color::from_rgb(0.8, 0.2, 0.2))),
+                                text_color: iced::Color::WHITE,
+                                ..button::Style::default()
+                            }
+                        });
+                    
                     let task_view = row![
                         text(status_icon).size(20),
                         column![
@@ -864,10 +960,12 @@ impl RitsuGui {
                                 .size(12)
                                 .color(priority_color),
                         ]
-                        .spacing(5)
+                        .spacing(5),
+                        row![status_button, delete_button].spacing(5),
                     ]
                     .spacing(10)
-                    .padding(10);
+                    .padding(10)
+                    .align_y(iced::Alignment::Center);
                     
                     col.push(container(task_view).style(move |_theme: &iced::Theme| {
                         container::Style {
