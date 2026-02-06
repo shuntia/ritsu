@@ -368,7 +368,7 @@ impl LlmClient {
 
         // Get the provider's streaming response
         let mut stream = self.provider.chat_stream(&chat_messages).await
-            .context("Failed to start streaming chat")?;
+            .context("Failed to start streaming chat with LLM provider")?;
 
         // Spawn a task to forward stream items to the channel
         tokio::spawn(async move {
