@@ -1,6 +1,6 @@
 # Ritsu Tasks
 
-## Current Sprint: Chat UI Enhancement
+## Current Sprint: GUI Feature Completion
 
 ### High Priority
 - [x] Implement animated loading indicator (throbber) in chat GUI
@@ -10,17 +10,29 @@
 - [x] Add more GUI animations (sidebar slide, message fade-in)
 - [x] Make system prompt configurable and context-aware
 - [x] Fix AI behavior to prioritize chat over background tasks
-- [x] **IMPLEMENT STREAMING RESPONSES**
+- [x] **IMPLEMENT STREAMING RESPONSES** - FULLY IMPLEMENTED!
   - [x] Reference local llm crate as path dependency
   - [x] Add streaming support to LLM client (`generate_streaming()`)
   - [x] Stream tokens via ServerPush::MessageChunk messages
-  - [x] **Token-by-token display in GUI** - FULLY IMPLEMENTED!
+  - [x] **Token-by-token display in GUI**
     - [x] Pre-create assistant message before streaming
     - [x] Use iced::stream::channel to bridge tokio → futures channels
     - [x] MessageChunk events append to indexed message in real-time
     - [x] Visual updates as each token arrives from LLM
   - [x] Add typing indicator animation while streaming
   - [x] Ready for integration testing with live LLM backend
+- [x] Implement session loading - switch to previous conversation **DONE**
+  - [x] Add IPC protocol for GetConversationHistory
+  - [x] Server handler using ConversationManager
+  - [x] GUI loads and displays conversation turns
+- [x] Implement task status change and delete in GUI **DONE**
+  - [x] Status cycle buttons (pending → in_progress → completed)
+  - [x] Delete button for tasks
+  - [x] Reload task list after operations
+- [ ] Complete task deletion backend
+  - [x] UI delete button implemented
+  - [ ] Add DeleteTask IPC request
+  - [ ] Server-side delete handler
 - [ ] Implement client daemon to handle all GUI interactions
   - [ ] Client daemon runs in background
   - [ ] GUI connects to client daemon (not server directly)
@@ -37,12 +49,10 @@
 - [x] Auto-retry connection every 5 seconds on disconnect
 - [x] Implement tasks list view (loads real data from server)
 - [x] Code quality improvements and warning cleanup
-- [ ] Implement session loading - switch to previous conversation (IPC call needed)
-- [ ] Implement task manager view (IPC calls needed)
-  - [x] View tasks list with filtering (status, priority) - UI complete
-  - [ ] Create new tasks from GUI
-  - [ ] Update task status/priority
-  - [ ] Delete tasks
+- [x] Implement session loading - switch to previous conversation (IPC call) **DONE**
+- [x] Implement task status change UI **DONE**
+- [ ] Implement task create dialog in GUI
+- [ ] Implement memory view - show notes and summaries
 - [x] Implement memory view placeholder
 - [ ] Add streaming responses from LLM (incremental display)
 - [ ] Add connection status indicator in GUI
@@ -88,8 +98,15 @@
 - [x] Fixed query_memory tool - use correct column names (timestamp vs created_at)
 - [x] Removed unused llm_old.rs file
 - [x] Enhanced AI context - always provide current time and task summary
+- [x] Fixed unused StreamExt import in gui.rs **DONE**
 - [ ] Fix trigger execution - no user notification/interaction when triggers fire
-- [ ] Add IPC protocol for sessions/tasks data loading in GUI
+- [ ] Add complete IPC protocol for task deletion
+
+## Recent Progress (Session 2026-02-06)
+- [x] Removed unused import warning
+- [x] Implemented session loading with conversation history
+- [x] Added task status change and delete UI
+- [x] Created session summary documentation
 
 ## Technical Debt
 - [ ] Consider switching from postcard to a more maintainable protocol
