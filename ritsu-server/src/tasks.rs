@@ -117,6 +117,23 @@ impl TaskManager {
         Ok(())
     }
 
+    /// Delete a task
+    pub async fn delete_task(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().await;
+        
+        let rows_affected = conn.execute(
+            "DELETE FROM tasks WHERE id = ?1",
+            [id],
+        )?;
+        
+        if rows_affected > 0 {
+            info!("Deleted task #{}", id);
+            Ok(())
+        } else {
+            anyhow::bail!("Task with id {} not found", id)
+        }
+    }
+
     /// List tasks with optional filters
     pub async fn list_tasks(
         &self,

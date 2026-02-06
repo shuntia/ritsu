@@ -44,6 +44,10 @@ pub enum ClientRequest {
         status: Option<TaskStatus>,
         priority: Option<TaskPriority>,
     },
+    /// Delete a task
+    DeleteTask {
+        id: i64,
+    },
     /// Query memory
     QueryMemory {
         query_type: MemoryQueryType,

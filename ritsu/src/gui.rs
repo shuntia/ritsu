@@ -447,10 +447,21 @@ impl RitsuGui {
                 )
             }
             Message::TaskDeleted(task_id) => {
-                // For now, just remove from local list
-                // TODO: Add IPC request for task deletion
-                self.tasks.retain(|t| t.id != task_id);
-                Task::none()
+                // Send delete request to server
+                Task::perform(
+                    async move {
+                        let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+                        let request = ritsu_common::protocol::ClientRequest::DeleteTask { id: task_id };
+                        
+                        match client.send_request(request).await {
+                            Ok(ritsu_common::protocol::ServerResponse::Ok) => Ok(()),
+                            Ok(ritsu_common::protocol::ServerResponse::Error { message }) => Err(message),
+                            Err(e) => Err(e.to_string()),
+                            _ => Err("Unexpected response".to_string()),
+                        }
+                    },
+                    Message::TaskOperationComplete,
+                )
             }
             Message::TaskOperationComplete(result) => {
                 match result {

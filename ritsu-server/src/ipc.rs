@@ -588,6 +588,15 @@ async fn handle_request(
             
             ServerResponse::Ok
         }
+        
+        ClientRequest::DeleteTask { id } => {
+            match task_manager.delete_task(id).await {
+                Ok(()) => ServerResponse::Ok,
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to delete task: {}", e),
+                },
+            }
+        }
 
         ClientRequest::QueryMemory { query_type, date_range: _ } => {
             use ritsu_common::protocol::MemoryQueryType;
