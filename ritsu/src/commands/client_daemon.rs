@@ -166,28 +166,66 @@ async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf).await?;
 
+        // Check if this is a SendMessage request (needs streaming support)
+        let is_send_message = if let Ok(req) = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&buf) {
+            matches!(req, ritsu_common::protocol::ClientRequest::SendMessage { .. })
+        } else {
+            false
+        };
+
         // Proxy to server (keep big-endian)
         let len_bytes = (buf.len() as u32).to_be_bytes();
         server_stream.write_all(&len_bytes).await?;
         server_stream.write_all(&buf).await?;
         server_stream.flush().await?;
 
-        // Read response from server
-        info!("Waiting for server response...");
-        let mut len_buf = [0u8; 4];
-        server_stream.read_exact(&mut len_buf).await?;
+        if is_send_message {
+            // For SendMessage, we need to forward multiple push notifications
+            info!("Proxying streaming responses...");
+            loop {
+                // Read push notification from server
+                let mut len_buf = [0u8; 4];
+                if server_stream.read_exact(&mut len_buf).await.is_err() {
+                    error!("Server disconnected during streaming");
+                    break;
+                }
 
-        let len = u32::from_be_bytes(len_buf) as usize;
-        info!("Server responded with {} bytes, forwarding to GUI", len);
-        let mut buf = vec![0u8; len];
-        server_stream.read_exact(&mut buf).await?;
+                let len = u32::from_be_bytes(len_buf) as usize;
+                let mut buf = vec![0u8; len];
+                server_stream.read_exact(&mut buf).await?;
 
-        // Forward to GUI
-        let len_bytes = (buf.len() as u32).to_be_bytes();
-        stream.write_all(&len_bytes).await?;
-        stream.write_all(&buf).await?;
-        stream.flush().await?;
-        info!("Response forwarded successfully");
+                // Forward to GUI
+                let len_bytes = (buf.len() as u32).to_be_bytes();
+                stream.write_all(&len_bytes).await?;
+                stream.write_all(&buf).await?;
+                stream.flush().await?;
+
+                // Check if this is the final chunk
+                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) = 
+                    postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
+                {
+                    info!("Final chunk received, streaming complete");
+                    break;
+                }
+            }
+        } else {
+            // For other requests, simple request/response
+            info!("Waiting for server response...");
+            let mut len_buf = [0u8; 4];
+            server_stream.read_exact(&mut len_buf).await?;
+
+            let len = u32::from_be_bytes(len_buf) as usize;
+            info!("Server responded with {} bytes, forwarding to GUI", len);
+            let mut buf = vec![0u8; len];
+            server_stream.read_exact(&mut buf).await?;
+
+            // Forward to GUI
+            let len_bytes = (buf.len() as u32).to_be_bytes();
+            stream.write_all(&len_bytes).await?;
+            stream.write_all(&buf).await?;
+            stream.flush().await?;
+            info!("Response forwarded successfully");
+        }
     }
 
     Ok(())

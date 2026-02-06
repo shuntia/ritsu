@@ -44,16 +44,28 @@ fn get_or_create_session_id(force_new: bool) -> Result<String> {
 }
 
 pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
-    // Connect to ritsu-server, not client daemon
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    // Connect to client daemon which will proxy to server
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
     let session_id = get_or_create_session_id(new_session)?;
     
-    let response = client
+    let response = match client
         .send_request(ClientRequest::SendMessage {
             content: message.to_string(),
             session_id: Some(session_id),
         })
-        .await?;
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            if e.to_string().contains("No such file or directory") || 
+               e.to_string().contains("Connection refused") {
+                eprintln!("✗ Client daemon not running. Start it with: ritsu start");
+                anyhow::bail!("Client daemon not running")
+            } else {
+                return Err(e);
+            }
+        }
+    };
 
     match response {
         ritsu_common::protocol::ServerResponse::Message { content } => {
