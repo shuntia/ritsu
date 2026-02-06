@@ -247,8 +247,8 @@ async fn start_ollama_if_needed() {
     match result {
         Ok(_child) => {
             tracing::info!("Ollama server started in background");
-            // Wait for Ollama to be ready (can take several seconds to load model)
-            tracing::info!("Waiting for Ollama to be ready...");
+            // Wait for Ollama HTTP server to be ready
+            tracing::info!("Waiting for Ollama HTTP server to start...");
             for attempt in 1..=15 {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 
@@ -260,16 +260,50 @@ async fn start_ollama_if_needed() {
                 if let Ok(output) = health_check {
                     let status_code = String::from_utf8_lossy(&output.stdout);
                     if status_code == "200" {
-                        tracing::info!("Ollama ready after {} seconds", attempt * 2);
-                        return;
+                        tracing::info!("Ollama HTTP server ready after {} seconds", attempt * 2);
+                        break;
                     }
                 }
                 
                 if attempt < 15 {
                     tracing::debug!("Ollama not ready yet, retrying... (attempt {}/15)", attempt);
+                } else {
+                    tracing::warn!("Ollama failed to become ready after 30 seconds");
+                    return;
                 }
             }
-            tracing::warn!("Ollama failed to become ready after 30 seconds");
+            
+            // Now do a warmup request to ensure the model is actually loaded
+            tracing::info!("Warming up Ollama model (this may take 5-10 seconds)...");
+            let warmup = tokio::time::timeout(
+                tokio::time::Duration::from_secs(60),
+                tokio::process::Command::new("curl")
+                    .args([
+                        "-s",
+                        "-X", "POST",
+                        "http://localhost:11434/api/chat",
+                        "-d", r#"{"model":"llama3.2:3b","messages":[{"role":"user","content":"hi"}],"stream":false}"#,
+                        "-H", "Content-Type: application/json"
+                    ])
+                    .output()
+            ).await;
+            
+            match warmup {
+                Ok(Ok(output)) => {
+                    if output.status.success() {
+                        tracing::info!("Ollama model warmed up successfully");
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        tracing::warn!("Ollama warmup request failed: {}", stderr);
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("Failed to execute Ollama warmup request: {}", e);
+                }
+                Err(_) => {
+                    tracing::warn!("Ollama warmup request timed out after 60 seconds");
+                }
+            }
         }
         Err(e) => {
             tracing::warn!("Failed to start Ollama server: {}", e);
