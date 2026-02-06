@@ -89,6 +89,7 @@ impl LlmClient {
         let mut builder = LLMBuilder::new()
             .backend(provider_type)
             .model(&backend.model)
+            .base_url(&backend.endpoint)
             .max_tokens(2048)
             .temperature(0.7)
             .timeout_seconds(120); // 2 minutes timeout for streaming (default is 30s)
