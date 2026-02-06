@@ -27,6 +27,10 @@ pub struct LlmConfig {
     /// Useful for models that struggle with tool calls in streaming mode
     #[serde(default)]
     pub disable_streaming: bool,
+    /// Disable tool calls entirely (faster for simple queries)
+    /// When true, the LLM won't be told about available tools
+    #[serde(default)]
+    pub disable_tools: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +80,7 @@ impl Default for LlmConfig {
                 api_key_env: None,
             }],
             disable_streaming: false,
+            disable_tools: false,
         }
     }
 }

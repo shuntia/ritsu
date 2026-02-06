@@ -122,6 +122,7 @@ async fn handle_client(
                                 &task_manager,
                                 &llm_client,
                                 config.llm.disable_streaming,
+                                config.llm.disable_tools,
                             ).await {
                                 error!("Error handling streaming message: {}", e);
                                 let error_response = ServerResponse::Error {
@@ -199,6 +200,7 @@ async fn handle_send_message_streaming(
     task_manager: &TaskManager,
     llm_client: &LlmClient,
     disable_streaming: bool,
+    disable_tools: bool,
 ) -> Result<()> {
     // Get or create conversation session
     let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
@@ -260,8 +262,8 @@ async fn handle_send_message_streaming(
 
     // Check if streaming is disabled in config
     if disable_streaming {
-        info!("Streaming disabled in config, using non-streaming mode");
-        match llm_client.generate(&messages, system_prompt.as_deref()).await {
+        info!("Streaming disabled in config, using non-streaming mode (tools: {})", !disable_tools);
+        match llm_client.generate_with_tools(&messages, system_prompt.as_deref(), !disable_tools).await {
             Ok(response) => {
                 info!("Non-streaming request succeeded");
                 let push = ServerPush::MessageChunk {
@@ -309,7 +311,7 @@ async fn handle_send_message_streaming(
             };
             send_push(stream, push).await?;
             
-            match llm_client.generate(&messages, system_prompt.as_deref()).await {
+            match llm_client.generate_with_tools(&messages, system_prompt.as_deref(), !disable_tools).await {
                 Ok(response) => {
                     info!("Non-streaming fallback succeeded");
                     let push = ServerPush::MessageChunk {

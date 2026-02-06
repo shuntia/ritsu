@@ -6,6 +6,9 @@ default_backend = "ollama"
 # Disable streaming responses (useful for smaller models that struggle with tool calls)
 # Set to true to always use non-streaming mode
 disable_streaming = false
+# Disable tool calls entirely (faster for simple queries, no tool execution)
+# When true, the LLM won't be told about available tools
+disable_tools = false
 
 [[llm.backends]]
 name = "ollama"
