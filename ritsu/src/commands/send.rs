@@ -44,7 +44,8 @@ fn get_or_create_session_id(force_new: bool) -> Result<String> {
 }
 
 pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    // Connect to ritsu-server, not client daemon
+    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
     let session_id = get_or_create_session_id(new_session)?;
     
     let response = client
