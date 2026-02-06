@@ -51,6 +51,7 @@ pub enum Message {
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
     RetryConnection,
+    KeyPressed(iced::keyboard::Key, iced::keyboard::Modifiers),
 }
 
 #[derive(Debug, Clone)]
@@ -681,6 +682,40 @@ impl RitsuGui {
                         }
                     },
                 )
+            }
+            Message::KeyPressed(key, modifiers) => {
+                use iced::keyboard::{Key, key::Named};
+                
+                // Ctrl/Cmd + Enter to send message
+                if modifiers.command() && matches!(key, Key::Named(Named::Enter)) {
+                    return self.update(Message::SendMessage);
+                }
+                
+                // Ctrl/Cmd + B to toggle sidebar
+                if modifiers.command() && matches!(key, Key::Character(ref c) if c.as_str() == "b") {
+                    return self.update(Message::ToggleSidebar);
+                }
+                
+                // Ctrl/Cmd + 1/2/3/4 to switch views
+                if modifiers.command() {
+                    match key {
+                        Key::Character(ref c) if c.as_str() == "1" => {
+                            return self.update(Message::SwitchView(ViewState::Chat));
+                        }
+                        Key::Character(ref c) if c.as_str() == "2" => {
+                            return self.update(Message::SwitchView(ViewState::Sessions));
+                        }
+                        Key::Character(ref c) if c.as_str() == "3" => {
+                            return self.update(Message::SwitchView(ViewState::Tasks));
+                        }
+                        Key::Character(ref c) if c.as_str() == "4" => {
+                            return self.update(Message::SwitchView(ViewState::Memory));
+                        }
+                        _ => {}
+                    }
+                }
+                
+                Task::none()
             }
         }
     }
@@ -1399,8 +1434,16 @@ fn view(state: &RitsuGui) -> Element<'_, Message> {
 }
 
 fn subscription(_state: &RitsuGui) -> Subscription<Message> {
-    // For now, no subscriptions - streaming handled via Tasks
-    Subscription::none()
+    use iced::keyboard;
+    use iced::Event;
+    
+    iced::event::listen_with(|event, _status, _id| {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event {
+            Some(Message::KeyPressed(key, modifiers))
+        } else {
+            None
+        }
+    })
 }
 
 pub fn run_blocking() -> anyhow::Result<()> {
