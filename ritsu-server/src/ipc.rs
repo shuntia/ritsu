@@ -766,5 +766,25 @@ async fn handle_request(
             info!("Client subscribed for push notifications");
             ServerResponse::Ok
         }
+
+        ClientRequest::GetSystemPrompt => {
+            match memory.build_effective_prompt().await {
+                Ok(prompt) => ServerResponse::SystemPrompt { content: prompt },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to get system prompt: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::SetSystemPrompt { content } => {
+            match memory.store_system_prompt("base", &content).await {
+                Ok(()) => ServerResponse::Success {
+                    message: "System prompt updated successfully".to_string(),
+                },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to set system prompt: {}", e),
+                },
+            }
+        }
     }
 }

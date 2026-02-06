@@ -7,4 +7,5 @@ pub mod client_daemon;
 pub mod send;
 pub mod trigger;
 pub mod task;
+pub mod prompt;
 pub mod memory;

@@ -69,6 +69,12 @@ pub enum ClientRequest {
         session_id: String,
         limit: i64,
     },
+    /// Get current system prompt
+    GetSystemPrompt,
+    /// Set system prompt
+    SetSystemPrompt {
+        content: String,
+    },
 }
 
 /// Server response to client
@@ -76,6 +82,8 @@ pub enum ClientRequest {
 pub enum ServerResponse {
     /// Successful operation
     Ok,
+    /// Successful operation with message
+    Success { message: String },
     /// Pong response
     Pong,
     /// Error occurred
@@ -92,6 +100,8 @@ pub enum ServerResponse {
     Sessions { sessions: Vec<SessionInfo> },
     /// Conversation history (list of turns)
     ConversationHistory { turns: Vec<ConversationTurn> },
+    /// System prompt
+    SystemPrompt { content: String },
 }
 
 /// Server push notification to client

@@ -69,6 +69,10 @@ enum Commands {
     #[command(subcommand)]
     Task(TaskCommands),
     
+    /// Manage system prompt
+    #[command(subcommand)]
+    Prompt(PromptCommands),
+    
     /// Query memory
     Memory {
         /// Number of days to query
@@ -170,6 +174,21 @@ enum TaskCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum PromptCommands {
+    /// Show current system prompt
+    Show,
+    
+    /// Set system prompt from file
+    Set {
+        /// Path to prompt file
+        path: String,
+    },
+    
+    /// Edit system prompt in $EDITOR
+    Edit,
+}
+
 fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
@@ -200,6 +219,7 @@ fn main() -> Result<()> {
                     Commands::Send { message, new_session } => commands::send::send_message(&message, new_session).await?,
                     Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
                     Commands::Task(cmd) => commands::task::handle(cmd).await?,
+                    Commands::Prompt(cmd) => commands::prompt::handle(cmd).await?,
                     Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
                     Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
                     Commands::ClearMemory { noconfirm } => commands::memory::clear_memory(noconfirm).await?,
