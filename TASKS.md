@@ -29,10 +29,15 @@
   - [x] Status cycle buttons (pending → in_progress → completed)
   - [x] Delete button for tasks
   - [x] Reload task list after operations
-- [ ] Complete task deletion backend
+- [x] Complete task deletion backend **DONE**
   - [x] UI delete button implemented
-  - [ ] Add DeleteTask IPC request
-  - [ ] Server-side delete handler
+  - [x] Add DeleteTask IPC request
+  - [x] Server-side delete handler
+- [x] Implement task create dialog in GUI **DONE**
+  - [x] Modal overlay with form inputs
+  - [x] Title, description, priority fields
+  - [x] Submit sends CreateTask IPC request
+  - [x] Dialog state management
 - [ ] Implement client daemon to handle all GUI interactions
   - [ ] Client daemon runs in background
   - [ ] GUI connects to client daemon (not server directly)
@@ -53,7 +58,7 @@
 - [x] Implement task status change UI **DONE**
 - [x] Implement task deletion backend **DONE**
 - [x] Implement memory view functionality **DONE**
-- [ ] Implement task create dialog in GUI
+
 - [x] Implement memory view placeholder
 - [ ] Add streaming responses from LLM (incremental display)
 - [ ] Add connection status indicator in GUI
