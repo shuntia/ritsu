@@ -43,7 +43,10 @@
   - [ ] GUI connects to client daemon (not server directly)
   - [ ] Client daemon proxies requests to server
   - [ ] Client daemon handles notifications and window management
-- [ ] Make system prompt configurable (load from config/database)
+- [x] Make system prompt configurable (load from config/database) **DONE**
+  - [x] CLI commands: show, set, edit
+  - [x] IPC protocol support
+  - [x] Load from file or database
 - [ ] Support thinking/reasoning display
 - [x] Generate session titles automatically **DONE**
   - [x] Add title column to conversations table
