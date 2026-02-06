@@ -75,7 +75,10 @@
 - [ ] Add auto-scroll to latest message
 - [x] Add timestamps to chat messages **DONE**
 - [x] Add copy button for assistant messages **DONE**
-- [ ] Add keyboard shortcuts (Ctrl+Enter to send, etc.)
+- [x] Add keyboard shortcuts (Ctrl+Enter to send, etc.) **DONE**
+  - [x] Ctrl/Cmd+Enter to send
+  - [x] Ctrl/Cmd+B to toggle sidebar
+  - [x] Ctrl/Cmd+1/2/3/4 for view switching
 - [ ] Add configuration UI for preferences
 - [ ] Add trigger management UI
 
