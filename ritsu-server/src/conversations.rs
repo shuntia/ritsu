@@ -16,6 +16,7 @@ pub struct ConversationTurn {
     pub content: String,
     pub tool_calls: Option<String>,
     pub tool_results: Option<String>,
+    pub thinking: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +91,7 @@ impl ConversationManager {
         content: &str,
         tool_calls: Option<&str>,
         tool_results: Option<&str>,
+        thinking: Option<&str>,
     ) -> Result<i64> {
         let conn = self.db.lock().await;
         
@@ -105,9 +107,9 @@ impl ConversationManager {
         // Insert turn
         conn.execute(
             "INSERT INTO conversation_turns 
-             (session_id, turn_number, role, content, tool_calls, tool_results) 
-             VALUES (?, ?, ?, ?, ?, ?)",
-            rusqlite::params![session_id, turn_number, role, content, tool_calls, tool_results],
+             (session_id, turn_number, role, content, tool_calls, tool_results, thinking) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![session_id, turn_number, role, content, tool_calls, tool_results, thinking],
         )?;
         
         // Update conversation turn count and last_activity
@@ -128,7 +130,7 @@ impl ConversationManager {
         let conn = self.db.lock().await;
         
         let mut stmt = conn.prepare(
-            "SELECT turn_number, role, content, tool_calls, tool_results 
+            "SELECT turn_number, role, content, tool_calls, tool_results, thinking 
              FROM conversation_turns 
              WHERE session_id = ? 
              ORDER BY turn_number DESC 
@@ -142,6 +144,7 @@ impl ConversationManager {
                 content: row.get(2)?,
                 tool_calls: row.get(3)?,
                 tool_results: row.get(4)?,
+                thinking: row.get(5)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -360,8 +363,8 @@ mod tests {
         
         let _session = manager.get_or_create_session("test_session").await.unwrap();
         
-        manager.add_turn("test_session", "user", "Hello", None, None).await.unwrap();
-        manager.add_turn("test_session", "assistant", "Hi there!", None, None).await.unwrap();
+        manager.add_turn("test_session", "user", "Hello", None, None, None).await.unwrap();
+        manager.add_turn("test_session", "assistant", "Hi there!", None, None, None).await.unwrap();
         
         let history = manager.get_history("test_session", 10).await.unwrap();
         assert_eq!(history.len(), 2);

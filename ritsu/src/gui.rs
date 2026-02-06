@@ -48,6 +48,7 @@ pub enum Message {
     CreateTaskSubmit,
     CancelTaskCreate,
     CopyMessage(usize),
+    ToggleThinking(usize),
     ToggleSidebar,
     ConnectionStatusChanged(ConnectionStatus),
     RetryConnection,
@@ -109,6 +110,8 @@ struct ChatMessage {
     is_user: bool,
     opacity: f32, // For fade-in animation
     timestamp: chrono::DateTime<chrono::Utc>,
+    thinking: Option<String>, // For models that expose thinking/reasoning
+    show_thinking: bool, // Whether to show thinking section (toggle)
 }
 
 impl RitsuGui {
@@ -243,6 +246,8 @@ impl RitsuGui {
                         is_user: true,
                         opacity: 0.0, // Start invisible for fade-in
                         timestamp: chrono::Utc::now(),
+                        thinking: None,
+                        show_thinking: false,
                     });
                     self.input.clear();
                     self.is_loading = true;
@@ -254,6 +259,8 @@ impl RitsuGui {
                         is_user: false,
                         opacity: 1.0,
                         timestamp: chrono::Utc::now(),
+                        thinking: None,
+                        show_thinking: false,
                     });
                     self.streaming_message_index = Some(self.messages.len() - 1);
 
@@ -449,6 +456,8 @@ impl RitsuGui {
                                 is_user,
                                 opacity: 1.0, // No fade-in for loaded messages
                                 timestamp: chrono::Utc::now(), // Use current time as fallback
+                                thinking: turn.thinking,
+                                show_thinking: false,
                             });
                         }
                     }
@@ -459,6 +468,8 @@ impl RitsuGui {
                             is_user: false,
                             opacity: 1.0,
                             timestamp: chrono::Utc::now(),
+                        thinking: None,
+                        show_thinking: false,
                         });
                     }
                 }
@@ -649,6 +660,8 @@ impl RitsuGui {
                         is_user: false,
                         opacity: 0.0,
                         timestamp: chrono::Utc::now(),
+                        thinking: None,
+                        show_thinking: false,
                     });
                 }
                 
@@ -664,6 +677,12 @@ impl RitsuGui {
                 if let Some(msg) = self.messages.get(idx) {
                     // Use iced clipboard
                     return iced::clipboard::write(msg.content.clone());
+                }
+                Task::none()
+            }
+            Message::ToggleThinking(idx) => {
+                if let Some(msg) = self.messages.get_mut(idx) {
+                    msg.show_thinking = !msg.show_thinking;
                 }
                 Task::none()
             }

@@ -170,6 +170,7 @@ pub struct ConversationTurn {
     pub content: String,
     pub tool_calls: Option<String>,
     pub tool_results: Option<String>,
+    pub thinking: Option<String>, // For models that expose thinking/reasoning
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

@@ -216,6 +216,7 @@ impl Database {
                 content TEXT NOT NULL,
                 tool_calls TEXT,
                 tool_results TEXT,
+                thinking TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (session_id) REFERENCES conversations(session_id) ON DELETE CASCADE
             )",
@@ -236,6 +237,16 @@ impl Database {
         
         if !columns.contains(&"title".to_string()) {
             conn.execute("ALTER TABLE conversations ADD COLUMN title TEXT", [])?;
+        }
+
+        // Migration: Add thinking column to existing conversation_turns table
+        let turn_columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(conversation_turns)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        
+        if !turn_columns.contains(&"thinking".to_string()) {
+            conn.execute("ALTER TABLE conversation_turns ADD COLUMN thinking TEXT", [])?;
         }
 
         // User preferences table

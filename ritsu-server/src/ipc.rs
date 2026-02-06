@@ -197,7 +197,7 @@ async fn handle_send_message_streaming(
     let session = conversation_manager.get_or_create_session(&session_id).await?;
 
     // Store user message
-    if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None).await {
+    if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None, None).await {
         warn!("Failed to store user turn: {}", e);
     }
     if let Err(e) = memory.store_conversation("user", &content).await {
@@ -291,7 +291,7 @@ async fn handle_send_message_streaming(
     info!("Streaming complete, {} bytes total", full_response.len());
 
     // Store assistant response
-    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None).await {
+    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None, None).await {
         warn!("Failed to store assistant turn: {}", e);
     }
     if let Err(e) = memory.store_conversation("assistant", &full_response).await {
@@ -354,7 +354,7 @@ async fn handle_request(
             };
 
             // Store user message in session
-            if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None).await {
+            if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None, None).await {
                 warn!("Failed to store user turn: {}", e);
             }
 
@@ -430,7 +430,7 @@ async fn handle_request(
             ).await {
                 Ok(response) => {
                     // Store assistant response in session
-                    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &response.content, None, None).await {
+                    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &response.content, None, None, None).await {
                         warn!("Failed to store assistant turn: {}", e);
                     }
 
@@ -722,6 +722,7 @@ async fn handle_request(
                             content: t.content,
                             tool_calls: t.tool_calls,
                             tool_results: t.tool_results,
+                            thinking: t.thinking,
                         })
                         .collect();
                     
