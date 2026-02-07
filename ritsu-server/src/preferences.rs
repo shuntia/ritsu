@@ -1,11 +1,9 @@
 //! User preferences extraction and management
 
 use anyhow::Result;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::info;
 
 #[allow(dead_code)]
@@ -19,11 +17,11 @@ pub struct Preference {
 }
 
 pub struct PreferencesManager {
-    db: Arc<Mutex<Connection>>,
+    db: Arc<tokio_rusqlite::Connection>,
 }
 
 impl PreferencesManager {
-    pub const fn new(db: Arc<Mutex<Connection>>) -> Self {
+    pub const fn new(db: Arc<tokio_rusqlite::Connection>) -> Self {
         Self { db }
     }
 

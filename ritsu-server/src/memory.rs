@@ -34,7 +34,8 @@ impl MemoryManager {
                 (date.to_string(), &role, &content),
             )?;
             Ok(())
-        }).await
+        }).await?;
+        Ok(())
     }
 
     /// Create a note
@@ -42,13 +43,14 @@ impl MemoryManager {
         let tags_json = serde_json::to_string(tags)?;
         let content = content.to_string();
         
-        self.conn.call(move |conn| {
+        let id = self.conn.call(move |conn| {
             conn.execute(
                 "INSERT INTO notes (content, tags) VALUES (?1, ?2)",
                 (&content, &tags_json),
             )?;
             Ok(conn.last_insert_rowid())
-        }).await
+        }).await?;
+        Ok(id)
     }
 
     /// Compact daily conversations into a daily summary
@@ -310,14 +312,15 @@ impl MemoryManager {
                  WHERE prompt_type = ?1 AND active = 1 
                  ORDER BY version DESC LIMIT 1",
                 [&prompt_type],
-            |row| row.get(0),
-        );
+                |row| row.get(0),
+            );
 
-        match result {
-            Ok(content) => Ok(Some(content)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+            match result {
+                Ok(content) => Ok(Some(content)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
+        }).await.map_err(Into::into)
     }
 
     /// Build the effective system prompt (base + AI-generated)
@@ -435,13 +438,17 @@ impl MemoryManager {
         prompted_changes: Option<&str>,
     ) -> Result<()> {
         let findings_json = serde_json::to_string(findings)?;
+        let analysis_type = analysis_type.to_string();
+        let prompted_changes = prompted_changes.map(String::from);
         
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT INTO idle_analyses (analysis_type, findings, prompted_changes) 
-             VALUES (?1, ?2, ?3)",
-            (analysis_type, findings_json, prompted_changes),
-        )?;
+        self.conn.call(move |conn| {
+            conn.execute(
+                "INSERT INTO idle_analyses (analysis_type, findings, prompted_changes) 
+                 VALUES (?1, ?2, ?3)",
+                (&analysis_type, &findings_json, &prompted_changes),
+            )?;
+            Ok(())
+        }).await?;
 
         info!("Stored {analysis_type} idle analysis");
         Ok(())
@@ -454,18 +461,20 @@ impl MemoryManager {
             .checked_sub_days(chrono::Days::new(u64::from(days)))
             .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
 
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT date, role, content FROM daily_conversations 
-             WHERE date >= ?1 ORDER BY date DESC, id DESC LIMIT 100"
-        )?;
-        
-        let rows = stmt.query_map([cutoff_date.to_string()], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        let cutoff_str = cutoff_date.to_string();
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT date, role, content FROM daily_conversations 
+                 WHERE date >= ?1 ORDER BY date DESC, id DESC LIMIT 100"
+            )?;
+            
+            let rows = stmt.query_map([&cutoff_str], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
 
-        let results: Vec<(String, String, String)> = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results: Vec<(String, String, String)> = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Query daily summaries
@@ -475,157 +484,162 @@ impl MemoryManager {
             .checked_sub_days(chrono::Days::new(u64::from(days)))
             .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
 
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT date, summary FROM daily_summaries 
-             WHERE date >= ?1 ORDER BY date DESC"
-        )?;
-        
-        let rows = stmt.query_map([cutoff_date.to_string()], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        let cutoff_str = cutoff_date.to_string();
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT date, summary FROM daily_summaries 
+                 WHERE date >= ?1 ORDER BY date DESC"
+            )?;
+            
+            let rows = stmt.query_map([&cutoff_str], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
 
-        let results: Vec<(String, String)> = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results: Vec<(String, String)> = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Query monthly summaries
     pub async fn query_monthly_summaries(&self, months: u32) -> Result<Vec<(String, String, i32)>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT year_month, summary, days_included FROM monthly_summaries 
-             ORDER BY year_month DESC LIMIT ?1"
-        )?;
-        
-        let rows = stmt.query_map([months], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT year_month, summary, days_included FROM monthly_summaries 
+                 ORDER BY year_month DESC LIMIT ?1"
+            )?;
+            
+            let rows = stmt.query_map([&months], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
 
-        let results: Vec<(String, String, i32)> = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results: Vec<(String, String, i32)> = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Get daily summary for a specific date
     pub async fn get_daily_summary(&self, date: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().await;
-        let result = conn.query_row(
-            "SELECT summary FROM daily_summaries WHERE date = ?1",
-            [date],
-            |row| row.get::<_, String>(0),
-        ).ok();
-        Ok(result)
+        let date = date.to_string();
+        self.conn.call(move |conn| {
+            let result = conn.query_row(
+                "SELECT summary FROM daily_summaries WHERE date = ?1",
+                [&date],
+                |row| row.get::<_, String>(0),
+            ).ok();
+            Ok(result)
+        }).await
     }
 
     /// Query notes
     pub async fn query_notes(&self, limit: u32) -> Result<Vec<(i64, String, String)>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT id, content, tags FROM notes 
-             ORDER BY created_at DESC LIMIT ?1"
-        )?;
-        
-        let rows = stmt.query_map([limit], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, content, tags FROM notes 
+                 ORDER BY created_at DESC LIMIT ?1"
+            )?;
+            
+            let rows = stmt.query_map([&limit], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
 
-        let results: Vec<(i64, String, String)> = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results: Vec<(i64, String, String)> = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Get recent conversations (last N days)
     pub async fn get_recent_conversations_days(&self, days: i64) -> Result<Vec<(String, String, String, String)>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT ct.timestamp, ct.role, ct.content, ct.session_id as user_id 
-             FROM conversation_turns ct
-             WHERE datetime(ct.timestamp) >= datetime('now', ? || ' days')
-             ORDER BY ct.timestamp DESC"
-        )?;
-        
-        let rows = stmt.query_map([format!("-{days}")], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })?;
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT ct.timestamp, ct.role, ct.content, ct.session_id as user_id 
+                 FROM conversation_turns ct
+                 WHERE datetime(ct.timestamp) >= datetime('now', ? || ' days')
+                 ORDER BY ct.timestamp DESC"
+            )?;
+            
+            let days_param = format!("-{days}");
+            let rows = stmt.query_map([&days_param], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
 
-        let results = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Get recent summaries (daily or monthly)
     pub async fn get_summaries(&self, summary_type: &str, limit: i64) -> Result<Vec<(String, String, String)>> {
-        let conn = self.conn.lock().await;
+        let summary_type = summary_type.to_string();
         
-        let (query, params): (&str, Vec<&dyn rusqlite::ToSql>) = match summary_type {
-            "daily" => (
-                "SELECT date, summary, tags FROM daily_summaries 
-                 ORDER BY date DESC LIMIT ?1",
-                vec![&limit]
-            ),
-            "monthly" => (
-                "SELECT year_month, summary, tags FROM monthly_summaries 
-                 ORDER BY year_month DESC LIMIT ?1",
-                vec![&limit]
-            ),
-            _ => anyhow::bail!("Invalid summary type: {summary_type}. Use 'daily' or 'monthly'"),
-        };
-        
-        let mut stmt = conn.prepare(query)?;
-        let rows = stmt.query_map(params.as_slice(), |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
+        self.conn.call(move |conn| {
+            let query = match summary_type.as_str() {
+                "daily" => "SELECT date, summary, tags FROM daily_summaries ORDER BY date DESC LIMIT ?1",
+                "monthly" => "SELECT year_month, summary, tags FROM monthly_summaries ORDER BY year_month DESC LIMIT ?1",
+                _ => return Err(anyhow::anyhow!("Invalid summary type: {summary_type}. Use 'daily' or 'monthly'").into()),
+            };
+            
+            let mut stmt = conn.prepare(query)?;
+            let rows = stmt.query_map([&limit], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
 
-        let results = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Get tool usage statistics
     pub async fn get_tool_usage_stats(&self, days: i64) -> Result<Vec<(String, i64, i64, f64)>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT tool_name, 
-                    COUNT(*) as total_calls,
-                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_calls,
-                    AVG(execution_time_ms) as avg_execution_time
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT tool_name, 
+                        COUNT(*) as total_calls,
+                        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_calls,
+                        AVG(execution_time_ms) as avg_execution_time
              FROM tool_usage
              WHERE datetime(timestamp) >= datetime('now', ? || ' days')
              GROUP BY tool_name
-             ORDER BY total_calls DESC"
-        )?;
-        
-        let rows = stmt.query_map([format!("-{days}")], |row| {
-            Ok((
-                row.get(0)?,  // tool_name
-                row.get(1)?,  // total_calls
-                row.get(2)?,  // successful_calls
-                row.get(3)?,  // avg_execution_time
-            ))
-        })?;
+                 ORDER BY total_calls DESC"
+            )?;
+            
+            let days_param = format!("-{days}");
+            let rows = stmt.query_map([&days_param], |row| {
+                Ok((
+                    row.get(0)?,  // tool_name
+                    row.get(1)?,  // total_calls
+                    row.get(2)?,  // successful_calls
+                    row.get(3)?,  // avg_execution_time
+                ))
+            })?;
 
-        let results = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Get recent tool usage
     pub async fn get_recent_tool_usage(&self, limit: i64) -> Result<Vec<(String, String, bool, String, String)>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT tool_name, arguments, success, result, timestamp
-             FROM tool_usage
-             ORDER BY timestamp DESC
-             LIMIT ?1"
-        )?;
-        
-        let rows = stmt.query_map([limit], |row| {
-            Ok((
-                row.get(0)?,  // tool_name
-                row.get(1)?,  // arguments
-                row.get(2)?,  // success
-                row.get(3)?,  // result
-                row.get(4)?,  // timestamp
-            ))
-        })?;
+        self.conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT tool_name, arguments, success, result, timestamp
+                 FROM tool_usage
+                 ORDER BY timestamp DESC
+                 LIMIT ?1"
+            )?;
+            
+            let rows = stmt.query_map([&limit], |row| {
+                Ok((
+                    row.get(0)?,  // tool_name
+                    row.get(1)?,  // arguments
+                    row.get(2)?,  // success
+                    row.get(3)?,  // result
+                    row.get(4)?,  // timestamp
+                ))
+            })?;
 
-        let results = rows.filter_map(Result::ok).collect();
-        Ok(results)
+            let results = rows.filter_map(Result::ok).collect();
+            Ok(results)
+        }).await
     }
 
     /// Get tool effectiveness summary
@@ -656,14 +670,15 @@ impl MemoryManager {
     /// Clear all memory tables (for testing)
     #[allow(clippy::significant_drop_tightening)]
     pub async fn clear_all(&self) -> Result<()> {
-        let conn = self.conn.lock().await;
-        
-        conn.execute("DELETE FROM notes", [])?;
-        conn.execute("DELETE FROM daily_conversations", [])?;
-        conn.execute("DELETE FROM daily_summaries", [])?;
-        conn.execute("DELETE FROM monthly_summaries", [])?;
-        conn.execute("DELETE FROM idle_analyses", [])?;
-        conn.execute("DELETE FROM tool_usage", [])?;
+        self.conn.call(|conn| {
+            conn.execute("DELETE FROM notes", [])?;
+            conn.execute("DELETE FROM daily_conversations", [])?;
+            conn.execute("DELETE FROM daily_summaries", [])?;
+            conn.execute("DELETE FROM monthly_summaries", [])?;
+            conn.execute("DELETE FROM idle_analyses", [])?;
+            conn.execute("DELETE FROM tool_usage", [])?;
+            Ok(())
+        }).await?;
         
         info!("Cleared all memory tables");
         Ok(())
@@ -671,110 +686,109 @@ impl MemoryManager {
 
     /// Get database statistics
     pub async fn get_database_stats(&self) -> Result<String> {
-        let conn = self.conn.lock().await;
-        
-        let conversations: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM daily_conversations",
-            [],
-            |row| row.get(0),
-        )?;
-        
-        let daily_summaries: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM daily_summaries",
-            [],
-            |row| row.get(0),
-        )?;
-        
-        let monthly_summaries: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM monthly_summaries",
-            [],
-            |row| row.get(0),
-        )?;
-        
-        let notes: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM notes",
-            [],
-            |row| row.get(0),
-        )?;
-        
-        let tasks: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM tasks",
-            [],
-            |row| row.get(0),
-        )?;
-        
-        let triggers: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM triggers",
-            [],
-            |row| row.get(0),
-        )?;
-        
-        Ok(format!(
-            "Database Statistics:\n\
-             Conversations: {conversations}\n\
-             Daily Summaries: {daily_summaries}\n\
-             Monthly Summaries: {monthly_summaries}\n\
-             Notes: {notes}\n\
-             Tasks: {tasks}\n\
-             Triggers: {triggers}"
-        ))
+        self.conn.call(|conn| {
+            let conversations: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM daily_conversations",
+                [],
+                |row| row.get(0),
+            )?;
+            
+            let daily_summaries: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM daily_summaries",
+                [],
+                |row| row.get(0),
+            )?;
+            
+            let monthly_summaries: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM monthly_summaries",
+                [],
+                |row| row.get(0),
+            )?;
+            
+            let notes: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM notes",
+                [],
+                |row| row.get(0),
+            )?;
+            
+            let tasks: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM tasks",
+                [],
+                |row| row.get(0),
+            )?;
+            
+            let triggers: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM triggers",
+                [],
+                |row| row.get(0),
+            )?;
+            
+            Ok(format!(
+                "Database Statistics:\n\
+                 Conversations: {conversations}\n\
+                 Daily Summaries: {daily_summaries}\n\
+                 Monthly Summaries: {monthly_summaries}\n\
+                 Notes: {notes}\n\
+                 Tasks: {tasks}\n\
+                 Triggers: {triggers}"
+            ))
+        }).await
     }
 
     /// Export database to JSON
     pub async fn export_database(&self) -> Result<String> {
         // For now, return a simple message
         // Full implementation would serialize all tables
-        let _conn = self.conn.lock().await; // Keep async for future implementation
         Ok("Database export not yet implemented. Use sqlite3 to export directly.".to_string())
     }
 
     /// Get memory compaction status
     pub async fn get_compaction_status(&self) -> Result<String> {
-        let conn = self.conn.lock().await;
-        
-        let last_daily: Option<String> = conn.query_row(
-            "SELECT date FROM daily_summaries ORDER BY date DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        ).ok();
-        
-        let last_monthly: Option<String> = conn.query_row(
-            "SELECT year_month FROM monthly_summaries ORDER BY year_month DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        ).ok();
-        
-        let oldest_conv: Option<String> = conn.query_row(
-            "SELECT date FROM daily_conversations ORDER BY date ASC LIMIT 1",
-            [],
-            |row| row.get(0),
-        ).ok();
-        
-        Ok(format!(
-            "Memory Compaction Status:\n\
-             Last daily summary: {}\n\
-             Last monthly summary: {}\n\
-             Oldest conversation: {}",
-            last_daily.unwrap_or_else(|| "None".to_string()),
-            last_monthly.unwrap_or_else(|| "None".to_string()),
-            oldest_conv.unwrap_or_else(|| "None".to_string()),
-        ))
+        self.conn.call(|conn| {
+            let last_daily: Option<String> = conn.query_row(
+                "SELECT date FROM daily_summaries ORDER BY date DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            ).ok();
+            
+            let last_monthly: Option<String> = conn.query_row(
+                "SELECT year_month FROM monthly_summaries ORDER BY year_month DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            ).ok();
+            
+            let oldest_conv: Option<String> = conn.query_row(
+                "SELECT date FROM daily_conversations ORDER BY date ASC LIMIT 1",
+                [],
+                |row| row.get(0),
+            ).ok();
+            
+            Ok(format!(
+                "Memory Compaction Status:\n\
+                 Last daily summary: {}\n\
+                 Last monthly summary: {}\n\
+                 Oldest conversation: {}",
+                last_daily.unwrap_or_else(|| "None".to_string()),
+                last_monthly.unwrap_or_else(|| "None".to_string()),
+                oldest_conv.unwrap_or_else(|| "None".to_string()),
+            ))
+        }).await
     }
 
     /// Force memory compaction
     pub async fn force_compact(&self) -> Result<()> {
         // For now, just return success
         // Full implementation would run daily compaction logic
-        let _conn = self.conn.lock().await; // Keep async for future implementation
         info!("Force compact requested (not yet implemented)");
         Ok(())
     }
 
     /// Reindex database
     pub async fn reindex_database(&self) -> Result<()> {
-        let conn = self.conn.lock().await;
-        
-        conn.execute("REINDEX", [])?;
+        self.conn.call(|conn| {
+            conn.execute("REINDEX", [])?;
+            Ok(())
+        }).await?;
         
         info!("Database reindexed");
         Ok(())
