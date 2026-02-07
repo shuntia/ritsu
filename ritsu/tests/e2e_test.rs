@@ -31,12 +31,14 @@ impl TestFixture {
         }
         std::fs::create_dir_all(&test_dir)?;
         
+        // Clean up any existing socket files
+        let _ = std::fs::remove_file("/tmp/ritsu.sock");
+        let _ = std::fs::remove_file("/tmp/ritsu-client.sock");
+        
         let db_path = test_dir.join("test.db");
-        let server_socket = test_dir.join("server.sock");
-        let client_socket = test_dir.join("client.sock");
         let config_path = test_dir.join("config.toml");
         
-        // Create test config
+        // Create test config - use default socket paths for E2E tests
         let config_content = format!(
             r#"
 [llm]
@@ -50,7 +52,7 @@ endpoint = "http://localhost:11434"
 model = "llama3.2:3b"
 
 [server]
-socket_path = "{}"
+socket_path = "/tmp/ritsu.sock"
 database_path = "{}"
 client_binary_path = "target/debug/ritsu"
 
@@ -62,11 +64,14 @@ user_response_seconds = 300
 http_request_seconds = 30
 llm_request_seconds = 120
 "#,
-            server_socket.display(),
             db_path.display()
         );
         
         std::fs::write(&config_path, config_content)?;
+        
+        // Use default socket paths
+        let server_socket = PathBuf::from("/tmp/ritsu.sock");
+        let client_socket = PathBuf::from("/tmp/ritsu-client.sock");
         
         Ok(Self {
             test_dir,
