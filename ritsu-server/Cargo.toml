@@ -30,6 +30,7 @@ futures.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
+cron = "0.12"
 dirs = "6.0"
 reqwest.workspace = true
 llm = { path = "../llm", features = ["openai", "anthropic", "ollama"], default-features = false }

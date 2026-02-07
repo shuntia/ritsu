@@ -8,7 +8,7 @@
 #![allow(clippy::uninlined_format_args)]
 
 use anyhow::Result;
-use chrono::{Datelike, Days, Local, NaiveTime, TimeZone};
+use chrono::{Datelike, Days, Local, NaiveTime, TimeZone, Utc};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,6 +28,8 @@ pub enum TriggerType {
     Interval(u64),
     /// Inactivity: seconds of no user interaction
     Inactivity(u64),
+    /// Cron: cron expression for complex scheduling
+    Cron(String),
     /// Dynamic: AI-initiated
     Dynamic,
 }
@@ -44,7 +46,7 @@ pub struct Trigger {
 
 pub struct TriggerRegistry {
     triggers: Arc<RwLock<Vec<Trigger>>>,
-    db_path: String,
+    pub db_path: String,
 }
 
 impl TriggerRegistry {
@@ -74,6 +76,7 @@ impl TriggerRegistry {
                     "time" => TriggerType::Time(schedule),
                     "interval" => TriggerType::Interval(schedule.parse().unwrap_or(3600)),
                     "inactivity" => TriggerType::Inactivity(schedule.parse().unwrap_or(1800)),
+                    "cron" => TriggerType::Cron(schedule),
                     "dynamic" => TriggerType::Dynamic,
                     _ => TriggerType::Dynamic,
                 };
@@ -249,6 +252,19 @@ impl TriggerRegistry {
         self.load_from_database().await?;
         Ok(())
     }
+}
+
+/// Calculate next trigger time for cron-based triggers
+fn calculate_next_cron_time(cron_expr: &str) -> Option<Instant> {
+    use cron::Schedule;
+    use std::str::FromStr;
+    
+    let schedule = Schedule::from_str(cron_expr).ok()?;
+    let now = Utc::now();
+    let next = schedule.after(&now).next()?;
+    
+    let duration = (next - now).to_std().ok()?;
+    Some(Instant::now() + duration)
 }
 
 /// Calculate next trigger time for time-based triggers
@@ -470,6 +486,26 @@ pub async fn execute_idle_analysis(
             memory.create_note(&format!("Daily Briefing - {}: {}", today, response.content), &["briefing".to_string()]).await?;
             info!("Daily briefing generated and stored as note");
         }
+        "custom" | "reminder" => {
+            // Custom AI-created trigger - send notification/message
+            info!("Executing custom trigger: {}", trigger.name);
+            
+            let message = trigger.metadata.get("message")
+                .map_or_else(|| format!("Reminder: {}", trigger.name), String::clone);
+            
+            let _urgency = trigger.metadata.get("urgency")
+                .map_or("normal", String::as_str);
+            
+            let open_chat = trigger.metadata.get("open_chat")
+                .is_some_and(|v| v == "true");
+            
+            // TODO: Send notification to client daemon via tool system
+            // For now, just log the action
+            info!("Custom trigger would notify: {} (open_chat: {})", message, open_chat);
+            
+            // Store as note so user can see it later
+            memory.create_note(&format!("Trigger '{}': {}", trigger.name, message), &["trigger".to_string(), "reminder".to_string()]).await?;
+        }
         _ => {
             warn!("Unknown analysis type: {}", analysis_type);
         }
@@ -520,6 +556,15 @@ pub async fn run_trigger_loop(
                     let instant = Instant::now() + Duration::from_secs(*seconds);
                     if next_trigger.as_ref().is_none_or(|(i, _)| instant < *i) {
                         next_trigger = Some((instant, trigger));
+                    }
+                }
+                TriggerType::Cron(cron_expr) => {
+                    if let Some(instant) = calculate_next_cron_time(cron_expr) {
+                        if next_trigger.as_ref().is_none_or(|(i, _)| instant < *i) {
+                            next_trigger = Some((instant, trigger));
+                        }
+                    } else {
+                        warn!("Invalid cron expression for trigger {}: {}", trigger.name, cron_expr);
                     }
                 }
                 TriggerType::Inactivity(threshold_secs) => {

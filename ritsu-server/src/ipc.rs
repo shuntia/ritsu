@@ -568,6 +568,7 @@ async fn handle_request(
                         crate::trigger::TriggerType::Time(time) => ("time".to_string(), time.clone()),
                         crate::trigger::TriggerType::Interval(secs) => ("interval".to_string(), secs.to_string()),
                         crate::trigger::TriggerType::Inactivity(secs) => ("inactivity".to_string(), secs.to_string()),
+                        crate::trigger::TriggerType::Cron(expr) => ("cron".to_string(), expr.clone()),
                         crate::trigger::TriggerType::Dynamic => ("dynamic".to_string(), String::new()),
                     };
                     ritsu_common::protocol::TriggerInfo {

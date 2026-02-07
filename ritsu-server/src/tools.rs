@@ -431,24 +431,42 @@ mod tool_impls {
     pub fn create_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "create_trigger".to_string(),
-            description: "Create a new time-based or event-based trigger for automation".to_string(),
-            tags: vec!["automation".to_string(), "trigger".to_string()],
+            description: "Create custom reminder/notification triggers. Use for meaningful, time-specific reminders. Examples: 'Remind me at 7 AM to review PRs', 'Check in every Monday at 9 AM'. Don't create triggers for things you can do immediately.".to_string(),
+            tags: vec!["automation".to_string(), "trigger".to_string(), "reminder".to_string()],
             parameters: vec![
                 ToolParameter {
                     name: "name".to_string(),
-                    description: "Unique trigger name".to_string(),
+                    description: "Unique trigger name (e.g., 'morning_pr_review')".to_string(),
                     required: true,
                     param_type: "string".to_string(),
                 },
                 ToolParameter {
                     name: "schedule".to_string(),
-                    description: "Schedule: 'HH:MM' for time, seconds for interval/inactivity".to_string(),
+                    description: "Schedule: 'HH:MM' for daily time, seconds for interval, or cron expression".to_string(),
                     required: true,
                     param_type: "string".to_string(),
                 },
                 ToolParameter {
                     name: "type".to_string(),
-                    description: "Trigger type: time, interval, inactivity, dynamic".to_string(),
+                    description: "Trigger type: 'time' (daily HH:MM), 'interval' (seconds), 'cron' (cron expression), 'dynamic' (one-time)".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "message".to_string(),
+                    description: "Message to send when trigger fires (for custom triggers)".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "open_chat".to_string(),
+                    description: "'true' to open chat window when triggered, 'false' for notification only".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "urgency".to_string(),
+                    description: "Notification urgency: 'low', 'normal', or 'critical'".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
@@ -473,25 +491,60 @@ mod tool_impls {
                     let trigger_type = args.get("type").cloned().unwrap_or_else(|| "time".to_string());
                     let tag = args.get("tag").cloned();
                     let description = args.get("description").cloned();
-
-                    info!("Creating trigger: {} ({}) at {}", name, trigger_type, schedule);
                     
-                    match trigger_registry.create_trigger(
-                        &name,
-                        &trigger_type,
-                        &schedule,
-                        tag.as_deref(),
-                        description.as_deref(),
-                    ).await {
-                        Ok(()) => {
-                            let desc_info = description.map(|d| format!(": {d}")).unwrap_or_default();
-                            ToolResult::success(format!("Trigger '{name}' created successfully{desc_info}"))
+                    // Check if this is a custom trigger (has message)
+                    let is_custom = args.contains_key("message");
+                    
+                    // Build metadata for custom triggers
+                    let mut metadata = std::collections::HashMap::new();
+                    if let Some(t) = tag {
+                        metadata.insert("tag".to_string(), t);
+                    }
+                    if let Some(d) = description.clone() {
+                        metadata.insert("description".to_string(), d);
+                    }
+                    
+                    if is_custom {
+                        // Custom trigger metadata
+                        metadata.insert("analysis_type".to_string(), "custom".to_string());
+                        if let Some(msg) = args.get("message") {
+                            metadata.insert("message".to_string(), msg.clone());
                         }
-                        Err(e) => {
-                            tracing::error!("Failed to create trigger: {}", e);
-                            ToolResult::error(format!("Failed to create trigger: {e}"))
+                        if let Some(open_chat) = args.get("open_chat") {
+                            metadata.insert("open_chat".to_string(), open_chat.clone());
+                        }
+                        if let Some(urgency) = args.get("urgency") {
+                            metadata.insert("urgency".to_string(), urgency.clone());
                         }
                     }
+
+                    info!("Creating trigger: {} ({}) at {} (custom: {})", name, trigger_type, schedule, is_custom);
+                    
+                    // Create trigger using database directly
+                    let conn = match rusqlite::Connection::open(&trigger_registry.db_path) {
+                        Ok(c) => c,
+                        Err(e) => return ToolResult::error(format!("Database error: {e}")),
+                    };
+                    
+                    let metadata_json = match serde_json::to_string(&metadata) {
+                        Ok(j) => j,
+                        Err(e) => return ToolResult::error(format!("Failed to serialize metadata: {e}")),
+                    };
+                    
+                    if let Err(e) = conn.execute(
+                        "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
+                         VALUES (?1, ?2, ?3, 1, 'ai', ?4, datetime('now'))",
+                        (&name, &trigger_type, &schedule, &metadata_json),
+                    ) {
+                        return ToolResult::error(format!("Failed to insert trigger: {e}"));
+                    }
+                    
+                    if let Err(e) = trigger_registry.load_from_database().await {
+                        return ToolResult::error(format!("Failed to reload triggers: {e}"));
+                    }
+                    
+                    let desc_info = description.map(|d| format!(": {d}")).unwrap_or_default();
+                    ToolResult::success(format!("Trigger '{name}' created successfully{desc_info}"))
                 })
             }),
         }
