@@ -167,11 +167,8 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> R
         stream.read_exact(&mut buf).await?;
 
         // Check if this is a SendMessage request (needs streaming support)
-        let is_send_message = if let Ok(req) = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&buf) {
-            matches!(req, ritsu_common::protocol::ClientRequest::SendMessage { .. })
-        } else {
-            false
-        };
+        let is_send_message = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&buf)
+            .is_ok_and(|req| matches!(req, ritsu_common::protocol::ClientRequest::SendMessage { .. }));
 
         // Proxy to server (keep big-endian)
         let len_bytes = (buf.len() as u32).to_be_bytes();

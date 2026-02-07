@@ -289,6 +289,38 @@ impl ConversationManager {
         info!("Cleared all conversations and turns");
         Ok(())
     }
+
+    /// Inspect a conversation session
+    pub async fn inspect_session(&self, session_id: &str) -> Result<String> {
+        let conn = self.db.lock().await;
+        
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM conversation_turns WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        
+        let first_turn: Option<String> = conn.query_row(
+            "SELECT timestamp FROM conversation_turns WHERE session_id = ?1 ORDER BY turn_number ASC LIMIT 1",
+            [session_id],
+            |row| row.get(0),
+        ).ok();
+        
+        let last_turn: Option<String> = conn.query_row(
+            "SELECT timestamp FROM conversation_turns WHERE session_id = ?1 ORDER BY turn_number DESC LIMIT 1",
+            [session_id],
+            |row| row.get(0),
+        ).ok();
+        
+        Ok(format!(
+            "Session: {session_id}\n\
+             Turn count: {count}\n\
+             First turn: {}\n\
+             Last turn: {}",
+            first_turn.unwrap_or_else(|| "None".to_string()),
+            last_turn.unwrap_or_else(|| "None".to_string()),
+        ))
+    }
 }
 
 #[cfg(test)]

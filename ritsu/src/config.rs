@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClientConfig {
     #[serde(default)]
     pub sockets: SocketConfig,
@@ -32,6 +32,7 @@ pub struct SocketConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_field_names)]
 pub struct TimeoutConfig {
     /// Connection timeout in seconds
     #[serde(default = "default_connect_timeout")]
@@ -93,18 +94,6 @@ pub struct RetryConfig {
     /// Enable exponential backoff for retries
     #[serde(default = "default_exponential_backoff")]
     pub exponential_backoff: bool,
-}
-
-impl Default for ClientConfig {
-    fn default() -> Self {
-        Self {
-            sockets: SocketConfig::default(),
-            timeouts: TimeoutConfig::default(),
-            gui: GuiConfig::default(),
-            paths: PathConfig::default(),
-            retry: RetryConfig::default(),
-        }
-    }
 }
 
 impl Default for SocketConfig {

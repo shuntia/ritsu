@@ -568,4 +568,115 @@ impl MemoryManager {
         info!("Cleared all memory tables");
         Ok(())
     }
+
+    /// Get database statistics
+    pub async fn get_database_stats(&self) -> Result<String> {
+        let conn = self.conn.lock().await;
+        
+        let conversations: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM daily_conversations",
+            [],
+            |row| row.get(0),
+        )?;
+        
+        let daily_summaries: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM daily_summaries",
+            [],
+            |row| row.get(0),
+        )?;
+        
+        let monthly_summaries: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM monthly_summaries",
+            [],
+            |row| row.get(0),
+        )?;
+        
+        let notes: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM notes",
+            [],
+            |row| row.get(0),
+        )?;
+        
+        let tasks: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM tasks",
+            [],
+            |row| row.get(0),
+        )?;
+        
+        let triggers: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM triggers",
+            [],
+            |row| row.get(0),
+        )?;
+        
+        Ok(format!(
+            "Database Statistics:\n\
+             Conversations: {conversations}\n\
+             Daily Summaries: {daily_summaries}\n\
+             Monthly Summaries: {monthly_summaries}\n\
+             Notes: {notes}\n\
+             Tasks: {tasks}\n\
+             Triggers: {triggers}"
+        ))
+    }
+
+    /// Export database to JSON
+    pub async fn export_database(&self) -> Result<String> {
+        // For now, return a simple message
+        // Full implementation would serialize all tables
+        let _conn = self.conn.lock().await; // Keep async for future implementation
+        Ok("Database export not yet implemented. Use sqlite3 to export directly.".to_string())
+    }
+
+    /// Get memory compaction status
+    pub async fn get_compaction_status(&self) -> Result<String> {
+        let conn = self.conn.lock().await;
+        
+        let last_daily: Option<String> = conn.query_row(
+            "SELECT date FROM daily_summaries ORDER BY date DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        ).ok();
+        
+        let last_monthly: Option<String> = conn.query_row(
+            "SELECT year_month FROM monthly_summaries ORDER BY year_month DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        ).ok();
+        
+        let oldest_conv: Option<String> = conn.query_row(
+            "SELECT date FROM daily_conversations ORDER BY date ASC LIMIT 1",
+            [],
+            |row| row.get(0),
+        ).ok();
+        
+        Ok(format!(
+            "Memory Compaction Status:\n\
+             Last daily summary: {}\n\
+             Last monthly summary: {}\n\
+             Oldest conversation: {}",
+            last_daily.unwrap_or_else(|| "None".to_string()),
+            last_monthly.unwrap_or_else(|| "None".to_string()),
+            oldest_conv.unwrap_or_else(|| "None".to_string()),
+        ))
+    }
+
+    /// Force memory compaction
+    pub async fn force_compact(&self) -> Result<()> {
+        // For now, just return success
+        // Full implementation would run daily compaction logic
+        let _conn = self.conn.lock().await; // Keep async for future implementation
+        info!("Force compact requested (not yet implemented)");
+        Ok(())
+    }
+
+    /// Reindex database
+    pub async fn reindex_database(&self) -> Result<()> {
+        let conn = self.conn.lock().await;
+        
+        conn.execute("REINDEX", [])?;
+        
+        info!("Database reindexed");
+        Ok(())
+    }
 }

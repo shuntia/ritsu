@@ -22,8 +22,8 @@ struct TestFixture {
 }
 
 impl TestFixture {
-    async fn new(test_name: &str) -> Result<Self> {
-        let test_dir = std::env::temp_dir().join(format!("ritsu_test_{}", test_name));
+    fn new(test_name: &str) -> Result<Self> {
+        let test_dir = std::env::temp_dir().join(format!("ritsu_test_{test_name}"));
         
         // Clean up any existing test directory
         if test_dir.exists() {
@@ -190,7 +190,7 @@ impl Drop for TestFixture {
 }
 
 /// Helper to run a ritsu command
-async fn run_command(args: &[&str]) -> Result<(bool, String)> {
+fn run_command(args: &[&str]) -> Result<(bool, String)> {
     let mut binary_path = std::env::current_dir()?.join("target/debug/ritsu");
     if !binary_path.exists() {
         binary_path = std::env::current_dir()?.parent()
@@ -205,14 +205,14 @@ async fn run_command(args: &[&str]) -> Result<(bool, String)> {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     
-    let combined = format!("{}{}", stdout, stderr);
+    let combined = format!("{stdout}{stderr}");
     Ok((success, combined))
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test --test e2e_test -- --ignored
+#[ignore = "E2E test - requires server"] // Run with: cargo test --test e2e_test -- --ignored
 async fn test_server_startup_and_ping() -> Result<()> {
-    let mut fixture = TestFixture::new("ping").await?;
+    let mut fixture = TestFixture::new("ping")?;
     
     // Start server
     fixture.start_server().await?;
@@ -221,54 +221,53 @@ async fn test_server_startup_and_ping() -> Result<()> {
     fixture.start_client_daemon().await?;
     
     // Test ping via client daemon
-    let (success, output) = run_command(&["server", "status"]).await?;
+    let (success, output) = run_command(&["server", "status"])?;
     
-    println!("Ping output: {}", output);
+    println!("Ping output: {output}");
     assert!(success || output.contains("Running"), "Server should be running");
     
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_send_message_and_receive_response() -> Result<()> {
-    let mut fixture = TestFixture::new("send_message").await?;
+    let mut fixture = TestFixture::new("send_message")?;
     
     // Start both daemons
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
     
     // Send a message
-    let (success, output) = run_command(&["send", "Hello, this is a test"]).await?;
+    let (success, output) = run_command(&["send", "Hello, this is a test"])?;
     
-    println!("Send output: {}", output);
+    println!("Send output: {output}");
     
     // Should get a response (not necessarily success if LLM not available)
     assert!(
         success || output.contains("daemon") || output.contains("🤖"),
-        "Should send message or get helpful error: {}",
-        output
+        "Should send message or get helpful error: {output}"
     );
     
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_session_persistence() -> Result<()> {
-    let mut fixture = TestFixture::new("session").await?;
+    let mut fixture = TestFixture::new("session")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
     
     // Send first message
-    let (success1, _) = run_command(&["send", "My name is Alice"]).await?;
+    let (success1, _) = run_command(&["send", "My name is Alice"])?;
     sleep(Duration::from_secs(2)).await;
     
     // Send second message in same session
-    let (success2, output2) = run_command(&["send", "What is my name?"]).await?;
+    let (success2, output2) = run_command(&["send", "What is my name?"])?;
     
-    println!("Session test output: {}", output2);
+    println!("Session test output: {output2}");
     
     // At minimum, commands should not crash
     assert!(
@@ -280,9 +279,9 @@ async fn test_session_persistence() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_task_management() -> Result<()> {
-    let mut fixture = TestFixture::new("tasks").await?;
+    let mut fixture = TestFixture::new("tasks")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
@@ -294,70 +293,69 @@ async fn test_task_management() -> Result<()> {
         "Test task",
         "--priority",
         "high",
-    ])
-    .await?;
+    ])?;
     
-    println!("Task creation success: {}", success);
+    println!("Task creation success: {success}");
     
     // List tasks
-    let (list_success, output) = run_command(&["task", "list"]).await?;
+    let (list_success, output) = run_command(&["task", "list"])?;
     
-    println!("Task list: {}", output);
+    println!("Task list: {output}");
     assert!(list_success, "Should list tasks");
     
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_notes_and_memory() -> Result<()> {
-    let mut fixture = TestFixture::new("notes").await?;
+    let mut fixture = TestFixture::new("notes")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
     
     // Query notes (should be empty initially)
-    let (success, output) = run_command(&["notes"]).await?;
+    let (success, output) = run_command(&["notes"])?;
     
-    println!("Notes output: {}", output);
+    println!("Notes output: {output}");
     assert!(success || output.contains("note"), "Should query notes");
     
     // Query memory
-    let (mem_success, mem_output) = run_command(&["memory", "--days", "7"]).await?;
+    let (mem_success, mem_output) = run_command(&["memory", "--days", "7"])?;
     
-    println!("Memory output: {}", mem_output);
+    println!("Memory output: {mem_output}");
     assert!(mem_success || mem_output.contains("memory"), "Should query memory");
     
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_trigger_management() -> Result<()> {
-    let mut fixture = TestFixture::new("triggers").await?;
+    let mut fixture = TestFixture::new("triggers")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
     
     // List triggers (should work even if empty)
-    let (success, output) = run_command(&["trigger", "list"]).await?;
+    let (success, output) = run_command(&["trigger", "list"])?;
     
-    println!("Trigger list: {}", output);
+    println!("Trigger list: {output}");
     assert!(success, "Should list triggers");
     
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_client_daemon_restart() -> Result<()> {
-    let mut fixture = TestFixture::new("restart").await?;
+    let mut fixture = TestFixture::new("restart")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
     
     // Send a message
-    let (_, _) = run_command(&["send", "Before restart"]).await?;
+    let (_, _) = run_command(&["send", "Before restart"])?;
     
     // Stop client daemon
     if let Some(mut child) = fixture.client_daemon_process.take() {
@@ -371,21 +369,18 @@ async fn test_client_daemon_restart() -> Result<()> {
     fixture.start_client_daemon().await?;
     
     // Send another message
-    let (success, _) = run_command(&["send", "After restart"]).await?;
+    let (_success, _) = run_command(&["send", "After restart"])?;
     
-    // Should still work
-    assert!(
-        success || true, // Even if LLM fails, restart should work
-        "Client daemon restart should work"
-    );
+    // Restart test passes if we got this far
+    // (LLM may not be available, so don't check message success)
     
     Ok(())
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_concurrent_messages() -> Result<()> {
-    let mut fixture = TestFixture::new("concurrent").await?;
+    let mut fixture = TestFixture::new("concurrent")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
@@ -393,16 +388,17 @@ async fn test_concurrent_messages() -> Result<()> {
     // Spawn multiple message sends concurrently
     let handles: Vec<_> = (0..3)
         .map(|i| {
-            tokio::spawn(async move {
-                run_command(&["send", &format!("Concurrent message {}", i)]).await
+            let msg = format!("Concurrent message {i}");
+            tokio::task::spawn_blocking(move || {
+                run_command(&["send", &msg])
             })
         })
         .collect();
     
     // Wait for all to complete
     for handle in handles {
-        let result = handle.await?;
-        println!("Concurrent result: {:?}", result);
+        let result = handle.await??;
+        println!("Concurrent result: {result:?}");
     }
     
     Ok(())
@@ -410,9 +406,9 @@ async fn test_concurrent_messages() -> Result<()> {
 
 /// Integration test to verify the full stack works
 #[tokio::test]
-#[ignore]
+#[ignore = "E2E test - requires server"]
 async fn test_full_conversation_flow() -> Result<()> {
-    let mut fixture = TestFixture::new("conversation").await?;
+    let mut fixture = TestFixture::new("conversation")?;
     
     fixture.start_server().await?;
     fixture.start_client_daemon().await?;
@@ -425,8 +421,8 @@ async fn test_full_conversation_flow() -> Result<()> {
     ];
     
     for msg in messages {
-        let (_, output) = run_command(&["send", msg]).await?;
-        println!("Message '{}' response: {}", msg, output);
+        let (_, output) = run_command(&["send", msg])?;
+        println!("Message '{msg}'response: {output}");
         sleep(Duration::from_millis(500)).await;
     }
     

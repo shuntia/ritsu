@@ -62,9 +62,8 @@ pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
                e.to_string().contains("Connection refused") {
                 eprintln!("✗ Client daemon not running. Start it with: ritsu start");
                 anyhow::bail!("Client daemon not running")
-            } else {
-                return Err(e);
             }
+            return Err(e);
         }
     };
 

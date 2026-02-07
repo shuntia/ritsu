@@ -140,6 +140,7 @@ async fn handle_client(
                                 &task_manager,
                                 &trigger_registry,
                                 &llm_client,
+                                &config,
                             ).await;
                             send_response(&mut stream, response).await?;
                         }
@@ -440,6 +441,7 @@ async fn handle_request(
     task_manager: &TaskManager,
     trigger_registry: &TriggerRegistry,
     llm_client: &LlmClient,
+    config: &crate::config::Config,
 ) -> ServerResponse {
     match request {
         ClientRequest::Ping => ServerResponse::Pong,
@@ -887,6 +889,95 @@ async fn handle_request(
                 },
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to set system prompt: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::GetModelInfo => {
+            let backend = config.llm.backends.first();
+            let model_info = backend.map_or_else(
+                || "No LLM backend configured".to_string(),
+                |b| format!(
+                    "Model Information:\n\
+                     Backend: {}\n\
+                     Endpoint: {}\n\
+                     Model: {}\n\
+                     Streaming: {}\n\
+                     Tools: {}",
+                    b.name,
+                    b.endpoint,
+                    b.model,
+                    !config.llm.disable_streaming,
+                    !config.llm.disable_tools,
+                )
+            );
+            ServerResponse::Success {
+                message: model_info,
+            }
+        }
+
+        ClientRequest::GetDatabaseStats => {
+            match memory.get_database_stats().await {
+                Ok(stats) => ServerResponse::Success { message: stats },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to get database stats: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::ExportDatabase => {
+            match memory.export_database().await {
+                Ok(json) => ServerResponse::Success { message: json },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to export database: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::InspectSession { session_id } => {
+            match conversation_manager.inspect_session(&session_id).await {
+                Ok(info) => ServerResponse::Success { message: info },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to inspect session: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::GetToolStats => {
+            // For now, return a placeholder message
+            // Full implementation would track tool usage in database
+            ServerResponse::Success {
+                message: "Tool statistics tracking not yet implemented".to_string(),
+            }
+        }
+
+        ClientRequest::GetMemoryStatus => {
+            match memory.get_compaction_status().await {
+                Ok(status) => ServerResponse::Success { message: status },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to get memory status: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::ForceCompact => {
+            match memory.force_compact().await {
+                Ok(()) => ServerResponse::Success {
+                    message: "Memory compaction completed successfully".to_string(),
+                },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to force compact: {}", e),
+                },
+            }
+        }
+
+        ClientRequest::ReindexDatabase => {
+            match memory.reindex_database().await {
+                Ok(()) => ServerResponse::Success {
+                    message: "Database reindexed successfully".to_string(),
+                },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to reindex database: {}", e),
                 },
             }
         }
