@@ -274,7 +274,33 @@ impl Database {
         info!("Database schema initialized successfully");
         Ok(())
     }
+    
+    /// Execute a database operation in a blocking context
+    /// Use this helper for all DB operations from async contexts
+    pub async fn execute_blocking<F, T>(db_path: String, f: F) -> Result<T>
+    where
+        F: FnOnce(&Connection) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&db_path)?;
+            f(&conn)
+        })
+        .await
+        .context("Task panicked")?
+    }
 }
+
+/// Helper function for filesystem operations
+pub async fn read_file_async(path: impl AsRef<Path> + Send + 'static) -> Result<String> {
+    tokio::task::spawn_blocking(move || {
+        std::fs::read_to_string(path.as_ref())
+            .with_context(|| format!("Failed to read file: {}", path.as_ref().display()))
+    })
+    .await
+    .context("Task panicked")?
+}
+
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]

@@ -319,7 +319,7 @@ impl MemoryManager {
 
         // 2. Load context-specific prompt
         if context != "general" {
-            if let Ok(context_prompt) = Self::load_context_prompt(context) {
+            if let Ok(context_prompt) = Self::load_context_prompt(context).await {
                 parts.push(context_prompt);
             }
         }
@@ -335,25 +335,25 @@ impl MemoryManager {
     /// Load base system prompt from various sources
     async fn load_base_prompt(&self) -> Result<String> {
         // Try .config/ritsu/prompts/system_base.md first
-        if let Ok(content) = std::fs::read_to_string(".config/ritsu/prompts/system_base.md") {
+        if let Ok(content) = crate::database::read_file_async(".config/ritsu/prompts/system_base.md").await {
             return Ok(content);
         }
 
         // Try home directory
         if let Some(home) = dirs::home_dir() {
-            if let Ok(content) = std::fs::read_to_string(home.join(".config/ritsu/prompts/system_base.md")) {
+            if let Ok(content) = crate::database::read_file_async(home.join(".config/ritsu/prompts/system_base.md")).await {
                 return Ok(content);
             }
         }
 
         // Fall back to legacy .config/system_prompt.md
-        if let Ok(content) = std::fs::read_to_string(".config/system_prompt.md") {
+        if let Ok(content) = crate::database::read_file_async(".config/system_prompt.md").await {
             return Ok(content);
         }
 
         // Try home directory legacy location
         if let Some(home) = dirs::home_dir() {
-            if let Ok(content) = std::fs::read_to_string(home.join(".config/ritsu/system_prompt.md")) {
+            if let Ok(content) = crate::database::read_file_async(home.join(".config/ritsu/system_prompt.md")).await {
                 return Ok(content);
             }
         }
@@ -368,7 +368,7 @@ impl MemoryManager {
     }
 
     /// Load context-specific prompt (chat, background, etc.)
-    fn load_context_prompt(context: &str) -> Result<String> {
+    async fn load_context_prompt(context: &str) -> Result<String> {
         let filename = match context {
             "chat" => "chat.md",
             "background" => "background.md",
@@ -380,14 +380,14 @@ impl MemoryManager {
 
         // Try .config/ritsu/prompts/{filename}
         let local_path = format!(".config/ritsu/prompts/{filename}");
-        if let Ok(content) = std::fs::read_to_string(&local_path) {
+        if let Ok(content) = crate::database::read_file_async(local_path).await {
             return Ok(content);
         }
 
         // Try home directory
         if let Some(home) = dirs::home_dir() {
             let home_path = home.join(format!(".config/ritsu/prompts/{filename}"));
-            if let Ok(content) = std::fs::read_to_string(home_path) {
+            if let Ok(content) = crate::database::read_file_async(home_path).await {
                 return Ok(content);
             }
         }

@@ -186,20 +186,17 @@ async fn main() -> Result<()> {
 
 /// Check if Ollama is installed and start it if not already running
 async fn start_ollama_if_needed(model_name: &str) {
-    use std::process::Command;
+    // Check if ollama is installed (spawn_blocking for sync Command)
+    let ollama_installed = tokio::task::spawn_blocking(|| {
+        std::process::Command::new("which")
+            .arg("ollama")
+            .output()
+            .ok()
+            .is_some_and(|o| o.status.success())
+    }).await;
     
-    // Check if ollama is installed
-    let ollama_check = Command::new("which")
-        .arg("ollama")
-        .output();
-    
-    if let Ok(output) = ollama_check {
-        if !output.status.success() {
-            tracing::debug!("Ollama not found in PATH");
-            return;
-        }
-    } else {
-        tracing::debug!("Failed to check for ollama");
+    if !ollama_installed.unwrap_or(false) {
+        tracing::debug!("Ollama not found in PATH");
         return;
     }
     
@@ -220,15 +217,22 @@ async fn start_ollama_if_needed(model_name: &str) {
     // Start Ollama in background
     tracing::info!("Starting Ollama server (output: /tmp/ritsu-ollama.log)...");
     
-    // Open log file
-    let log_file = match std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/ritsu-ollama.log")
-    {
-        Ok(file) => file,
-        Err(e) => {
+    // Open log file using spawn_blocking
+    let log_file_result = tokio::task::spawn_blocking(|| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/ritsu-ollama.log")
+    }).await;
+    
+    let log_file = match log_file_result {
+        Ok(Ok(file)) => file,
+        Ok(Err(e)) => {
             tracing::warn!("Failed to open /tmp/ritsu-ollama.log: {}", e);
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("Task failed: {}", e);
             return;
         }
     };

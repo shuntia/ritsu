@@ -525,22 +525,26 @@ mod tool_impls {
 
                     info!("Creating trigger: {} ({}) at {} (custom: {})", name, trigger_type, schedule, is_custom);
                     
-                    // Create trigger using database directly
-                    let conn = match rusqlite::Connection::open(&trigger_registry.db_path) {
-                        Ok(c) => c,
-                        Err(e) => return ToolResult::error(format!("Database error: {e}")),
-                    };
-                    
                     let metadata_json = match serde_json::to_string(&metadata) {
                         Ok(j) => j,
                         Err(e) => return ToolResult::error(format!("Failed to serialize metadata: {e}")),
                     };
                     
-                    if let Err(e) = conn.execute(
-                        "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
-                         VALUES (?1, ?2, ?3, 1, 'ai', ?4, datetime('now'))",
-                        (&name, &trigger_type, &schedule, &metadata_json),
-                    ) {
+                    // Create trigger using spawn_blocking
+                    let db_path = trigger_registry.db_path.clone();
+                    let name_clone = name.clone();
+                    let trigger_type_clone = trigger_type.clone();
+                    let schedule_clone = schedule.clone();
+                    let metadata_json_clone = metadata_json.clone();
+                    
+                    if let Err(e) = crate::database::Database::execute_blocking(db_path, move |conn| {
+                        conn.execute(
+                            "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
+                             VALUES (?1, ?2, ?3, 1, 'ai', ?4, datetime('now'))",
+                            (&name_clone, &trigger_type_clone, &schedule_clone, &metadata_json_clone),
+                        )?;
+                        Ok(())
+                    }).await {
                         return ToolResult::error(format!("Failed to insert trigger: {e}"));
                     }
                     

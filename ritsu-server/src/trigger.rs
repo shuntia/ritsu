@@ -60,9 +60,9 @@ impl TriggerRegistry {
     }
 
     pub async fn load_from_database(&self) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
         
-        let loaded_triggers: Vec<Trigger> = {
+        let loaded_triggers = crate::database::Database::execute_blocking(db_path, |conn| {
             let mut stmt = conn.prepare("SELECT id, name, trigger_type, schedule, enabled, created_by, metadata FROM triggers WHERE enabled = 1")?;
             
             let triggers_iter = stmt.query_map([], |row| {
@@ -96,8 +96,8 @@ impl TriggerRegistry {
                 })
             })?;
 
-            triggers_iter.filter_map(Result::ok).collect()
-        };
+            Ok(triggers_iter.filter_map(Result::ok).collect::<Vec<_>>())
+        }).await?;
 
         let mut triggers = self.triggers.write().await;
         triggers.clear();
@@ -108,37 +108,41 @@ impl TriggerRegistry {
     }
 
     pub async fn register_builtin_triggers(&self) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
         
-        // Daily conversation compaction at 2:00 AM
-        Self::insert_trigger_if_not_exists(
-            &conn,
-            "daily_compaction",
-            "time",
-            "02:00",
-            "system",
-            r#"{"analysis_type":"conversation"}"#,
-        )?;
+        crate::database::Database::execute_blocking(db_path, |conn| {
+            // Daily conversation compaction at 2:00 AM
+            Self::insert_trigger_if_not_exists(
+                conn,
+                "daily_compaction",
+                "time",
+                "02:00",
+                "system",
+                r#"{"analysis_type":"conversation"}"#,
+            )?;
 
-        // Weekly pattern recognition on Sunday at 3:00 AM
-        Self::insert_trigger_if_not_exists(
-            &conn,
-            "weekly_pattern",
-            "time",
-            "03:00",
-            "system",
-            r#"{"analysis_type":"pattern","day":"sunday"}"#,
-        )?;
+            // Weekly pattern recognition on Sunday at 3:00 AM
+            Self::insert_trigger_if_not_exists(
+                conn,
+                "weekly_pattern",
+                "time",
+                "03:00",
+                "system",
+                r#"{"analysis_type":"pattern","day":"sunday"}"#,
+            )?;
 
-        // Monthly self-reflection on last day at 5:00 AM
-        Self::insert_trigger_if_not_exists(
-            &conn,
-            "monthly_reflection",
-            "time",
-            "05:00",
-            "system",
-            r#"{"analysis_type":"reflection","day":"last"}"#,
-        )?;
+            // Monthly self-reflection on last day at 5:00 AM
+            Self::insert_trigger_if_not_exists(
+                conn,
+                "monthly_reflection",
+                "time",
+                "05:00",
+                "system",
+                r#"{"analysis_type":"reflection","day":"last"}"#,
+            )?;
+            
+            Ok(())
+        }).await?;
 
         self.load_from_database().await?;
         Ok(())
@@ -171,7 +175,7 @@ impl TriggerRegistry {
         tags: Vec<String>,
         metadata: HashMap<String, String>,
     ) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
         
         // Build full metadata with tags and description
         let mut full_metadata = metadata;
@@ -179,11 +183,14 @@ impl TriggerRegistry {
         full_metadata.insert("description".to_string(), description);
         let metadata_json = serde_json::to_string(&full_metadata)?;
         
-        conn.execute(
-            "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
-             VALUES (?1, 'dynamic', '', 1, 'ai', ?2, datetime('now'))",
-            (&name, metadata_json),
-        )?;
+        crate::database::Database::execute_blocking(db_path, move |conn| {
+            conn.execute(
+                "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
+                 VALUES (?1, 'dynamic', '', 1, 'ai', ?2, datetime('now'))",
+                (&name, metadata_json),
+            )?;
+            Ok(())
+        }).await?;
 
         self.load_from_database().await?;
         self.trigger_changed.notify_one();
@@ -191,8 +198,14 @@ impl TriggerRegistry {
     }
 
     pub async fn remove_trigger(&self, name: &str) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
-        conn.execute("DELETE FROM triggers WHERE name = ?1", [name])?;
+        let db_path = self.db_path.clone();
+        let name = name.to_string();
+        
+        crate::database::Database::execute_blocking(db_path, move |conn| {
+            conn.execute("DELETE FROM triggers WHERE name = ?1", [&name])?;
+            Ok(())
+        }).await?;
+        
         self.load_from_database().await?;
         self.trigger_changed.notify_one();
         Ok(())
@@ -214,7 +227,10 @@ impl TriggerRegistry {
         tag: Option<&str>,
         description: Option<&str>,
     ) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
+        let name = name.to_string();
+        let trigger_type = trigger_type.to_string();
+        let schedule = schedule.to_string();
         
         // Build metadata JSON with tag and description
         let mut metadata = HashMap::new();
@@ -226,23 +242,30 @@ impl TriggerRegistry {
         }
         let metadata_json = serde_json::to_string(&metadata)?;
         
-        conn.execute(
-            "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
-             VALUES (?1, ?2, ?3, 1, 'user', ?4, datetime('now'))",
-            (name, trigger_type, schedule, metadata_json),
-        )?;
+        crate::database::Database::execute_blocking(db_path, move |conn| {
+            conn.execute(
+                "INSERT INTO triggers (name, trigger_type, schedule, enabled, created_by, metadata, created_at)
+                 VALUES (?1, ?2, ?3, 1, 'user', ?4, datetime('now'))",
+                (&name, &trigger_type, &schedule, &metadata_json),
+            )?;
+            Ok(())
+        }).await?;
 
         self.load_from_database().await?;
         Ok(())
     }
 
     pub async fn delete_trigger(&self, name: &str) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
+        let name = name.to_string();
+        let name_for_error = name.clone();
         
-        let rows = conn.execute("DELETE FROM triggers WHERE name = ?1", [name])?;
+        let rows = crate::database::Database::execute_blocking(db_path, move |conn| {
+            Ok(conn.execute("DELETE FROM triggers WHERE name = ?1", [&name])?)
+        }).await?;
         
         if rows == 0 {
-            anyhow::bail!("Trigger not found: {}", name);
+            anyhow::bail!("Trigger not found: {}", name_for_error);
         }
 
         self.load_from_database().await?;
@@ -250,15 +273,19 @@ impl TriggerRegistry {
     }
 
     pub async fn disable_trigger(&self, name: &str) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let db_path = self.db_path.clone();
+        let name = name.to_string();
+        let name_for_error = name.clone();
         
-        let rows = conn.execute(
-            "UPDATE triggers SET enabled = 0 WHERE name = ?1",
-            [name],
-        )?;
+        let rows = crate::database::Database::execute_blocking(db_path, move |conn| {
+            Ok(conn.execute(
+                "UPDATE triggers SET enabled = 0 WHERE name = ?1",
+                [&name],
+            )?)
+        }).await?;
         
         if rows == 0 {
-            anyhow::bail!("Trigger not found: {}", name);
+            anyhow::bail!("Trigger not found: {}", name_for_error);
         }
 
         self.load_from_database().await?;
