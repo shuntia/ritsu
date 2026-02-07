@@ -67,10 +67,15 @@ impl ToolRegistry {
     #[allow(dead_code)]
     pub async fn execute(&self, name: &str, args: HashMap<String, String>) -> Result<ToolResult> {
         let start = std::time::Instant::now();
-        let tools = self.tools.read().await;
         
-        let result = if let Some(tool) = tools.get(name) {
-            (tool.handler)(args.clone()).await
+        // Clone the handler to avoid holding lock across await
+        let handler = {
+            let tools = self.tools.read().await;
+            tools.get(name).map(|tool| tool.handler.clone())
+        };
+        
+        let result = if let Some(handler) = handler {
+            handler(args.clone()).await
         } else {
             ToolResult::error(format!("Tool '{name}' not found"))
         };

@@ -25,30 +25,10 @@ impl IpcClient {
     async fn get_connection(&self) -> Result<tokio::sync::MutexGuard<'_, Option<UnixStream>>> {
         let mut guard = self.connection.lock().await;
         
-        // If connection exists, test it by trying to peek (non-destructive)
-        if let Some(stream) = guard.as_mut() {
-            // Try to peek 1 byte to test if connection is alive
-            let mut buf = [0u8; 1];
-            match stream.try_read(&mut buf) {
-                Ok(0) => {
-                    // Connection closed
-                    *guard = None;
-                }
-                Ok(_) => {
-                    // Data available (shouldn't happen in our protocol), connection alive
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No data available, connection is alive - this is expected
-                    return Ok(guard);
-                }
-                Err(_) => {
-                    // Connection error
-                    *guard = None;
-                }
-            }
-        }
+        // Don't test connection liveness - let actual protocol operations fail
+        // Testing with try_read() would consume bytes and corrupt the stream
         
-        // Need to establish new connection
+        // If no connection exists, establish new one
         if guard.is_none() {
             let stream = UnixStream::connect(&self.socket_path).await?;
             *guard = Some(stream);

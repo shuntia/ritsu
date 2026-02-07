@@ -537,13 +537,23 @@ impl MemoryManager {
     /// Get recent summaries (daily or monthly)
     pub async fn get_summaries(&self, summary_type: &str, limit: i64) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT date, summary, tags FROM summaries 
-             WHERE type = ?1
-             ORDER BY date DESC LIMIT ?2"
-        )?;
         
-        let rows = stmt.query_map((summary_type, limit), |row| {
+        let (query, params): (&str, Vec<&dyn rusqlite::ToSql>) = match summary_type {
+            "daily" => (
+                "SELECT date, summary, tags FROM daily_summaries 
+                 ORDER BY date DESC LIMIT ?1",
+                vec![&limit]
+            ),
+            "monthly" => (
+                "SELECT year_month, summary, tags FROM monthly_summaries 
+                 ORDER BY year_month DESC LIMIT ?1",
+                vec![&limit]
+            ),
+            _ => anyhow::bail!("Invalid summary type: {}. Use 'daily' or 'monthly'", summary_type),
+        };
+        
+        let mut stmt = conn.prepare(query)?;
+        let rows = stmt.query_map(params.as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
 
