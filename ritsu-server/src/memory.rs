@@ -14,39 +14,45 @@ use crate::llm::LlmClient;
 
 pub struct MemoryManager {
     conn: Arc<Mutex<Connection>>,
+    db_path: String,
 }
 
 #[allow(dead_code)]
 impl MemoryManager {
     #[must_use]
-    pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
-        Self { conn }
+    pub fn new(conn: Arc<Mutex<Connection>>, db_path: String) -> Self {
+        Self { conn, db_path }
     }
 
     /// Store a conversation message
     pub async fn store_conversation(&self, role: &str, content: &str) -> Result<()> {
         let date = chrono::Utc::now().date_naive();
+        let db_path = self.db_path.clone();
+        let role = role.to_string();
+        let content = content.to_string();
         
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT INTO daily_conversations (date, role, content) VALUES (?1, ?2, ?3)",
-            (date.to_string(), role, content),
-        )?;
-        
-        Ok(())
+        crate::database::Database::execute_blocking(db_path, move |conn| {
+            conn.execute(
+                "INSERT INTO daily_conversations (date, role, content) VALUES (?1, ?2, ?3)",
+                (date.to_string(), &role, &content),
+            )?;
+            Ok(())
+        }).await
     }
 
     /// Create a note
     pub async fn create_note(&self, content: &str, tags: &[String]) -> Result<i64> {
         let tags_json = serde_json::to_string(tags)?;
+        let db_path = self.db_path.clone();
+        let content = content.to_string();
         
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT INTO notes (content, tags) VALUES (?1, ?2)",
-            (content, &tags_json),
-        )?;
-        
-        Ok(conn.last_insert_rowid())
+        crate::database::Database::execute_blocking(db_path, move |conn| {
+            conn.execute(
+                "INSERT INTO notes (content, tags) VALUES (?1, ?2)",
+                (&content, &tags_json),
+            )?;
+            Ok(conn.last_insert_rowid())
+        }).await
     }
 
     /// Compact daily conversations into a daily summary

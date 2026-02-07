@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
     info!("Database initialized at: {}", config.server.database_path);
 
     // Initialize memory manager
-    let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone()));
+    let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone(), config.server.database_path.clone()));
     info!("Memory manager initialized");
 
     // Initialize conversation manager
