@@ -125,16 +125,6 @@ impl TriggerRegistry {
             r#"{"analysis_type":"pattern","day":"sunday"}"#,
         )?;
 
-        // Bi-weekly tool effectiveness (1st & 15th at 4:00 AM)
-        Self::insert_trigger_if_not_exists(
-            &conn,
-            "biweekly_tools",
-            "time",
-            "04:00",
-            "system",
-            r#"{"analysis_type":"tools","days":"1,15"}"#,
-        )?;
-
         // Monthly self-reflection on last day at 5:00 AM
         Self::insert_trigger_if_not_exists(
             &conn,
@@ -143,16 +133,6 @@ impl TriggerRegistry {
             "05:00",
             "system",
             r#"{"analysis_type":"reflection","day":"last"}"#,
-        )?;
-
-        // Inactivity analysis after 30 minutes
-        Self::insert_trigger_if_not_exists(
-            &conn,
-            "inactivity_analysis",
-            "inactivity",
-            "1800",
-            "system",
-            r#"{"analysis_type":"conversation"}"#,
         )?;
 
         self.load_from_database().await?;
@@ -414,65 +394,6 @@ pub async fn execute_idle_analysis(
             ]);
             memory.store_idle_analysis("pattern", &findings, None).await?;
             info!("Weekly pattern recognition completed: {}", response.content.chars().take(100).collect::<String>());
-        }
-        "tools" => {
-            // Bi-weekly tool effectiveness analysis
-            info!("Starting tool effectiveness analysis");
-            
-            // Get tool usage statistics
-            let tool_stats = memory.get_tool_effectiveness_summary(14).await
-                .unwrap_or_else(|_| "Unable to retrieve tool usage statistics".to_string());
-            
-            // Get past 14 days of activity
-            let past_summaries = memory.query_daily_summaries(14).await?;
-            
-            if past_summaries.is_empty() && tool_stats.contains("No tool usage") {
-                info!("No activity to analyze for tool effectiveness");
-                return Ok(());
-            }
-            
-            let system_prompt = memory.build_background_prompt(Some("tools")).await?;
-            let summaries_text = if past_summaries.is_empty() {
-                "No daily summaries available".to_string()
-            } else {
-                past_summaries.iter()
-                    .map(|(date, summary)| format!("{date}: {summary}"))
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            };
-            
-            let messages = vec![
-                crate::llm::Message {
-                    role: "system".to_string(),
-                    content: system_prompt,
-                },
-                crate::llm::Message {
-                    role: "user".to_string(),
-                    content: format!(
-                        "Analyze tool effectiveness over the past 14 days:\n\n{}\n\n📊 Tool Usage Statistics:\n{}\n\nEvaluate:\n1. Which tools are most/least used\n2. Tool success rates and performance\n3. User interaction patterns\n4. Suggestions for improvement",
-                        summaries_text, tool_stats
-                    ),
-                }
-            ];
-            
-            let response = llm_client.generate(&messages, None).await
-                .ok()
-                .unwrap_or_else(|| {
-                    warn!("Effectiveness analysis LLM error");
-                    crate::llm::LlmResponse {
-                        content: format!("Tool effectiveness analysis for past 14 days\n{}", tool_stats),
-                        tool_calls: Vec::new(),
-                    }
-                });
-            
-            let findings = HashMap::from([
-                ("type".to_string(), "tool_effectiveness".to_string()),
-                ("summary".to_string(), response.content.clone()),
-                ("period".to_string(), "14_days".to_string()),
-                ("stats".to_string(), tool_stats),
-            ]);
-            memory.store_idle_analysis("tools", &findings, None).await?;
-            info!("Tool effectiveness analysis completed: {}", response.content.chars().take(100).collect::<String>());
         }
         "reflection" => {
             // Monthly self-reflection and compaction

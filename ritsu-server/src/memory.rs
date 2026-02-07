@@ -374,7 +374,6 @@ impl MemoryManager {
             "background" => "background.md",
             "compact" => "background/compact.md",
             "pattern" => "background/pattern.md",
-            "tools" => "background/tools.md",
             "briefing" => "background/briefing.md",
             _ => return Err(anyhow::anyhow!("Unknown context: {context}")),
         };
@@ -406,7 +405,6 @@ impl MemoryManager {
         let context = match analysis_type {
             Some("conversation" | "reflection") => "compact",  // Daily/monthly compaction
             Some("pattern") => "pattern",       // Weekly pattern recognition
-            Some("tools") => "tools",           // Tool effectiveness analysis
             Some("morning_briefing" | "daily_briefing") => "briefing",
             _ => "background",  // Generic background task
         };
