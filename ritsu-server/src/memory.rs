@@ -549,7 +549,7 @@ impl MemoryManager {
                  ORDER BY year_month DESC LIMIT ?1",
                 vec![&limit]
             ),
-            _ => anyhow::bail!("Invalid summary type: {}. Use 'daily' or 'monthly'", summary_type),
+            _ => anyhow::bail!("Invalid summary type: {summary_type}. Use 'daily' or 'monthly'"),
         };
         
         let mut stmt = conn.prepare(query)?;

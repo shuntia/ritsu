@@ -543,8 +543,8 @@ pub async fn run_trigger_loop(
         if triggers.is_empty() {
             info!("No triggers registered, waiting for changes or 60 seconds");
             tokio::select! {
-                _ = sleep(Duration::from_secs(60)) => {},
-                _ = notifier.notified() => {
+                () = sleep(Duration::from_secs(60)) => {},
+                () = notifier.notified() => {
                     info!("Trigger registry changed, reloading");
                 }
             }
@@ -621,7 +621,7 @@ pub async fn run_trigger_loop(
             
             // Wait for trigger time or registry change
             tokio::select! {
-                _ = sleep_until(instant) => {
+                () = sleep_until(instant) => {
                     // Trigger time reached - execute it
                     info!("Executing trigger: {}", trigger.name);
                     if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client).await {
@@ -635,7 +635,7 @@ pub async fn run_trigger_loop(
                         }
                     }
                 }
-                _ = notifier.notified() => {
+                () = notifier.notified() => {
                     // Trigger registry changed - reschedule
                     info!("Trigger registry changed, rescheduling");
                 }
@@ -643,8 +643,8 @@ pub async fn run_trigger_loop(
         } else {
             // No triggers ready, wait for registry change or check again in 60 seconds
             tokio::select! {
-                _ = sleep(Duration::from_secs(60)) => {},
-                _ = notifier.notified() => {
+                () = sleep(Duration::from_secs(60)) => {},
+                () = notifier.notified() => {
                     info!("Trigger registry changed, rescheduling");
                 }
             }
