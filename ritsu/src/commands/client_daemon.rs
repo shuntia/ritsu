@@ -97,7 +97,7 @@ async fn handle_server_tool_requests(
             return Err(anyhow::anyhow!("Server disconnected"));
         }
 
-        let len = u32::from_le_bytes(len_buf) as usize;
+        let len = u32::from_be_bytes(len_buf) as usize;
         if len > 10_000_000 {
             return Err(anyhow::anyhow!("Message too large"));
         }
@@ -118,7 +118,7 @@ async fn handle_server_tool_requests(
 
         // Send response back to server
         let response_bytes = postcard::to_allocvec(&response)?;
-        let len_bytes = (response_bytes.len() as u32).to_le_bytes();
+        let len_bytes = (response_bytes.len() as u32).to_be_bytes();
 
         let mut guard = server_connection.lock().await;
         if let Some(stream) = guard.as_mut() {

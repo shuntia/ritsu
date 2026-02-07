@@ -76,7 +76,7 @@ impl ServerState {
 
         // Serialize and send request
         let request_bytes = postcard::to_allocvec(&request)?;
-        let len_bytes = (request_bytes.len() as u32).to_le_bytes();
+        let len_bytes = (request_bytes.len() as u32).to_be_bytes();
 
         if let Err(e) = stream.write_all(&len_bytes).await {
             error!("Failed to send to client daemon: {}", e);
@@ -104,7 +104,7 @@ impl ServerState {
             return Err(anyhow::anyhow!("Failed to read response"));
         }
 
-        let len = u32::from_le_bytes(len_buf) as usize;
+        let len = u32::from_be_bytes(len_buf) as usize;
         let mut buf = vec![0u8; len];
         
         if let Err(e) = stream.read_exact(&mut buf).await {

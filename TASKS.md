@@ -102,10 +102,10 @@
 ## 📋 REMEDIATION PLAN
 
 ### Phase 1: Critical Fixes (P0) - ~4 hours
-1. [ ] Fix `get_summaries` SQL bug
-2. [ ] Remove `try_read` pattern from IPC client
-3. [ ] Fix `ToolRegistry::execute` deadlock
-4. [ ] Wrap all rusqlite calls in `spawn_blocking`
+1. [x] Fix `get_summaries` SQL bug ✓
+2. [x] Remove `try_read` pattern from IPC client ✓
+3. [x] Fix `ToolRegistry::execute` deadlock ✓
+4. [ ] Wrap all rusqlite calls in `spawn_blocking` (DEFERRED - requires DB pool architecture)
 5. [ ] Test each fix thoroughly
 
 ### Phase 2: Async Architecture (P1) - ~6 hours
