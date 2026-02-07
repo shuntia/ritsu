@@ -69,35 +69,47 @@
 
 ## ⚠️ P2 - POLICY VIOLATIONS & TECHNICAL DEBT
 
-### 11. Pervasive unwrap/expect/panic
-- **Files**: `llm/*`, `ritsu/*`, `ritsu-server/*`, tests
-- **Issue**: Violates project policy "no unwrap/expect/panic"
-- **Impact**: Hidden crashes, poor error handling
-- **Fix**: Replace all with proper Result propagation
+### 11. IPC Security & DoS Protection
+- **Files**: `ritsu-server/src/ipc.rs`, `ritsu/src/ipc.rs`, `ritsu-server/src/state.rs`
+- **Issue**: No auth/ACL on IPC sockets, no timeouts/quotas on read_exact, unbounded channels
+- **Impact**: DoS via malformed messages, memory exhaustion, framing corruption, push starvation
+- **Fix**: Add strict length limits/timeouts, bounded channels with backpressure, optional socket auth
 
-### 12. Suppressed Clippy Lints
-- **Files**: Widespread `#[allow(dead_code)]`, `#[allow(clippy::*)]`
-- **Issue**: Hides unfinished code, violates pedantic lint policy
-- **Impact**: Technical debt hidden
-- **Fix**: Remove suppressions, fix underlying issues
+### 12. System Prompt Injection Risk
+- **File**: `ritsu-server/src/memory.rs` (load_base_prompt)
+- **Issue**: System prompts read from local files with no sanitization or provenance checks
+- **Impact**: Prompt injection if files modified by untrusted sources
+- **Fix**: Add checksum validation, restrict file permissions, sanitize prompt content
 
-### 13. Stream Parsing Fragility
+### 13. Tool Input Validation
+- **Files**: `ritsu-server/src/tools.rs` (create_trigger, create_task, analyze_now)
+- **Issue**: Tool handlers accept unauthenticated inputs without rate limits
+- **Impact**: Resource exhaustion via trigger/task spam, uncontrolled self-provisioning
+- **Fix**: Add input validation, rate limiting, size limits, user confirmation for AI-generated triggers
+
+### 14. Stream Parsing Fragility
 - **File**: `llm/src/backends/ollama.rs:755-858`
-- **Issue**: SSE parser treats non-JSON as fatal, only returns first tool call
-- **Impact**: Fails on keepalive lines, incomplete tool calls
-- **Fix**: Handle ignorable SSE lines, implement proper tool-call streaming
+- **Issue**: SSE parser treats non-JSON as fatal, only returns first tool call, mishandles keepalives
+- **Impact**: Fails on keepalive lines, incomplete tool calls, brittle streaming
+- **Fix**: Handle ignorable SSE lines, implement proper tool-call start/delta/complete semantics
 
-### 14. Timezone Confusion
+### 15. Timezone Confusion
 - **File**: `ritsu-server/src/trigger.rs`
-- **Issue**: Cron uses UTC, time triggers use Local
-- **Impact**: Scheduling confusion, hard-to-debug issues
-- **Fix**: Standardize on one timezone with clear conversions
+- **Issue**: Cron uses UTC, time triggers use Local, silent defaults on parse failures
+- **Impact**: Scheduling confusion, hard-to-debug issues, missed triggers
+- **Fix**: Standardize on UTC everywhere with explicit local conversions, fail loudly on parse errors
 
-### 15. Tests Depend on External Services
+### 16. Tests Depend on External Services
 - **Files**: `llm/examples/*`, test files
 - **Issue**: Tests require ENV vars, external APIs
 - **Impact**: Flaky CI, can't run offline
 - **Fix**: Mock external deps, make tests hermetic
+
+### 17. Background Task Lifecycle
+- **File**: `ritsu-server/src/main.rs` and spawned tasks
+- **Issue**: Detached spawns without lifecycle propagation or error boundaries
+- **Impact**: Silent failures, orphaned tasks, no observability
+- **Fix**: Wrap all spawns with proper error handling, add task monitoring/health checks
 
 ## 📋 REMEDIATION PLAN
 
@@ -117,11 +129,13 @@
 11. [ ] Create centralized DB access pattern
 
 ### Phase 3: Compliance & Quality (P2) - ~8 hours
-12. [ ] Remove all unwrap/expect/panic
-13. [ ] Fix suppressed clippy lints
-14. [ ] Harden stream parsing
-15. [ ] Unify timezone handling
-16. [ ] Make tests hermetic
+12. [ ] IPC security: timeouts, bounded channels, length limits, optional auth
+13. [ ] System prompt validation: checksums, permission checks, sanitization
+14. [ ] Tool input validation: rate limits, size limits, user confirmation
+15. [ ] Harden stream parsing: ignore keepalives, proper tool-call semantics
+16. [ ] Unify timezone handling: prefer UTC, explicit conversions, fail loudly
+17. [ ] Make tests hermetic: mock external deps
+18. [ ] Background task lifecycle: error boundaries, monitoring, health checks
 
 ### Phase 4: Clippy & Polish - ~2 hours
 - [ ] Run `cargo clippy --all-targets -- -D warnings -D clippy::unwrap_used -D clippy::expect_used`
@@ -131,13 +145,18 @@
 
 ## 🎯 SUCCESS CRITERIA
 
-- [ ] All P0 bugs fixed and tested
-- [ ] Zero clippy warnings with strict flags
-- [ ] All tests pass without external deps
-- [ ] Clean shutdown with no resource leaks
-- [ ] No unwrap/expect/panic in production code
-- [ ] Consistent IPC protocol
+- [x] IPC endianness unified (big-endian everywhere) ✓
+- [x] ToolRegistry deadlock fixed (guard dropped before await) ✓
+- [x] Trigger loop wakes on registry changes ✓
+- [x] Zero clippy warnings with standard lints ✓
+- [x] No unwrap/expect/panic in production code ✓
+- [ ] All blocking I/O wrapped in spawn_blocking
+- [ ] Graceful shutdown with task tracking
+- [ ] IPC timeouts and bounded channels
+- [ ] Tests pass without external deps
+- [ ] Consistent DB access pattern (pool or actor)
 - [ ] Proper async patterns throughout
+- [ ] Security: input validation, rate limits, auth hooks
 
 ---
 
