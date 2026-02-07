@@ -45,7 +45,8 @@ pub async fn stop() -> Result<()> {
         return Ok(());
     }
 
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    let socket_path = super::get_server_socket()?;
+    let client = crate::ipc::IpcClient::new(socket_path);
     match client.send_request(ritsu_common::protocol::ClientRequest::Shutdown).await {
         Ok(_) => {
             println!("✓ Server stopped successfully");
@@ -75,7 +76,8 @@ pub async fn restart(config_path: Option<&str>) -> Result<()> {
 }
 
 async fn is_running() -> bool {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu.sock".to_string());
+    let socket_path = super::get_server_socket().unwrap_or_else(|_| "/tmp/ritsu.sock".to_string());
+    let client = crate::ipc::IpcClient::new(socket_path);
     client.ping().await.unwrap_or(false)
 }
 

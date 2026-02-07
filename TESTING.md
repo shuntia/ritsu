@@ -55,6 +55,26 @@ cargo test --test e2e_test -- --ignored --nocapture --test-threads=1
 - Ollama running (optional but recommended)
 - Clean test environment (no conflicting processes)
 
+**Note:** Tests use default socket paths (`/tmp/ritsu.sock` and `/tmp/ritsu-client.sock`) and must run sequentially to avoid conflicts.
+
+## Configuring Socket Paths
+
+Socket paths can be configured in two ways:
+
+1. **Client Config File** (`~/.config/ritsu/client.toml`):
+   ```toml
+   client_socket = "/tmp/ritsu-client.sock"
+   server_socket = "/tmp/ritsu.sock"
+   ```
+
+2. **Environment Variables** (override config file):
+   ```bash
+   export RITSU_CLIENT_SOCKET="/custom/client.sock"
+   export RITSU_SERVER_SOCKET="/custom/server.sock"
+   ```
+
+See `client.toml.example` for a full configuration example.
+
 ## E2E Test Scenarios
 
 ### test_server_startup_and_ping

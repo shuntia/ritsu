@@ -10,31 +10,34 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-const CLIENT_DAEMON_SOCKET: &str = "/tmp/ritsu-client.sock";
-const SERVER_SOCKET: &str = "/tmp/ritsu.sock";
-
 pub async fn run() -> Result<()> {
     info!("Starting Ritsu client daemon...");
+    
+    // Load config
+    let config = crate::config::ClientConfig::load()?;
+    let client_socket = config.client_socket_path();
+    let server_socket = config.server_socket_path();
 
     // Remove existing socket if present
-    if Path::new(CLIENT_DAEMON_SOCKET).exists() {
-        std::fs::remove_file(CLIENT_DAEMON_SOCKET)
+    if Path::new(&client_socket).exists() {
+        std::fs::remove_file(&client_socket)
             .context("Failed to remove existing client daemon socket")?;
     }
 
     // Bind to client daemon socket for GUI connections
-    let listener = UnixListener::bind(CLIENT_DAEMON_SOCKET)
+    let listener = UnixListener::bind(&client_socket)
         .context("Failed to bind client daemon socket")?;
-    info!("Client daemon listening on {}", CLIENT_DAEMON_SOCKET);
+    info!("Client daemon listening on {}", client_socket);
 
     // Also maintain connection to server for tool requests
     let server_connection = Arc::new(Mutex::new(None::<UnixStream>));
     let server_conn_clone = Arc::clone(&server_connection);
+    let server_socket_clone = server_socket.clone();
 
     // Spawn task to handle incoming tool requests from server
     tokio::spawn(async move {
         loop {
-            match connect_to_server().await {
+            match connect_to_server(&server_socket_clone).await {
                 Ok(stream) => {
                     info!("Connected to server for tool requests");
                     *server_conn_clone.lock().await = Some(stream);
@@ -47,25 +50,22 @@ pub async fn run() -> Result<()> {
                     *server_conn_clone.lock().await = None;
                 }
                 Err(e) => {
-                    error!("Failed to connect to server: {}", e);
+                    warn!("Could not connect to server: {}, retrying in 5s", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }
-            
-            // Retry connection every 5 seconds
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     });
 
-    // Accept GUI connections and proxy requests
+    // Accept GUI/CLI connections
     loop {
         match listener.accept().await {
-            Ok((stream, _addr)) => {
+            Ok((stream, _)) => {
                 info!("New GUI connection accepted");
+                let server_socket_clone = server_socket.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_gui_connection(stream).await {
+                    if let Err(e) = handle_gui_connection(stream, &server_socket_clone).await {
                         error!("Error handling GUI connection: {}", e);
-                    } else {
-                        info!("GUI connection closed gracefully");
                     }
                 });
             }
@@ -76,8 +76,8 @@ pub async fn run() -> Result<()> {
     }
 }
 
-async fn connect_to_server() -> Result<UnixStream> {
-    UnixStream::connect(SERVER_SOCKET)
+async fn connect_to_server(server_socket: &str) -> Result<UnixStream> {
+    UnixStream::connect(server_socket)
         .await
         .context("Failed to connect to server")
 }
@@ -143,9 +143,9 @@ async fn handle_tool_request(request: ServerToClientRequest) -> Result<()> {
     }
 }
 
-async fn handle_gui_connection(mut stream: UnixStream) -> Result<()> {
+async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> Result<()> {
     info!("Handling new GUI connection, connecting to server...");
-    let mut server_stream = connect_to_server().await?;
+    let mut server_stream = connect_to_server(server_socket).await?;
     info!("Connected to server, starting proxy loop");
 
     loop {
@@ -318,8 +318,11 @@ async fn handle_focus_chat() -> Result<()> {
 pub async fn stop() -> Result<()> {
     println!("Stopping client daemon...");
     
+    let config = crate::config::ClientConfig::load()?;
+    let client_socket = config.client_socket_path();
+    
     // Check if daemon is running by checking socket
-    if !Path::new(CLIENT_DAEMON_SOCKET).exists() {
+    if !Path::new(&client_socket).exists() {
         println!("Client daemon is not running");
         return Ok(());
     }
@@ -344,18 +347,21 @@ pub async fn stop() -> Result<()> {
     }
     
     // Clean up socket in both cases
-    let _ = std::fs::remove_file(CLIENT_DAEMON_SOCKET);
+    let _ = std::fs::remove_file(&client_socket);
     
     Ok(())
 }
 
 pub async fn status() -> Result<()> {
-    if Path::new(CLIENT_DAEMON_SOCKET).exists() {
+    let config = crate::config::ClientConfig::load()?;
+    let client_socket = config.client_socket_path();
+    
+    if Path::new(&client_socket).exists() {
         // Try to connect to verify it's actually running
-        match UnixStream::connect(CLIENT_DAEMON_SOCKET).await {
+        match UnixStream::connect(&client_socket).await {
             Ok(_) => {
                 println!("Client daemon: Running");
-                println!("Socket: {}", CLIENT_DAEMON_SOCKET);
+                println!("Socket: {}", client_socket);
             }
             Err(_) => {
                 println!("Client daemon: Socket exists but not responding (stale?)");

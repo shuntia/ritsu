@@ -38,7 +38,7 @@ pub async fn handle(cmd: TaskCommands) -> Result<()> {
 }
 
 async fn list_tasks(status: Option<ritsu_common::TaskStatus>) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ClientRequest::ListTasks {
@@ -75,7 +75,7 @@ async fn create_task(
     tags: Vec<String>,
     due_date: Option<String>,
 ) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ClientRequest::CreateTask {
@@ -105,7 +105,7 @@ async fn update_task(
     status: Option<ritsu_common::TaskStatus>,
     priority: Option<ritsu_common::TaskPriority>,
 ) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ClientRequest::UpdateTask { id, status, priority })

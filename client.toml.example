@@ -1,0 +1,76 @@
+# Ritsu Client Configuration
+# This file configures the ritsu client CLI and GUI.
+# 
+# Default location: ~/.config/ritsu/client.toml
+# 
+# Environment variables override these settings:
+#   RITSU_CLIENT_SOCKET - Client daemon socket path
+#   RITSU_SERVER_SOCKET - Server socket path
+#   RITSU_CONNECT_TIMEOUT - Connection timeout in seconds
+#   RITSU_REQUEST_TIMEOUT - Request timeout in seconds
+#   RITSU_STREAMING_TIMEOUT - Streaming timeout in seconds
+
+[sockets]
+# Socket path where client daemon listens for GUI/CLI connections
+# Default: /tmp/ritsu-client.sock
+client_socket = "/tmp/ritsu-client.sock"
+
+# Socket path where ritsu-server listens for requests
+# Default: /tmp/ritsu.sock
+server_socket = "/tmp/ritsu.sock"
+
+[timeouts]
+# Connection timeout in seconds
+# Default: 5
+connect_seconds = 5
+
+# Request timeout in seconds (for non-streaming requests)
+# Default: 30
+request_seconds = 30
+
+# Streaming timeout in seconds (for initial response)
+# Default: 120
+streaming_seconds = 120
+
+[gui]
+# Window width in pixels
+# Default: 800
+window_width = 800
+
+# Window height in pixels
+# Default: 600
+window_height = 600
+
+# Font size in points
+# Default: 14.0
+font_size = 14.0
+
+# Enable desktop notifications
+# Default: true
+notifications_enabled = true
+
+# Maximum number of messages to display in chat
+# Default: 500
+max_messages = 500
+
+[paths]
+# Session file path (stores last session ID)
+# Default: ~/.local/share/ritsu/session.txt
+session_file = "~/.local/share/ritsu/session.txt"
+
+# Chat history cache directory
+# Default: ~/.cache/ritsu
+cache_dir = "~/.cache/ritsu"
+
+[retry]
+# Number of connection retry attempts
+# Default: 3
+max_retries = 3
+
+# Retry delay in milliseconds
+# Default: 1000
+retry_delay_ms = 1000
+
+# Enable exponential backoff for retries
+# Default: true
+exponential_backoff = true

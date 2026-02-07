@@ -32,12 +32,18 @@ mkdir -p ~/.config/ritsu
 cp config.toml.example ~/.config/ritsu/config.toml
 # Edit config.toml with your LLM backend settings
 
+# Optional: Customize client socket paths
+cp client.toml.example ~/.config/ritsu/client.toml
+# Edit client.toml to change socket paths if needed
+
 # Optional: Customize system prompt (first half of AI personality)
 cp .config/system_prompt.md.example .config/system_prompt.md
 # Edit .config/system_prompt.md to define Ritsu's personality and capabilities
 ```
 
 **System Prompt**: The `.config/system_prompt.md` file defines the first half of Ritsu's personality and capabilities. This is combined with AI-generated context to form the complete system prompt. The file is read at runtime, so changes take effect immediately.
+
+**Client Config**: The `~/.config/ritsu/client.toml` file configures socket paths for client-server communication. Environment variables (`RITSU_CLIENT_SOCKET`, `RITSU_SERVER_SOCKET`) override these settings.
 
 ### Usage
 

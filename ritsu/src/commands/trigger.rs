@@ -13,7 +13,7 @@ pub async fn handle(cmd: TriggerCommands) -> Result<()> {
 }
 
 async fn list_triggers() -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::ListTriggers)
@@ -39,7 +39,7 @@ async fn list_triggers() -> Result<()> {
 }
 
 async fn create_trigger(name: &str, time: &str) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::CreateTrigger {
@@ -65,7 +65,7 @@ async fn create_trigger(name: &str, time: &str) -> Result<()> {
 }
 
 async fn disable_trigger(name: &str) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::DisableTrigger {
@@ -87,7 +87,7 @@ async fn disable_trigger(name: &str) -> Result<()> {
 }
 
 async fn delete_trigger(name: &str) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::DeleteTrigger {

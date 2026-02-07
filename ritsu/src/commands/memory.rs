@@ -4,7 +4,7 @@ use anyhow::Result;
 use ritsu_common::protocol::{ClientRequest, MemoryQueryType};
 
 pub async fn query_memory(days: Option<u32>) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let _days = days.unwrap_or(7);
     let response = client
@@ -28,7 +28,7 @@ pub async fn query_memory(days: Option<u32>) -> Result<()> {
 }
 
 pub async fn query_notes(_tag: Option<&str>) -> Result<()> {
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     let response = client
         .send_request(ClientRequest::QueryMemory {
@@ -74,7 +74,7 @@ pub async fn clear_memory(noconfirm: bool) -> Result<()> {
         }
     }
     
-    let client = crate::ipc::IpcClient::new("/tmp/ritsu-client.sock".to_string());
+    let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
     
     println!("Clearing all memory...");
     let response = client
