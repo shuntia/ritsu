@@ -117,14 +117,14 @@
 1. [x] Fix `get_summaries` SQL bug ✓
 2. [x] Remove `try_read` pattern from IPC client ✓
 3. [x] Fix `ToolRegistry::execute` deadlock ✓
-4. [ ] Wrap all rusqlite calls in `spawn_blocking` (DEFERRED - requires DB pool architecture)
+4. [x] Wrap all rusqlite calls in `spawn_blocking` ✓
 5. [ ] Test each fix thoroughly
 
 ### Phase 2: Async Architecture (P1) - ~6 hours
 6. [x] Standardize IPC endianness ✓
 7. [x] Add trigger loop wake mechanism ✓
 8. [ ] Implement graceful shutdown
-9. [ ] Wrap all blocking I/O in spawn_blocking
+9. [x] Wrap all blocking I/O in spawn_blocking ✓
 10. [ ] Fix database initialization pattern
 11. [ ] Create centralized DB access pattern
 
