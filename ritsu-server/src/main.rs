@@ -92,6 +92,9 @@ async fn main() -> Result<()> {
     let preferences_manager = std::sync::Arc::new(preferences::PreferencesManager::new(db.connection.clone()));
     info!("Preferences manager initialized");
 
+    // Set up graceful shutdown signal
+    let shutdown_flag = std::sync::Arc::new(tokio::sync::Notify::new());
+
     // Initialize task manager
     let task_manager = std::sync::Arc::new(tasks::TaskManager::new(db.connection.clone()));
     info!("Task manager initialized");
@@ -122,9 +125,17 @@ async fn main() -> Result<()> {
     let task_manager_clone = task_manager.clone();
     let llm_client_clone = llm_client.clone();
     let server_state_clone = server_state.clone();
-    tokio::spawn(async move {
-        if let Err(e) = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, task_manager_clone, llm_client_clone, server_state_clone).await {
-            tracing::error!("Trigger loop error: {}", e);
+    let shutdown_flag_clone = shutdown_flag.clone();
+    let trigger_loop_handle = tokio::spawn(async move {
+        tokio::select! {
+            result = trigger::run_trigger_loop(trigger_registry_clone, memory_clone, task_manager_clone, llm_client_clone, server_state_clone) => {
+                if let Err(e) = result {
+                    tracing::error!("Trigger loop error: {}", e);
+                }
+            }
+            () = shutdown_flag_clone.notified() => {
+                info!("Trigger loop shutting down...");
+            }
         }
     });
 
@@ -139,16 +150,23 @@ async fn main() -> Result<()> {
         server_state.clone(),
         Arc::new(config.clone()),
     );
-    tokio::spawn(async move {
-        if let Err(e) = ipc_server.run().await {
-            tracing::error!("IPC server error: {}", e);
+    let shutdown_flag_clone = shutdown_flag.clone();
+    let ipc_server_handle = tokio::spawn(async move {
+        tokio::select! {
+            result = ipc_server.run() => {
+                if let Err(e) = result {
+                    tracing::error!("IPC server error: {}", e);
+                }
+            }
+            () = shutdown_flag_clone.notified() => {
+                info!("IPC server shutting down...");
+            }
         }
     });
 
     info!("ritsu-server started successfully");
 
-    // Set up graceful shutdown with signal handling
-    let shutdown_flag = std::sync::Arc::new(tokio::sync::Notify::new());
+    // Set up signal handlers
     let shutdown_flag_clone = shutdown_flag.clone();
 
     tokio::spawn(async move {
@@ -179,6 +197,15 @@ async fn main() -> Result<()> {
 
     // Wait for shutdown signal
     shutdown_flag.notified().await;
+    info!("Shutdown signal received, waiting for tasks to complete...");
+    
+    // Wait for background tasks to finish with timeout
+    let shutdown_timeout = std::time::Duration::from_secs(5);
+    
+    let _ = tokio::time::timeout(shutdown_timeout, async {
+        let _ = tokio::join!(trigger_loop_handle, ipc_server_handle);
+    }).await;
+    
     info!("Shutting down ritsu... Good night!");
 
     Ok(())
