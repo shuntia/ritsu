@@ -8,7 +8,7 @@ use std::fs;
 fn extract_message(response: ServerResponse) -> Result<String> {
     match response {
         ServerResponse::Success { message } => Ok(message),
-        ServerResponse::Message { content } => Ok(content),
+        ServerResponse::Message { content } | ServerResponse::SystemPrompt { content } => Ok(content),
         ServerResponse::Error { message } => anyhow::bail!("Server error: {}", message),
         other => anyhow::bail!("Unexpected response: {:?}", other),
     }
