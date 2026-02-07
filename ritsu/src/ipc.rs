@@ -2,21 +2,64 @@
 
 use anyhow::Result;
 use ritsu_common::protocol::{ClientRequest, ServerPush, ServerResponse};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
+#[derive(Clone)]
 pub struct IpcClient {
     socket_path: String,
+    connection: Arc<Mutex<Option<UnixStream>>>,
 }
 
 impl IpcClient {
     pub fn new(socket_path: String) -> Self {
-        Self { socket_path }
+        Self {
+            socket_path,
+            connection: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Get or establish connection to the daemon
+    async fn get_connection(&self) -> Result<tokio::sync::MutexGuard<'_, Option<UnixStream>>> {
+        let mut guard = self.connection.lock().await;
+        
+        // If connection exists, test it by trying to peek (non-destructive)
+        if let Some(stream) = guard.as_mut() {
+            // Try to peek 1 byte to test if connection is alive
+            let mut buf = [0u8; 1];
+            match stream.try_read(&mut buf) {
+                Ok(0) => {
+                    // Connection closed
+                    *guard = None;
+                }
+                Ok(_) => {
+                    // Data available (shouldn't happen in our protocol), connection alive
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No data available, connection is alive - this is expected
+                    return Ok(guard);
+                }
+                Err(_) => {
+                    // Connection error
+                    *guard = None;
+                }
+            }
+        }
+        
+        // Need to establish new connection
+        if guard.is_none() {
+            let stream = UnixStream::connect(&self.socket_path).await?;
+            *guard = Some(stream);
+        }
+        
+        Ok(guard)
     }
 
     pub async fn send_request(&self, request: ClientRequest) -> Result<ServerResponse> {
-        let mut stream = UnixStream::connect(&self.socket_path).await?;
+        let mut guard = self.get_connection().await?;
+        let stream = guard.as_mut().ok_or_else(|| anyhow::anyhow!("Failed to establish connection"))?;
 
         // Serialize request
         let request_data = postcard::to_allocvec(&request)?;
@@ -64,11 +107,14 @@ impl IpcClient {
     
     /// Send a message and subscribe to streaming responses
     /// Returns a channel receiver that yields message chunks
+    /// Note: This creates a dedicated connection for streaming since it's long-lived
     pub async fn send_message_streaming(
         &self,
         content: String,
         session_id: Option<String>,
     ) -> Result<mpsc::Receiver<ServerPush>> {
+        // For streaming, create a dedicated connection since it's long-lived
+        // and we can't hold the main connection lock for the duration
         let mut stream = UnixStream::connect(&self.socket_path).await?;
         
         // Send message request
