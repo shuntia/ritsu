@@ -52,8 +52,10 @@ cargo test --test e2e_test -- --ignored --nocapture --test-threads=1
 
 **Note:** E2E tests are marked with `#[ignore]` by default and require:
 - Built binaries in `target/debug/`
-- Ollama running (optional but recommended)
+- Ollama running at `http://localhost:11434` (tests make real LLM API calls)
 - Clean test environment (no conflicting processes)
+- **Tests may be slow (15-60s per test) due to real LLM calls**
+- **Tests may fail if Ollama is unresponsive or model not available**
 
 **Note:** Tests use default socket paths (`/tmp/ritsu.sock` and `/tmp/ritsu-client.sock`) and must run sequentially to avoid conflicts.
 

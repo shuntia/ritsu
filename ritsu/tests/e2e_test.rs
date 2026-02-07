@@ -4,6 +4,7 @@
 //! the full interaction flow.
 
 use anyhow::Result;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
@@ -61,8 +62,8 @@ daily_rotation_days = 40
 
 [timeouts]
 user_response_seconds = 300
-http_request_seconds = 30
-llm_request_seconds = 120
+http_request_seconds = 10
+llm_request_seconds = 15
 "#,
             db_path.display()
         );
@@ -103,19 +104,36 @@ llm_request_seconds = 120
         let mut cmd = Command::new(&binary_path);
         cmd.arg("--config")
             .arg(&self.config_path)
-            .env("RUST_LOG", "info,ritsu_server=debug");
+            .env("RUST_LOG", "info,ritsu_server=debug")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         
         let child = cmd.spawn()?;
         self.server_process = Some(child);
         
         // Wait for server to be ready
-        for i in 0..20 {
+        for i in 0..30 {
             if self.server_socket.exists() {
                 println!("Server socket ready after {}ms", i * 100);
-                sleep(Duration::from_millis(500)).await; // Extra time for full startup
+                sleep(Duration::from_millis(1000)).await; // Extra time for full startup
                 return Ok(());
             }
             sleep(Duration::from_millis(100)).await;
+        }
+        
+        // Server failed to start - try to get output
+        if let Some(mut child) = self.server_process.take() {
+            let _ = child.kill();
+            if let Some(mut stdout) = child.stdout.take() {
+                let mut output = String::new();
+                let _ = stdout.read_to_string(&mut output);
+                println!("Server stdout: {output}");
+            }
+            if let Some(mut stderr) = child.stderr.take() {
+                let mut output = String::new();
+                let _ = stderr.read_to_string(&mut output);
+                println!("Server stderr: {output}");
+            }
         }
         
         anyhow::bail!("Server failed to start - socket not created")
