@@ -224,21 +224,14 @@ async fn handle_send_message_streaming(
         warn!("Failed to store in conversations: {}", e);
     }
 
-    // Get system prompt
-    let base_prompt = memory.build_effective_prompt().await
-        .unwrap_or_else(|_| "You are Ritsu, a helpful AI assistant.".to_string());
+    // Get chat-specific system prompt
+    let system_prompt = memory.build_chat_prompt().await
+        .unwrap_or_else(|_| {
+            warn!("Failed to build chat prompt, using fallback");
+            "You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string()
+        });
     
-    let system_prompt = Some(format!(
-        "{}\n\n---\n\n**CHAT SESSION MODE**\n\
-        You are currently in an active chat conversation with the user.\n\
-        - Prioritize responding directly to the user's message\n\
-        - Be conversational and helpful\n\
-        - Avoid doing background tasks like memory compaction or analysis\n\
-        - Only use tools if directly relevant to answering the user's question\n\
-        - Don't create triggers or tasks unless explicitly asked\n\
-        - Focus on the conversation, not on system maintenance",
-        base_prompt
-    ));
+    let system_prompt = Some(system_prompt);
 
     // Get conversation history
     let history = conversation_manager.get_history(&session_id, 20).await

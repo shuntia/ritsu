@@ -90,8 +90,8 @@ impl MemoryManager {
             None
         };
 
-        // Get system prompt
-        let system_prompt = self.build_effective_prompt().await?;
+        // Get compact-specific system prompt
+        let system_prompt = self.build_background_prompt(Some("compact")).await?;
 
         // Generate summary with LLM (no lock held)
         let conversation_text = conversations.iter()
@@ -173,8 +173,8 @@ impl MemoryManager {
             return Ok(());
         }
 
-        // Get system prompt
-        let system_prompt = self.build_effective_prompt().await?;
+        // Get compact-specific system prompt
+        let system_prompt = self.build_background_prompt(Some("compact")).await?;
 
         // Get previous month's summary for continuity
         let prev_month_summary = {
@@ -306,35 +306,111 @@ impl MemoryManager {
 
     /// Build the effective system prompt (base + AI-generated)
     pub async fn build_effective_prompt(&self) -> Result<String> {
-        // First try to read from .config/system_prompt.md
-        let config_prompt = std::fs::read_to_string(".config/system_prompt.md")
-            .ok()
-            .or_else(|| {
-                // Try from home directory
-                dirs::home_dir()
-                    .and_then(|home| std::fs::read_to_string(home.join(".config/ritsu/system_prompt.md")).ok())
-            });
+        self.build_prompt_for_context("general").await
+    }
 
-        // Then get database prompts
-        let base = self.get_system_prompt("base").await?;
-        let ai_generated = self.get_system_prompt("ai_generated").await?;
-
-        // Build the prompt in order: config file → database base → AI generated
+    /// Build system prompt for specific context (chat, background, etc.)
+    pub async fn build_prompt_for_context(&self, context: &str) -> Result<String> {
         let mut parts = Vec::new();
 
-        if let Some(config) = config_prompt {
-            parts.push(config);
-        } else if let Some(base_prompt) = base {
-            parts.push(base_prompt);
-        } else {
-            parts.push("You are Ritsu, a helpful AI assistant.".to_string());
+        // 1. Load base system prompt
+        let base = self.load_base_prompt().await?;
+        parts.push(base);
+
+        // 2. Load context-specific prompt
+        if context != "general" {
+            if let Ok(context_prompt) = Self::load_context_prompt(context) {
+                parts.push(context_prompt);
+            }
         }
 
-        if let Some(ai) = ai_generated {
-            parts.push(ai);
+        // 3. Add AI-generated enhancements
+        if let Ok(Some(ai_generated)) = self.get_system_prompt("ai_generated").await {
+            parts.push(ai_generated);
         }
 
-        Ok(parts.join("\n\n"))
+        Ok(parts.join("\n\n---\n\n"))
+    }
+
+    /// Load base system prompt from various sources
+    async fn load_base_prompt(&self) -> Result<String> {
+        // Try .config/ritsu/prompts/system_base.md first
+        if let Ok(content) = std::fs::read_to_string(".config/ritsu/prompts/system_base.md") {
+            return Ok(content);
+        }
+
+        // Try home directory
+        if let Some(home) = dirs::home_dir() {
+            if let Ok(content) = std::fs::read_to_string(home.join(".config/ritsu/prompts/system_base.md")) {
+                return Ok(content);
+            }
+        }
+
+        // Fall back to legacy .config/system_prompt.md
+        if let Ok(content) = std::fs::read_to_string(".config/system_prompt.md") {
+            return Ok(content);
+        }
+
+        // Try home directory legacy location
+        if let Some(home) = dirs::home_dir() {
+            if let Ok(content) = std::fs::read_to_string(home.join(".config/ritsu/system_prompt.md")) {
+                return Ok(content);
+            }
+        }
+
+        // Try database
+        if let Ok(Some(base)) = self.get_system_prompt("base").await {
+            return Ok(base);
+        }
+
+        // Ultimate fallback
+        Ok("You are Ritsu, a helpful AI assistant.".to_string())
+    }
+
+    /// Load context-specific prompt (chat, background, etc.)
+    fn load_context_prompt(context: &str) -> Result<String> {
+        let filename = match context {
+            "chat" => "chat.md",
+            "background" => "background.md",
+            "compact" => "background/compact.md",
+            "pattern" => "background/pattern.md",
+            "tools" => "background/tools.md",
+            "briefing" => "background/briefing.md",
+            _ => return Err(anyhow::anyhow!("Unknown context: {context}")),
+        };
+
+        // Try .config/ritsu/prompts/{filename}
+        let local_path = format!(".config/ritsu/prompts/{filename}");
+        if let Ok(content) = std::fs::read_to_string(&local_path) {
+            return Ok(content);
+        }
+
+        // Try home directory
+        if let Some(home) = dirs::home_dir() {
+            let home_path = home.join(format!(".config/ritsu/prompts/{filename}"));
+            if let Ok(content) = std::fs::read_to_string(home_path) {
+                return Ok(content);
+            }
+        }
+
+        Err(anyhow::anyhow!("Context prompt not found: {context}"))
+    }
+
+    /// Build chat-specific system prompt
+    pub async fn build_chat_prompt(&self) -> Result<String> {
+        self.build_prompt_for_context("chat").await
+    }
+
+    /// Build background task system prompt based on analysis type
+    pub async fn build_background_prompt(&self, analysis_type: Option<&str>) -> Result<String> {
+        let context = match analysis_type {
+            Some("conversation" | "reflection") => "compact",  // Daily/monthly compaction
+            Some("pattern") => "pattern",       // Weekly pattern recognition
+            Some("tools") => "tools",           // Tool effectiveness analysis
+            Some("morning_briefing" | "daily_briefing") => "briefing",
+            _ => "background",  // Generic background task
+        };
+        self.build_prompt_for_context(context).await
     }
 
     /// Store an idle analysis result

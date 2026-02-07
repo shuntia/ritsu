@@ -351,6 +351,7 @@ pub async fn execute_idle_analysis(
             // Get task context
             let task_context = task_manager.get_task_summary().await.ok();
             
+            // Use compact-specific prompt for daily compaction
             if let Err(e) = memory.compact_daily(&yesterday, llm_client, task_context.as_deref()).await {
                 error!("Failed to compact daily conversations: {}", e);
             }
@@ -367,7 +368,7 @@ pub async fn execute_idle_analysis(
                 return Ok(());
             }
             
-            let system_prompt = memory.build_effective_prompt().await?;
+            let system_prompt = memory.build_background_prompt(Some("pattern")).await?;
             let summaries_text = past_summaries.iter()
                 .map(|(date, summary)| format!("{date}: {summary}"))
                 .collect::<Vec<_>>()
@@ -430,7 +431,7 @@ pub async fn execute_idle_analysis(
                 return Ok(());
             }
             
-            let system_prompt = memory.build_effective_prompt().await?;
+            let system_prompt = memory.build_background_prompt(Some("tools")).await?;
             let summaries_text = if past_summaries.is_empty() {
                 "No daily summaries available".to_string()
             } else {
@@ -509,7 +510,7 @@ pub async fn execute_idle_analysis(
             // Get today's tasks
             let task_summary = task_manager.get_active_tasks_summary().await.unwrap_or_default();
             
-            let system_prompt = memory.build_effective_prompt().await?;
+            let system_prompt = memory.build_background_prompt(Some("morning_briefing")).await?;
             let today = Local::now().format("%A, %B %d, %Y").to_string();
             
             let mut prompt = format!("Good morning! Today is {}.", today);
