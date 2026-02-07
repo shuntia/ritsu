@@ -46,43 +46,87 @@ fn get_or_create_session_id(force_new: bool) -> Result<String> {
 pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
     // Connect to client daemon which will proxy to server
     let socket_path = super::get_client_socket()?;
-    let client = crate::ipc::IpcClient::new(socket_path);
     let session_id = get_or_create_session_id(new_session)?;
     
-    let response = match client
-        .send_request(ClientRequest::SendMessage {
-            content: message.to_string(),
-            session_id: Some(session_id),
-        })
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            if e.to_string().contains("No such file or directory") || 
-               e.to_string().contains("Connection refused") {
-                eprintln!("✗ Client daemon not running. Start it with: ritsu start");
-                anyhow::bail!("Client daemon not running")
-            }
-            return Err(e);
+    // Connect directly to collect streaming response
+    let mut stream = tokio::net::UnixStream::connect(&socket_path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound || 
+           e.kind() == std::io::ErrorKind::ConnectionRefused {
+            eprintln!("✗ Client daemon not running. Start it with: ritsu start");
+            anyhow::anyhow!("Client daemon not running")
+        } else {
+            anyhow::anyhow!("Failed to connect: {}", e)
         }
+    })?;
+    
+    // Send request
+    let request = ClientRequest::SendMessage {
+        content: message.to_string(),
+        session_id: Some(session_id),
     };
-
-    match response {
-        ritsu_common::protocol::ServerResponse::Message { content } => {
-            println!("🤖 {}", content);
-            Ok(())
+    let request_data = postcard::to_allocvec(&request)?;
+    let request_len = (request_data.len() as u32).to_be_bytes();
+    
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    stream.write_all(&request_len).await?;
+    stream.write_all(&request_data).await?;
+    stream.flush().await?;
+    
+    // Collect streaming response
+    let mut full_response = String::new();
+    loop {
+        // Read message length
+        let mut len_buf = [0u8; 4];
+        stream.read_exact(&mut len_buf).await?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        
+        // Read message data
+        let mut data = vec![0u8; len];
+        stream.read_exact(&mut data).await?;
+        
+        // Try to deserialize as ServerPush (streaming chunks)
+        if let Ok(push) = postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&data) {
+            if let ritsu_common::protocol::ServerPush::MessageChunk { content, is_final } = push {
+                print!("{}", content);
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                full_response.push_str(&content);
+                
+                if is_final {
+                    println!(); // Final newline
+                    break;
+                }
+            }
         }
-        ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ Message sent");
-            Ok(())
-        }
-        ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("✗ Error: {}", message);
-            anyhow::bail!(message)
-        }
-        _ => {
-            eprintln!("✗ Unexpected response");
-            anyhow::bail!("Unexpected response")
+        // Try to deserialize as ServerResponse (final response)
+        else if let Ok(response) = postcard::from_bytes::<ritsu_common::protocol::ServerResponse>(&data) {
+            match response {
+                ritsu_common::protocol::ServerResponse::Ok => {
+                    if full_response.is_empty() {
+                        println!("✓ Message sent");
+                    }
+                    return Ok(());
+                }
+                ritsu_common::protocol::ServerResponse::Error { message } => {
+                    if full_response.is_empty() {
+                        eprintln!("✗ Error: {}", message);
+                    }
+                    anyhow::bail!(message)
+                }
+                ritsu_common::protocol::ServerResponse::Message { content } => {
+                    println!("🤖 {}", content);
+                    return Ok(());
+                }
+                _ => {
+                    eprintln!("✗ Unexpected response");
+                    anyhow::bail!("Unexpected response")
+                }
+            }
+        } else {
+            eprintln!("✗ Failed to parse response");
+            anyhow::bail!("Failed to parse response")
         }
     }
+    
+    Ok(())
 }

@@ -115,7 +115,7 @@ async fn handle_client(
                         
                         // Special handling for SendMessage to support streaming
                         if let ClientRequest::SendMessage { content, session_id } = request {
-                            if let Err(e) = handle_send_message_streaming(
+                            match handle_send_message_streaming(
                                 &mut stream,
                                 content,
                                 session_id,
@@ -126,11 +126,17 @@ async fn handle_client(
                                 config.llm.disable_streaming,
                                 config.llm.disable_tools,
                             ).await {
-                                error!("Error handling streaming message: {}", e);
-                                let error_response = ServerResponse::Error {
-                                    message: format!("Error: {}", e),
-                                };
-                                send_response(&mut stream, error_response).await?;
+                                Ok(()) => {
+                                    // Send final response to satisfy clients waiting for ServerResponse
+                                    send_response(&mut stream, ServerResponse::Ok).await?;
+                                }
+                                Err(e) => {
+                                    error!("Error handling streaming message: {}", e);
+                                    let error_response = ServerResponse::Error {
+                                        message: format!("Error: {}", e),
+                                    };
+                                    send_response(&mut stream, error_response).await?;
+                                }
                             }
                         } else {
                             let response = handle_request(
