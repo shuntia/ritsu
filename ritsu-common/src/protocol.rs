@@ -75,6 +75,24 @@ pub enum ClientRequest {
     SetSystemPrompt {
         content: String,
     },
+    /// Get model information
+    GetModelInfo,
+    /// Get database statistics
+    GetDatabaseStats,
+    /// Export full database
+    ExportDatabase,
+    /// Inspect a conversation session
+    InspectSession {
+        session_id: String,
+    },
+    /// Get tool usage statistics
+    GetToolStats,
+    /// Get memory compaction status
+    GetMemoryStatus,
+    /// Force memory compaction (dangerous)
+    ForceCompact,
+    /// Reindex database
+    ReindexDatabase,
 }
 
 /// Server response to client

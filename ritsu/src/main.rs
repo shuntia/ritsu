@@ -102,6 +102,10 @@ enum Commands {
         #[arg(long)]
         noconfirm: bool,
     },
+    
+    /// Developer tools and inspection commands (hidden)
+    #[command(subcommand, hide = true)]
+    Dev(DevCommands),
 }
 
 #[derive(Subcommand)]
@@ -221,6 +225,77 @@ enum PromptCommands {
     Edit,
 }
 
+#[derive(Subcommand)]
+enum DevCommands {
+    /// Show effective system prompt
+    Prompt,
+    
+    /// Show model information and stats
+    Model,
+    
+    /// Show server configuration
+    Config,
+    
+    /// Show client configuration
+    ClientConfig,
+    
+    /// Show database statistics
+    DbStats,
+    
+    /// Test connection to server
+    Ping {
+        /// Number of ping attempts
+        #[arg(short, long, default_value = "1")]
+        count: u32,
+    },
+    
+    /// Clear session file
+    ClearSession,
+    
+    /// Clear client cache
+    ClearCache,
+    
+    /// Export full database
+    ExportDb {
+        /// Output file path
+        #[arg(short, long, default_value = "ritsu_dump.json")]
+        output: String,
+    },
+    
+    /// Inspect conversation session
+    InspectSession {
+        /// Session ID (defaults to current)
+        session_id: Option<String>,
+    },
+    
+    /// List all sessions
+    ListSessions {
+        /// Limit number of results
+        #[arg(short, long, default_value = "20")]
+        limit: u32,
+    },
+    
+    /// Show tool usage statistics
+    ToolStats,
+    
+    /// Show memory compaction status
+    MemoryStatus,
+    
+    /// Force memory compaction (dangerous)
+    ForceCompact {
+        /// Skip confirmation
+        #[arg(long)]
+        noconfirm: bool,
+    },
+    
+    /// Rebuild database indexes
+    ReindexDb {
+        /// Skip confirmation
+        #[arg(long)]
+        noconfirm: bool,
+    },
+}
+
 fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
@@ -263,6 +338,7 @@ fn main() -> Result<()> {
                     Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
                     Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
                     Commands::ClearMemory { noconfirm } => commands::memory::clear_memory(noconfirm).await?,
+                    Commands::Dev(cmd) => commands::dev::handle(cmd).await?,
                     Commands::Chat => unreachable!(),
                 }
                 Ok(())

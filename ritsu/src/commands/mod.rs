@@ -10,6 +10,7 @@ pub mod task;
 pub mod prompt;
 pub mod export;
 pub mod memory;
+pub mod dev;
 
 use anyhow::Result;
 
