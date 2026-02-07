@@ -25,18 +25,10 @@ impl Database {
         let conn = Connection::open(path)
             .context("Failed to open database")?;
         
+        // Initialize schema synchronously before wrapping in async Mutex
+        Self::initialize_schema_sync(&conn)?;
+        
         let db = Self { connection: Arc::new(Mutex::new(conn)) };
-        
-        // Initialize schema synchronously in a blocking task
-        let conn_clone = db.connection.clone();
-        tokio::task::block_in_place(|| {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                let conn = conn_clone.lock().await;
-                Self::initialize_schema_sync(&conn)
-            })
-        })?;
-        
         Ok(db)
     }
 
