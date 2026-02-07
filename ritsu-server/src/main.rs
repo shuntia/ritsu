@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
     start_ollama_if_needed(model_name).await;
 
     // Initialize database
-    let db = database::Database::new(&config.server.database_path)?;
+    let db = database::Database::new(&config.server.database_path).await?;
     info!("Database initialized at: {}", config.server.database_path);
 
     // Initialize memory manager

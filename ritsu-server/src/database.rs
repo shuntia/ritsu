@@ -4,31 +4,33 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct Database {
-    pub connection: Arc<Mutex<Connection>>,
+    pub connection: Arc<tokio_rusqlite::Connection>,
 }
 
 impl Database {
     /// Create a new database connection and initialize schema
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+    pub async fn new(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
         
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent).await
                 .context("Failed to create database directory")?;
         }
 
-        let conn = Connection::open(path)
+        // Open connection using tokio_rusqlite
+        let conn = tokio_rusqlite::Connection::open(&path).await
             .context("Failed to open database")?;
         
-        // Initialize schema synchronously before wrapping in async Mutex
-        Self::initialize_schema_sync(&conn)?;
+        // Initialize schema
+        conn.call(|conn| {
+            Self::initialize_schema_sync(conn)
+        }).await?;
         
-        let db = Self { connection: Arc::new(Mutex::new(conn)) };
+        let db = Self { connection: Arc::new(conn) };
         Ok(db)
     }
 

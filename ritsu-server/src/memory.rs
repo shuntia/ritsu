@@ -5,33 +5,30 @@
 
 use anyhow::Result;
 use chrono::NaiveDate;
-use rusqlite::Connection;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::llm::LlmClient;
 
 pub struct MemoryManager {
-    conn: Arc<Mutex<Connection>>,
+    conn: Arc<tokio_rusqlite::Connection>,
     db_path: String,
 }
 
 #[allow(dead_code)]
 impl MemoryManager {
     #[must_use]
-    pub fn new(conn: Arc<Mutex<Connection>>, db_path: String) -> Self {
+    pub fn new(conn: Arc<tokio_rusqlite::Connection>, db_path: String) -> Self {
         Self { conn, db_path }
     }
 
     /// Store a conversation message
     pub async fn store_conversation(&self, role: &str, content: &str) -> Result<()> {
         let date = chrono::Utc::now().date_naive();
-        let db_path = self.db_path.clone();
         let role = role.to_string();
         let content = content.to_string();
         
-        crate::database::Database::execute_blocking(db_path, move |conn| {
+        self.conn.call(move |conn| {
             conn.execute(
                 "INSERT INTO daily_conversations (date, role, content) VALUES (?1, ?2, ?3)",
                 (date.to_string(), &role, &content),
@@ -43,10 +40,9 @@ impl MemoryManager {
     /// Create a note
     pub async fn create_note(&self, content: &str, tags: &[String]) -> Result<i64> {
         let tags_json = serde_json::to_string(tags)?;
-        let db_path = self.db_path.clone();
         let content = content.to_string();
         
-        crate::database::Database::execute_blocking(db_path, move |conn| {
+        self.conn.call(move |conn| {
             conn.execute(
                 "INSERT INTO notes (content, tags) VALUES (?1, ?2)",
                 (&content, &tags_json),
@@ -59,16 +55,16 @@ impl MemoryManager {
     pub async fn compact_daily(&self, date: &NaiveDate, llm_client: &LlmClient, task_context: Option<&str>) -> Result<()> {
         info!("Compacting conversations for {date}");
 
-        // Get all conversations for the date (collect first, then release lock)
-        let conversations = {
-            let conn = self.conn.lock().await;
+        // Get all conversations for the date
+        let date_str = date.to_string();
+        let conversations = self.conn.call(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT role, content FROM daily_conversations 
                  WHERE date = ?1 ORDER BY timestamp"
             )?;
             
             let rows = stmt
-                .query_map([date.to_string()], |row| {
+                .query_map([&date_str], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
             
@@ -76,8 +72,8 @@ impl MemoryManager {
             for row in rows {
                 result.push(row?);
             }
-            result
-        }; // Lock released here
+            Ok(result)
+        }).await?;
 
         if conversations.is_empty() {
             info!("No conversations to compact for {date}");
@@ -86,12 +82,14 @@ impl MemoryManager {
 
         // Get previous day's summary for context
         let previous_summary = if let Some(previous_day) = date.pred_opt() {
-            let conn = self.conn.lock().await;
-            conn.query_row(
-                "SELECT summary FROM daily_summaries WHERE date = ?1",
-                [previous_day.to_string()],
-                |row| row.get::<_, String>(0),
-            ).ok()
+            let prev_str = previous_day.to_string();
+            self.conn.call(move |conn| {
+                conn.query_row(
+                    "SELECT summary FROM daily_summaries WHERE date = ?1",
+                    [&prev_str],
+                    |row| row.get::<_, String>(0),
+                ).ok()
+            }).await
         } else {
             None
         };
@@ -138,13 +136,16 @@ impl MemoryManager {
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let count = conversations.len() as i32;
 
-        // Insert daily summary (acquire lock again)
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT OR REPLACE INTO daily_summaries (date, summary, tags, conversation_count) 
-             VALUES (?1, ?2, ?3, ?4)",
-            (date.to_string(), summary, tags, count),
-        )?;
+        // Insert daily summary
+        let date_str = date.to_string();
+        self.conn.call(move |conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO daily_summaries (date, summary, tags, conversation_count) 
+                 VALUES (?1, ?2, ?3, ?4)",
+                (&date_str, &summary, &tags, &count),
+            )?;
+            Ok(())
+        }).await?;
 
         info!("Compacted {count} conversations into daily summary for {date}");
         Ok(())
@@ -154,16 +155,16 @@ impl MemoryManager {
     pub async fn compact_monthly(&self, year_month: &str, llm_client: &LlmClient, task_context: Option<&str>) -> Result<()> {
         info!("Compacting daily summaries for {year_month}");
 
-        // Get all daily summaries for the month (collect first, then release lock)
-        let summaries = {
-            let conn = self.conn.lock().await;
+        // Get all daily summaries for the month
+        let pattern = format!("{year_month}%");
+        let summaries = self.conn.call(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT date, summary FROM daily_summaries 
                  WHERE date LIKE ?1 ORDER BY date"
             )?;
             
             let rows = stmt
-                .query_map([format!("{year_month}%")], |row| {
+                .query_map([&pattern], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
             
@@ -171,8 +172,8 @@ impl MemoryManager {
             for row in rows {
                 result.push(row?);
             }
-            result
-        }; // Lock released here
+            Ok(result)
+        }).await?;
 
         if summaries.is_empty() {
             info!("No daily summaries to compact for {year_month}");
@@ -183,15 +184,15 @@ impl MemoryManager {
         let system_prompt = self.build_background_prompt(Some("compact")).await?;
 
         // Get previous month's summary for continuity
-        let prev_month_summary = {
-            let conn = self.conn.lock().await;
+        let year_month_str = year_month.to_string();
+        let prev_month_summary = self.conn.call(move |conn| {
             conn.query_row(
                 "SELECT summary FROM monthly_summaries 
                  WHERE year_month < ?1 ORDER BY year_month DESC LIMIT 1",
-                [year_month],
+                [&year_month_str],
                 |row| row.get::<_, String>(0),
             ).ok()
-        };
+        }).await;
 
         // Generate monthly summary with LLM (no lock held)
         let summaries_text = summaries.iter()
@@ -232,13 +233,16 @@ impl MemoryManager {
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
         let days_count = summaries.len() as i32;
 
-        // Insert monthly summary (acquire lock again)
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT OR REPLACE INTO monthly_summaries (year_month, summary, tags, days_included) 
-             VALUES (?1, ?2, ?3, ?4)",
-            (year_month, summary, tags, days_count),
-        )?;
+        // Insert monthly summary
+        let year_month_str = year_month.to_string();
+        self.conn.call(move |conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO monthly_summaries (year_month, summary, tags, days_included) 
+                 VALUES (?1, ?2, ?3, ?4)",
+                (&year_month_str, &summary, &tags, &days_count),
+            )?;
+            Ok(())
+        }).await?;
 
         info!("Compacted {days_count} daily summaries into monthly summary for {year_month}");
         Ok(())
@@ -251,11 +255,13 @@ impl MemoryManager {
             .checked_sub_days(chrono::Days::new(u64::from(rotation_days)))
             .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
 
-        let conn = self.conn.lock().await;
-        let deleted = conn.execute(
-            "DELETE FROM daily_conversations WHERE date < ?1",
-            [cutoff_date.to_string()],
-        )?;
+        let cutoff_str = cutoff_date.to_string();
+        let deleted = self.conn.call(move |conn| {
+            conn.execute(
+                "DELETE FROM daily_conversations WHERE date < ?1",
+                [&cutoff_str],
+            )
+        }).await?;
 
         info!("Rotated {deleted} old conversations (older than {cutoff_date})");
         Ok(())
@@ -263,43 +269,47 @@ impl MemoryManager {
 
     /// Store a system prompt (base or AI-generated)
     pub async fn store_system_prompt(&self, prompt_type: &str, content: &str) -> Result<()> {
-        let conn = self.conn.lock().await;
+        let prompt_type = prompt_type.to_string();
+        let content = content.to_string();
         
-        // Deactivate previous prompts of this type
-        conn.execute(
-            "UPDATE system_prompts SET active = 0 WHERE prompt_type = ?1",
-            [prompt_type],
-        )?;
+        self.conn.call(move |conn| {
+            // Deactivate previous prompts of this type
+            conn.execute(
+                "UPDATE system_prompts SET active = 0 WHERE prompt_type = ?1",
+                [&prompt_type],
+            )?;
 
-        // Get next version number
-        let version: i32 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) + 1 FROM system_prompts WHERE prompt_type = ?1",
-                [prompt_type],
-                |row| row.get(0),
-            )
-            .unwrap_or(1);
+            // Get next version number
+            let version: i32 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) + 1 FROM system_prompts WHERE prompt_type = ?1",
+                    [&prompt_type],
+                    |row| row.get(0),
+                )
+                .unwrap_or(1);
 
-        // Insert new prompt
-        conn.execute(
-            "INSERT INTO system_prompts (prompt_type, content, version, active) 
-             VALUES (?1, ?2, ?3, 1)",
-            (prompt_type, content, version),
-        )?;
+            // Insert new prompt
+            conn.execute(
+                "INSERT INTO system_prompts (prompt_type, content, version, active) 
+                 VALUES (?1, ?2, ?3, 1)",
+                (&prompt_type, &content, &version),
+            )?;
 
-        info!("Stored {prompt_type} system prompt (version {version})");
-        Ok(())
+            info!("Stored {prompt_type} system prompt (version {version})");
+            Ok(())
+        }).await
     }
 
     /// Get the active system prompt of a specific type
     pub async fn get_system_prompt(&self, prompt_type: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().await;
+        let prompt_type = prompt_type.to_string();
         
-        let result = conn.query_row(
-            "SELECT content FROM system_prompts 
-             WHERE prompt_type = ?1 AND active = 1 
-             ORDER BY version DESC LIMIT 1",
-            [prompt_type],
+        self.conn.call(move |conn| {
+            let result = conn.query_row(
+                "SELECT content FROM system_prompts 
+                 WHERE prompt_type = ?1 AND active = 1 
+                 ORDER BY version DESC LIMIT 1",
+                [&prompt_type],
             |row| row.get(0),
         );
 

@@ -24,6 +24,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 rusqlite.workspace = true
+tokio-rusqlite = "0.7"
 toml.workspace = true
 postcard.workspace = true
 futures.workspace = true
