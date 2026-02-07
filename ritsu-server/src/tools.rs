@@ -548,6 +548,9 @@ mod tool_impls {
                         return ToolResult::error(format!("Failed to reload triggers: {e}"));
                     }
                     
+                    // Notify trigger loop to wake up and reschedule
+                    trigger_registry.notify_changed();
+                    
                     let desc_info = description.map(|d| format!(": {d}")).unwrap_or_default();
                     ToolResult::success(format!("Trigger '{name}' created successfully{desc_info}"))
                 })

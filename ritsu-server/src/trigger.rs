@@ -47,6 +47,7 @@ pub struct Trigger {
 pub struct TriggerRegistry {
     triggers: Arc<RwLock<Vec<Trigger>>>,
     pub db_path: String,
+    trigger_changed: Arc<tokio::sync::Notify>,
 }
 
 impl TriggerRegistry {
@@ -54,6 +55,7 @@ impl TriggerRegistry {
         Self {
             triggers: Arc::new(RwLock::new(Vec::new())),
             db_path,
+            trigger_changed: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -184,6 +186,7 @@ impl TriggerRegistry {
         )?;
 
         self.load_from_database().await?;
+        self.trigger_changed.notify_one();
         Ok(())
     }
 
@@ -191,7 +194,16 @@ impl TriggerRegistry {
         let conn = Connection::open(&self.db_path)?;
         conn.execute("DELETE FROM triggers WHERE name = ?1", [name])?;
         self.load_from_database().await?;
+        self.trigger_changed.notify_one();
         Ok(())
+    }
+    
+    pub fn notify_changed(&self) {
+        self.trigger_changed.notify_one();
+    }
+    
+    pub fn notifier(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.trigger_changed)
     }
 
     pub async fn create_trigger(
@@ -523,13 +535,19 @@ pub async fn run_trigger_loop(
     state: Arc<crate::state::ServerState>,
 ) -> Result<()> {
     info!("Starting trigger loop");
+    let notifier = registry.notifier();
 
     loop {
         let triggers = registry.get_all_triggers().await;
         
         if triggers.is_empty() {
-            info!("No triggers registered, sleeping for 60 seconds");
-            sleep(Duration::from_secs(60)).await;
+            info!("No triggers registered, waiting for changes or 60 seconds");
+            tokio::select! {
+                _ = sleep(Duration::from_secs(60)) => {},
+                _ = notifier.notified() => {
+                    info!("Trigger registry changed, reloading");
+                }
+            }
             continue;
         }
 
@@ -600,23 +618,36 @@ pub async fn run_trigger_loop(
                 formatted_time,
                 duration_until.as_secs_f64()
             );
-            sleep_until(instant).await;
             
-            // Execute the trigger
-            info!("Executing trigger: {}", trigger.name);
-            if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client).await {
-                error!("Failed to execute trigger {}: {}", trigger.name, e);
-            }
-            
-            // Remove dynamic triggers after execution
-            if matches!(trigger.trigger_type, TriggerType::Dynamic) {
-                if let Err(e) = registry.remove_trigger(&trigger.name).await {
-                    error!("Failed to remove dynamic trigger {}: {}", trigger.name, e);
+            // Wait for trigger time or registry change
+            tokio::select! {
+                _ = sleep_until(instant) => {
+                    // Trigger time reached - execute it
+                    info!("Executing trigger: {}", trigger.name);
+                    if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client).await {
+                        error!("Failed to execute trigger {}: {}", trigger.name, e);
+                    }
+                    
+                    // Remove dynamic triggers after execution
+                    if matches!(trigger.trigger_type, TriggerType::Dynamic) {
+                        if let Err(e) = registry.remove_trigger(&trigger.name).await {
+                            error!("Failed to remove dynamic trigger {}: {}", trigger.name, e);
+                        }
+                    }
+                }
+                _ = notifier.notified() => {
+                    // Trigger registry changed - reschedule
+                    info!("Trigger registry changed, rescheduling");
                 }
             }
         } else {
-            // No triggers ready, check inactivity in 60 seconds
-            sleep(Duration::from_secs(60)).await;
+            // No triggers ready, wait for registry change or check again in 60 seconds
+            tokio::select! {
+                _ = sleep(Duration::from_secs(60)) => {},
+                _ = notifier.notified() => {
+                    info!("Trigger registry changed, rescheduling");
+                }
+            }
         }
     }
 }
