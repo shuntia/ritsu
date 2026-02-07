@@ -109,8 +109,8 @@
 5. [ ] Test each fix thoroughly
 
 ### Phase 2: Async Architecture (P1) - ~6 hours
-6. [ ] Standardize IPC endianness
-7. [ ] Add trigger loop wake mechanism
+6. [x] Standardize IPC endianness ✓
+7. [x] Add trigger loop wake mechanism ✓
 8. [ ] Implement graceful shutdown
 9. [ ] Wrap all blocking I/O in spawn_blocking
 10. [ ] Fix database initialization pattern
