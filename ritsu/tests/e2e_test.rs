@@ -83,7 +83,19 @@ llm_request_seconds = 120
     async fn start_server(&mut self) -> Result<()> {
         println!("Starting server with config: {}", self.config_path.display());
         
-        let mut cmd = Command::new("target/debug/ritsu-server");
+        // Get absolute path to binary (tests run from workspace root or package dir)
+        let mut binary_path = std::env::current_dir()?.join("target/debug/ritsu-server");
+        if !binary_path.exists() {
+            // Try parent directory (in case we're in ritsu/ subdir)
+            binary_path = std::env::current_dir()?.parent()
+                .ok_or_else(|| anyhow::anyhow!("Could not find parent directory"))?
+                .join("target/debug/ritsu-server");
+        }
+        if !binary_path.exists() {
+            anyhow::bail!("ritsu-server binary not found at: {}", binary_path.display());
+        }
+        
+        let mut cmd = Command::new(&binary_path);
         cmd.arg("--config")
             .arg(&self.config_path)
             .env("RUST_LOG", "info,ritsu_server=debug");
@@ -108,9 +120,21 @@ llm_request_seconds = 120
     async fn start_client_daemon(&mut self) -> Result<()> {
         println!("Starting client daemon");
         
+        // Get absolute path to binary (tests run from workspace root or package dir)
+        let mut binary_path = std::env::current_dir()?.join("target/debug/ritsu");
+        if !binary_path.exists() {
+            // Try parent directory (in case we're in ritsu/ subdir)
+            binary_path = std::env::current_dir()?.parent()
+                .ok_or_else(|| anyhow::anyhow!("Could not find parent directory"))?
+                .join("target/debug/ritsu");
+        }
+        if !binary_path.exists() {
+            anyhow::bail!("ritsu binary not found at: {}", binary_path.display());
+        }
+        
         // Client daemon connects to server socket, but listens on client socket
         // We need to override the socket paths via environment or config
-        let mut cmd = Command::new("target/debug/ritsu");
+        let mut cmd = Command::new(&binary_path);
         cmd.arg("start")
             .env("RUST_LOG", "info,ritsu=debug");
         
@@ -162,7 +186,13 @@ impl Drop for TestFixture {
 
 /// Helper to run a ritsu command
 async fn run_command(args: &[&str]) -> Result<(bool, String)> {
-    let output = Command::new("target/debug/ritsu")
+    let mut binary_path = std::env::current_dir()?.join("target/debug/ritsu");
+    if !binary_path.exists() {
+        binary_path = std::env::current_dir()?.parent()
+            .ok_or_else(|| anyhow::anyhow!("Could not find parent directory"))?
+            .join("target/debug/ritsu");
+    }
+    let output = Command::new(&binary_path)
         .args(args)
         .output()?;
     
