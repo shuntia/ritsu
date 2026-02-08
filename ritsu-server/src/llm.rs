@@ -590,18 +590,31 @@ impl LlmClient {
                         // Acquire a permit (await inside spawned task so we don't block the outer task)
                         let _permit = permit_sem.acquire_owned().await.expect("semaphore closed");
 
+                        // Log start
+                        let start = std::time::Instant::now();
+                        info!(tool=%call_name, args=?call_args, "Starting tool execution");
+
                         // Execute with timeout to prevent a single tool from blocking forever
                         match tokio::time::timeout(tool_timeout, tool_registry.execute(&call_name, call_args.clone())).await {
                             Ok(Ok(res)) => {
+                                let duration = start.elapsed();
                                 let result_text = if res.success { res.output.clone() } else { res.error.clone().unwrap_or_else(|| res.output.clone()) };
+                                info!(tool=%call_name, duration_ms = %duration.as_millis(), success = res.success, "Tool execution completed");
+
                                 let msg = format!("\n\n🔧 Tool '{}' result:\n{}\n", call_name, result_text);
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Ok(Err(e)) => {
+                                let duration = start.elapsed();
+                                warn!(tool=%call_name, duration_ms = %duration.as_millis(), error=%e, "Tool execution failed");
+
                                 let msg = format!("\n\n🔧 Tool '{}' execution failed: {}\n", call_name, e);
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Err(_) => {
+                                let duration = start.elapsed();
+                                warn!(tool=%call_name, duration_ms = %duration.as_millis(), "Tool execution timed out after {}s", tool_timeout.as_secs());
+
                                 let msg = format!("\n\n🔧 Tool '{}' execution timed out after {}s\n", call_name, tool_timeout.as_secs());
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
