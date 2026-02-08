@@ -41,7 +41,7 @@ impl PreferencesManager {
         let category_for_log = category.clone();
         let key_for_log = key.clone();
         let value_for_log = value.clone();
-        let source = source.map(|s| s.to_string());
+        let source = source.map(str::to_string);
         
         self.db.call(move |conn| -> rusqlite::Result<()> {
             conn.execute(
@@ -51,7 +51,7 @@ impl PreferencesManager {
                 rusqlite::params![&category, &key, &value, confidence, &source],
             )?;
             Ok(())
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         
         info!("Set preference: {} / {} = {}", category_for_log, key_for_log, value_for_log);
         Ok(())
@@ -191,7 +191,7 @@ impl PreferencesManager {
                 [&category],
             )?;
             Ok(rows)
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         
         info!("Cleared {} preferences from category: {}", rows, category_for_log);
         Ok(rows)

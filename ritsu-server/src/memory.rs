@@ -11,8 +11,12 @@ use tracing::info;
 
 use crate::llm::LlmClient;
 
+/// Tool usage record: (tool_name, arguments, success, result, timestamp)
+type ToolUsageRecord = (String, String, bool, String, String);
+
 pub struct MemoryManager {
     conn: Arc<tokio_rusqlite::Connection>,
+    #[allow(dead_code)]
     db_path: String,
 }
 
@@ -629,8 +633,8 @@ impl MemoryManager {
     }
 
     /// Get recent tool usage
-    pub async fn get_recent_tool_usage(&self, limit: i64) -> Result<Vec<(String, String, bool, String, String)>> {
-        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String, bool, String, String)>> {
+    pub async fn get_recent_tool_usage(&self, limit: i64) -> Result<Vec<ToolUsageRecord>> {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<ToolUsageRecord>> {
             let mut stmt = conn.prepare(
                 "SELECT tool_name, arguments, success, result, timestamp
                  FROM tool_usage
@@ -801,7 +805,7 @@ impl MemoryManager {
         self.conn.call(|conn| -> rusqlite::Result<()> {
             conn.execute("REINDEX", [])?;
             Ok(())
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         
         info!("Database reindexed");
         Ok(())

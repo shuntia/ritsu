@@ -95,9 +95,9 @@ impl ConversationManager {
         let session_id = session_id.to_string();
         let role = role.to_string();
         let content = content.to_string();
-        let tool_calls = tool_calls.map(|s| s.to_string());
-        let tool_results = tool_results.map(|s| s.to_string());
-        let thinking = thinking.map(|s| s.to_string());
+        let tool_calls = tool_calls.map(str::to_string);
+        let tool_results = tool_results.map(str::to_string);
+        let thinking = thinking.map(str::to_string);
         
         self.db.call(move |conn| -> rusqlite::Result<i64> {
             // Get current turn count
@@ -238,7 +238,7 @@ impl ConversationManager {
                 
                 Ok(context)
             }
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         
         // Ask LLM to generate a short title
         let messages = vec![
@@ -267,7 +267,7 @@ impl ConversationManager {
                 )?;
                 Ok(())
             }
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         
         Ok(title)
     }
@@ -288,7 +288,7 @@ impl ConversationManager {
             } else {
                 Ok(false)
             }
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))
     }
 
     /// Clear all conversations and turns (for testing)
@@ -297,7 +297,7 @@ impl ConversationManager {
             conn.execute("DELETE FROM conversation_turns", [])?;
             conn.execute("DELETE FROM conversations", [])?;
             Ok(())
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         
         info!("Cleared all conversations and turns");
         Ok(())

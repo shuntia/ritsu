@@ -126,7 +126,7 @@ impl ToolRegistry {
                 (&tool_name, &args, success, &result, execution_time_ms),
             )?;
             Ok(())
-        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         Ok(())
     }
 

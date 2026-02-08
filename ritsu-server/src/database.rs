@@ -6,9 +6,9 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
-/// Helper to convert tokio_rusqlite errors to anyhow
+/// Helper to convert `tokio_rusqlite` errors to `anyhow`
 fn convert_db_result<T>(res: std::result::Result<T, tokio_rusqlite::Error<rusqlite::Error>>) -> Result<T> {
-    res.map_err(|e| anyhow::anyhow!("{:?}", e))
+    res.map_err(|e| anyhow::anyhow!("{e:?}"))
 }
 
 pub struct Database {
