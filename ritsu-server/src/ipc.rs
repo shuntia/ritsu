@@ -410,7 +410,7 @@ async fn handle_send_message_streaming(
     if let Ok(needs_title) = conversation_manager.needs_title_generation(&session_id).await {
         if needs_title {
             info!("Generating title for session {}", session_id);
-            if let Err(e) = conversation_manager.generate_title(&session_id, llm_client).await {
+            if let Err(e) = conversation_manager.generate_title(&session_id, &llm_client).await {
                 warn!("Failed to generate session title: {}", e);
             }
         }
