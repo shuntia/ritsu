@@ -463,7 +463,7 @@ impl MemoryManager {
             .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
 
         let cutoff_str = cutoff_date.to_string();
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT date, role, content FROM daily_conversations 
                  WHERE date >= ?1 ORDER BY date DESC, id DESC LIMIT 100"
@@ -475,7 +475,7 @@ impl MemoryManager {
 
             let results: Vec<(String, String, String)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Query daily summaries
@@ -486,7 +486,7 @@ impl MemoryManager {
             .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
 
         let cutoff_str = cutoff_date.to_string();
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT date, summary FROM daily_summaries 
                  WHERE date >= ?1 ORDER BY date DESC"
@@ -498,12 +498,12 @@ impl MemoryManager {
 
             let results: Vec<(String, String)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Query monthly summaries
     pub async fn query_monthly_summaries(&self, months: u32) -> Result<Vec<(String, String, i32)>> {
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String, i32)>> {
             let mut stmt = conn.prepare(
                 "SELECT year_month, summary, days_included FROM monthly_summaries 
                  ORDER BY year_month DESC LIMIT ?1"
@@ -515,25 +515,25 @@ impl MemoryManager {
 
             let results: Vec<(String, String, i32)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get daily summary for a specific date
     pub async fn get_daily_summary(&self, date: &str) -> Result<Option<String>> {
         let date = date.to_string();
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Option<String>> {
             let result = conn.query_row(
                 "SELECT summary FROM daily_summaries WHERE date = ?1",
                 [&date],
                 |row| row.get::<_, String>(0),
             ).ok();
             Ok(result)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Query notes
     pub async fn query_notes(&self, limit: u32) -> Result<Vec<(i64, String, String)>> {
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(i64, String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT id, content, tags FROM notes 
                  ORDER BY created_at DESC LIMIT ?1"
@@ -545,12 +545,12 @@ impl MemoryManager {
 
             let results: Vec<(i64, String, String)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get recent conversations (last N days)
     pub async fn get_recent_conversations_days(&self, days: i64) -> Result<Vec<(String, String, String, String)>> {
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String, String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT ct.timestamp, ct.role, ct.content, ct.session_id as user_id 
                  FROM conversation_turns ct
@@ -565,14 +565,14 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get recent summaries (daily or monthly)
     pub async fn get_summaries(&self, summary_type: &str, limit: i64) -> Result<Vec<(String, String, String)>> {
         let summary_type = summary_type.to_string();
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String, String)>> {
             let query = match summary_type.as_str() {
                 "daily" => "SELECT date, summary, tags FROM daily_summaries ORDER BY date DESC LIMIT ?1",
                 "monthly" => "SELECT year_month, summary, tags FROM monthly_summaries ORDER BY year_month DESC LIMIT ?1",
@@ -586,12 +586,12 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get tool usage statistics
     pub async fn get_tool_usage_stats(&self, days: i64) -> Result<Vec<(String, i64, i64, f64)>> {
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, i64, i64, f64)>> {
             let mut stmt = conn.prepare(
                 "SELECT tool_name, 
                         COUNT(*) as total_calls,
@@ -615,12 +615,12 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get recent tool usage
     pub async fn get_recent_tool_usage(&self, limit: i64) -> Result<Vec<(String, String, bool, String, String)>> {
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String, bool, String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT tool_name, arguments, success, result, timestamp
                  FROM tool_usage
@@ -640,7 +640,7 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get tool effectiveness summary
@@ -687,7 +687,7 @@ impl MemoryManager {
 
     /// Get database statistics
     pub async fn get_database_stats(&self) -> Result<String> {
-        self.conn.call(|conn| {
+        self.conn.call(|conn| -> rusqlite::Result<String> {
             let conversations: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM daily_conversations",
                 [],
@@ -733,7 +733,7 @@ impl MemoryManager {
                  Tasks: {tasks}\n\
                  Triggers: {triggers}"
             ))
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Export database to JSON
@@ -745,7 +745,7 @@ impl MemoryManager {
 
     /// Get memory compaction status
     pub async fn get_compaction_status(&self) -> Result<String> {
-        self.conn.call(|conn| {
+        self.conn.call(|conn| -> rusqlite::Result<String> {
             let last_daily: Option<String> = conn.query_row(
                 "SELECT date FROM daily_summaries ORDER BY date DESC LIMIT 1",
                 [],
@@ -773,7 +773,7 @@ impl MemoryManager {
                 last_monthly.unwrap_or_else(|| "None".to_string()),
                 oldest_conv.unwrap_or_else(|| "None".to_string()),
             ))
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Force memory compaction
@@ -786,10 +786,10 @@ impl MemoryManager {
 
     /// Reindex database
     pub async fn reindex_database(&self) -> Result<()> {
-        self.conn.call(|conn| {
+        self.conn.call(|conn| -> rusqlite::Result<()> {
             conn.execute("REINDEX", [])?;
             Ok(())
-        }).await?;
+        }).await.map_err(Into::into)?;
         
         info!("Database reindexed");
         Ok(())

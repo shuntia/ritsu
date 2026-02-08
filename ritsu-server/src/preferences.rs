@@ -27,7 +27,6 @@ impl PreferencesManager {
 
     /// Set or update a preference
     pub async fn set_preference(
-    #[allow(clippy::significant_drop_tightening)]
         &self,
         category: &str,
         key: &str,
@@ -35,14 +34,20 @@ impl PreferencesManager {
         confidence: f64,
         source: Option<&str>,
     ) -> Result<()> {
-        let conn = self.db.lock().await;
+        let category = category.to_string();
+        let key = key.to_string();
+        let value = value.to_string();
+        let source = source.map(|s| s.to_string());
         
-        conn.execute(
-            "INSERT OR REPLACE INTO preferences 
-             (category, key, value, confidence, source, updated_at) 
-             VALUES (?, ?, ?, ?, ?, datetime('now'))",
-            rusqlite::params![category, key, value, confidence, source],
-        )?;
+        self.db.call(move |conn| -> rusqlite::Result<()> {
+            conn.execute(
+                "INSERT OR REPLACE INTO preferences 
+                 (category, key, value, confidence, source, updated_at) 
+                 VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                rusqlite::params![&category, &key, &value, confidence, &source],
+            )?;
+            Ok(())
+        }).await.map_err(Into::into)?;
         
         info!("Set preference: {} / {} = {}", category, key, value);
         Ok(())
@@ -51,84 +56,87 @@ impl PreferencesManager {
     /// Get a specific preference
     #[allow(dead_code)]
     pub async fn get_preference(&self, category: &str, key: &str) -> Result<Option<Preference>> {
-    #[allow(clippy::significant_drop_tightening)]
-        let conn = self.db.lock().await;
+        let category = category.to_string();
+        let key = key.to_string();
         
-        let mut stmt = conn.prepare(
-            "SELECT category, key, value, confidence, source 
-             FROM preferences 
-             WHERE category = ? AND key = ?"
-        )?;
-        
-        let pref = stmt.query_row([category, key], |row| {
-            Ok(Preference {
-                category: row.get(0)?,
-                key: row.get(1)?,
-                value: row.get(2)?,
-                confidence: row.get(3)?,
-                source: row.get(4)?,
-            })
-        });
-        
-        match pref {
-            Ok(p) => Ok(Some(p)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        self.db.call(move |conn| -> rusqlite::Result<Option<Preference>> {
+            let mut stmt = conn.prepare(
+                "SELECT category, key, value, confidence, source 
+                 FROM preferences 
+                 WHERE category = ? AND key = ?"
+            )?;
+            
+            let pref = stmt.query_row([&category, &key], |row| {
+                Ok(Preference {
+                    category: row.get(0)?,
+                    key: row.get(1)?,
+                    value: row.get(2)?,
+                    confidence: row.get(3)?,
+                    source: row.get(4)?,
+                })
+            });
+            
+            match pref {
+                Ok(p) => Ok(Some(p)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
+        }).await.map_err(Into::into)
     }
 
     /// Get all preferences in a category
     #[allow(dead_code)]
     pub async fn get_category(&self, category: &str) -> Result<Vec<Preference>> {
-    #[allow(clippy::significant_drop_tightening)]
-        let conn = self.db.lock().await;
+        let category = category.to_string();
         
-        let mut stmt = conn.prepare(
-            "SELECT category, key, value, confidence, source 
-             FROM preferences 
-             WHERE category = ? 
-             ORDER BY key"
-        )?;
-        
-        let prefs = stmt.query_map([category], |row| {
-            Ok(Preference {
-                category: row.get(0)?,
-                key: row.get(1)?,
-                value: row.get(2)?,
-                confidence: row.get(3)?,
-                source: row.get(4)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-        
-        Ok(prefs)
+        self.db.call(move |conn| -> rusqlite::Result<Vec<Preference>> {
+            let mut stmt = conn.prepare(
+                "SELECT category, key, value, confidence, source 
+                 FROM preferences 
+                 WHERE category = ? 
+                 ORDER BY key"
+            )?;
+            
+            let prefs = stmt.query_map([&category], |row| {
+                Ok(Preference {
+                    category: row.get(0)?,
+                    key: row.get(1)?,
+                    value: row.get(2)?,
+                    confidence: row.get(3)?,
+                    source: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+            
+            Ok(prefs)
+        }).await.map_err(Into::into)
     }
 
     /// Get all preferences as a map
     #[allow(dead_code)]
     pub async fn get_all(&self) -> Result<HashMap<String, HashMap<String, String>>> {
-        let conn = self.db.lock().await;
-        
-        let mut stmt = conn.prepare(
-            "SELECT category, key, value FROM preferences ORDER BY category, key"
-        )?;
-        
-        let mut prefs: HashMap<String, HashMap<String, String>> = HashMap::new();
-        
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?, // category
-                row.get::<_, String>(1)?, // key
-                row.get::<_, String>(2)?, // value
-            ))
-        })?;
-        
-        for row in rows {
-            let (category, key, value) = row?;
-            prefs.entry(category).or_default().insert(key, value);
-        }
-        
-        Ok(prefs)
+        self.db.call(|conn| -> rusqlite::Result<HashMap<String, HashMap<String, String>>> {
+            let mut stmt = conn.prepare(
+                "SELECT category, key, value FROM preferences ORDER BY category, key"
+            )?;
+            
+            let mut prefs: HashMap<String, HashMap<String, String>> = HashMap::new();
+            
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?, // category
+                    row.get::<_, String>(1)?, // key
+                    row.get::<_, String>(2)?, // value
+                ))
+            })?;
+            
+            for row in rows {
+                let (category, key, value) = row?;
+                prefs.entry(category).or_default().insert(key, value);
+            }
+            
+            Ok(prefs)
+        }).await.map_err(Into::into)
     }
 
     /// Format preferences for system prompt
@@ -155,25 +163,30 @@ impl PreferencesManager {
     /// Remove a preference
     #[allow(dead_code)]
     pub async fn remove_preference(&self, category: &str, key: &str) -> Result<bool> {
-        let conn = self.db.lock().await;
+        let category = category.to_string();
+        let key = key.to_string();
         
-        let rows = conn.execute(
-            "DELETE FROM preferences WHERE category = ? AND key = ?",
-            [category, key],
-        )?;
-        
-        Ok(rows > 0)
+        self.db.call(move |conn| -> rusqlite::Result<bool> {
+            let rows = conn.execute(
+                "DELETE FROM preferences WHERE category = ? AND key = ?",
+                [&category, &key],
+            )?;
+            Ok(rows > 0)
+        }).await.map_err(Into::into)
     }
 
     /// Clear all preferences in a category
     #[allow(dead_code)]
     pub async fn clear_category(&self, category: &str) -> Result<usize> {
-        let conn = self.db.lock().await;
+        let category = category.to_string();
         
-        let rows = conn.execute(
-            "DELETE FROM preferences WHERE category = ?",
-            [category],
-        )?;
+        let rows = self.db.call(move |conn| -> rusqlite::Result<usize> {
+            let rows = conn.execute(
+                "DELETE FROM preferences WHERE category = ?",
+                [&category],
+            )?;
+            Ok(rows)
+        }).await.map_err(Into::into)?;
         
         info!("Cleared {} preferences from category: {}", rows, category);
         Ok(rows)

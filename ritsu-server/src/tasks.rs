@@ -151,7 +151,7 @@ impl TaskManager {
         let status_filter = status_filter.map(|s| s.to_string());
         let priority_filter = priority_filter.map(|s| s.to_string());
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<Vec<Task>> {
             let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
 
             if let Some(status) = &status_filter {
@@ -206,7 +206,7 @@ impl TaskManager {
                 .collect();
 
             Ok(tasks)
-        }).await?
+        }).await.map_err(Into::into)
     }
 
     /// Get task summary statistics for AI context

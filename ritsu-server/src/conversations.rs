@@ -99,7 +99,7 @@ impl ConversationManager {
         let tool_results = tool_results.map(|s| s.to_string());
         let thinking = thinking.map(|s| s.to_string());
         
-        self.db.call(move |conn| {
+        self.db.call(move |conn| -> rusqlite::Result<i64> {
             // Get current turn count
             let turn_count: i64 = conn.query_row(
                 "SELECT turn_count FROM conversations WHERE session_id = ?",
@@ -134,7 +134,7 @@ impl ConversationManager {
     pub async fn get_history(&self, session_id: &str, limit: i64) -> Result<Vec<ConversationTurn>> {
         let session_id = session_id.to_string();
         
-        self.db.call(move |conn| {
+        self.db.call(move |conn| -> rusqlite::Result<i64> {
             let mut stmt = conn.prepare(
                 "SELECT turn_number, role, content, tool_calls, tool_results, thinking 
                  FROM conversation_turns 
@@ -157,12 +157,12 @@ impl ConversationManager {
             
             // Reverse to get chronological order
             Ok(turns.into_iter().rev().collect())
-        }).await
+        }).await.map_err(Into::into)
     }
 
     /// Get all active sessions (active in last 24 hours)
     pub async fn get_active_sessions(&self) -> Result<Vec<ConversationSession>> {
-        self.db.call(|conn| {
+        self.db.call(|conn| -> rusqlite::Result<Vec<ConversationSession>> {
             let mut stmt = conn.prepare(
                 "SELECT session_id, turn_count, started_at, last_activity, title 
                  FROM conversations 
@@ -182,12 +182,12 @@ impl ConversationManager {
             .collect::<Result<Vec<_>, _>>()?;
             
             Ok(sessions)
-        }).await
+        }).await.map_err(Into::into)
     }
 
     /// Clean up old conversations (older than 30 days)
     pub async fn cleanup_old_sessions(&self, days: i64) -> Result<usize> {
-        self.db.call(move |conn| {
+        self.db.call(move |conn| -> rusqlite::Result<i64> {
             let deleted = conn.execute(
                 "DELETE FROM conversations 
                  WHERE last_activity < datetime('now', ? || ' days')",
@@ -199,7 +199,7 @@ impl ConversationManager {
             }
             
             Ok(deleted)
-        }).await
+        }).await.map_err(Into::into)
     }
 
     /// Generate a title for a session based on first few turns
@@ -209,7 +209,7 @@ impl ConversationManager {
         // Build context from first few turns
         let context = self.db.call({
             let session_id = session_id.clone();
-            move |conn| {
+            move |conn| -> rusqlite::Result<String> {
                 // Get first 2-3 turns to generate title from
                 let mut stmt = conn.prepare(
                     "SELECT role, content FROM conversation_turns 
@@ -238,7 +238,7 @@ impl ConversationManager {
                 
                 Ok(context)
             }
-        }).await?;
+        }).await.map_err(Into::into)?;
         
         // Ask LLM to generate a short title
         let messages = vec![
@@ -260,14 +260,14 @@ impl ConversationManager {
         // Store the title
         self.db.call({
             let title = title.clone();
-            move |conn| {
+            move |conn| -> rusqlite::Result<()> {
                 conn.execute(
                     "UPDATE conversations SET title = ? WHERE session_id = ?",
                     [&title, &session_id],
                 )?;
                 Ok(())
             }
-        }).await?;
+        }).await.map_err(Into::into)?;
         
         Ok(title)
     }
@@ -276,7 +276,7 @@ impl ConversationManager {
     pub async fn needs_title_generation(&self, session_id: &str) -> Result<bool> {
         let session_id = session_id.to_string();
         
-        self.db.call(move |conn| {
+        self.db.call(move |conn| -> rusqlite::Result<i64> {
             let result: Option<(i64, Option<String>)> = conn.query_row(
                 "SELECT turn_count, title FROM conversations WHERE session_id = ?",
                 [&session_id],
@@ -288,16 +288,16 @@ impl ConversationManager {
             } else {
                 Ok(false)
             }
-        }).await
+        }).await.map_err(Into::into)
     }
 
     /// Clear all conversations and turns (for testing)
     pub async fn clear_all(&self) -> Result<()> {
-        self.db.call(|conn| {
+        self.db.call(|conn| -> rusqlite::Result<()> {
             conn.execute("DELETE FROM conversation_turns", [])?;
             conn.execute("DELETE FROM conversations", [])?;
             Ok(())
-        }).await?;
+        }).await.map_err(Into::into)?;
         
         info!("Cleared all conversations and turns");
         Ok(())
@@ -307,7 +307,7 @@ impl ConversationManager {
     pub async fn inspect_session(&self, session_id: &str) -> Result<String> {
         let session_id = session_id.to_string();
         
-        self.db.call(move |conn| {
+        self.db.call(move |conn| -> rusqlite::Result<i64> {
             let count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM conversation_turns WHERE session_id = ?1",
                 [&session_id],
@@ -334,7 +334,7 @@ impl ConversationManager {
                 first_turn.unwrap_or_else(|| "None".to_string()),
                 last_turn.unwrap_or_else(|| "None".to_string()),
             ))
-        }).await
+        }).await.map_err(Into::into)
     }
 }
 
