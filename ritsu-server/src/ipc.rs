@@ -123,7 +123,7 @@ async fn handle_client(
                                 &memory,
                                 &conversation_manager,
                                 &task_manager,
-                                &llm_client,
+                                llm_client.clone(),
                                 config.llm.disable_streaming,
                                 config.llm.disable_tools,
                             ).await {
@@ -208,7 +208,7 @@ async fn handle_send_message_streaming(
     memory: &MemoryManager,
     conversation_manager: &ConversationManager,
     task_manager: &TaskManager,
-    llm_client: &LlmClient,
+    llm_client: Arc<LlmClient>,
     disable_streaming: bool,
     disable_tools: bool,
 ) -> Result<()> {
