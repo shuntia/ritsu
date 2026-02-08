@@ -8,6 +8,7 @@ use anyhow::Result;
 use ritsu_common::{TaskPriority, TaskStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio_rusqlite::rusqlite;
 use tracing::info;
 
 pub struct TaskManager {

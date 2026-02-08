@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use chrono::{Datelike, Days, Local, NaiveTime, TimeZone, Utc};
-use rusqlite::Connection;
+use tokio_rusqlite::rusqlite;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -149,7 +149,7 @@ impl TriggerRegistry {
     }
 
     fn insert_trigger_if_not_exists(
-        conn: &Connection,
+        conn: &rusqlite::Connection,
         name: &str,
         trigger_type: &str,
         schedule: &str,

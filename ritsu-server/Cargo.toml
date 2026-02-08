@@ -23,7 +23,6 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-rusqlite.workspace = true
 tokio-rusqlite = "0.7"
 toml.workspace = true
 postcard.workspace = true
@@ -31,7 +30,7 @@ futures.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
-cron = "0.12"
+cron = "0.15"
 dirs = "6.0"
 reqwest.workspace = true
 llm = { path = "../llm", features = ["openai", "anthropic", "ollama"], default-features = false }

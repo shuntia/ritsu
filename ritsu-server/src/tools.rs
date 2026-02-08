@@ -7,6 +7,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_rusqlite::rusqlite;
 use tracing::{info, warn};
 
 pub type ToolFuture = Pin<Box<dyn Future<Output = ToolResult> + Send>>;

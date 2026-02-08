@@ -1,7 +1,7 @@
 //! Database operations and schema management
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use tokio_rusqlite::rusqlite;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
@@ -41,7 +41,7 @@ impl Database {
 
     /// Initialize or migrate database schema
     #[allow(clippy::too_many_lines)]
-    fn initialize_schema_sync(conn: &Connection) -> rusqlite::Result<()> {
+    fn initialize_schema_sync(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
         info!("Initializing database schema");
 
         // Enable foreign keys
@@ -278,11 +278,11 @@ impl Database {
     /// Use this helper for all DB operations from async contexts
     pub async fn execute_blocking<F, T>(db_path: String, f: F) -> Result<T>
     where
-        F: FnOnce(&Connection) -> Result<T> + Send + 'static,
+        F: FnOnce(&rusqlite::Connection) -> Result<T> + Send + 'static,
         T: Send + 'static,
     {
         tokio::task::spawn_blocking(move || {
-            let conn = Connection::open(&db_path)?;
+            let conn = rusqlite::Connection::open(&db_path)?;
             f(&conn)
         })
         .await

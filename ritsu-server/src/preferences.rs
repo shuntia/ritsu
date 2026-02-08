@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio_rusqlite::rusqlite;
 use tracing::info;
 
 #[allow(dead_code)]

@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use rusqlite::OptionalExtension;
+use tokio_rusqlite::rusqlite::{self, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::info;
@@ -288,7 +288,7 @@ impl ConversationManager {
             } else {
                 Ok(false)
             }
-        }).await.map_err(Into::into)
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))
     }
 
     /// Clear all conversations and turns (for testing)

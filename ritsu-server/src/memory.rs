@@ -6,6 +6,7 @@
 use anyhow::Result;
 use chrono::NaiveDate;
 use std::sync::Arc;
+use tokio_rusqlite::rusqlite;
 use tracing::info;
 
 use crate::llm::LlmClient;
