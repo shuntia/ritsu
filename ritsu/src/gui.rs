@@ -197,13 +197,15 @@ impl RitsuGui {
                     self.animation_frame = (self.animation_frame + 1) % 4;
                 }
                 
-                // Animate sidebar transition
-                if self.sidebar_visible && self.sidebar_animation < 1.0 {
-                    self.sidebar_animation = (self.sidebar_animation + 0.15).min(1.0);
-                    needs_animation = true;
-                } else if !self.sidebar_visible && self.sidebar_animation > 0.0 {
-                    self.sidebar_animation = (self.sidebar_animation - 0.15).max(0.0);
-                    needs_animation = true;
+                // Animate sidebar transition using eased interpolation for smoother motion
+                {
+                    let target = if self.sidebar_visible { 1.0 } else { 0.0 };
+                    // Smooth towards target (exponential smoothing) instead of fixed steps
+                    let delta = (target - self.sidebar_animation) * 0.35;
+                    if delta.abs() > 0.001 {
+                        self.sidebar_animation = (self.sidebar_animation + delta).clamp(0.0, 1.0);
+                        needs_animation = true;
+                    }
                 }
                 
                 // Animate message fade-ins
@@ -818,144 +820,182 @@ impl RitsuGui {
             ViewState::Memory => self.view_memory(),
         };
 
-        // Animate sidebar width
-        let sidebar_width = 180.0 * self.sidebar_animation;
-        
-        // If sidebar has any visibility, show it
-        let layout = if self.sidebar_animation > 0.01 {
-            // Sidebar with view switcher
-            let sidebar = column![
-                button("💬 Chat")
-                    .on_press(Message::SwitchView(ViewState::Chat))
-                    .width(iced::Length::Fill)
-                    .padding(10)
-                    .style(if self.current_view == ViewState::Chat {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
-                            text_color: theme.palette().text,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::primary(theme, status)
-                        }
-                    } else {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
-                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::secondary(theme, status)
-                        }
-                    }),
-                button("📜 Sessions")
-                    .on_press(Message::SwitchView(ViewState::Sessions))
-                    .width(iced::Length::Fill)
-                    .padding(10)
-                    .style(if self.current_view == ViewState::Sessions {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
-                            text_color: theme.palette().text,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::primary(theme, status)
-                        }
-                    } else {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
-                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::secondary(theme, status)
-                        }
-                    }),
-                button("✓ Tasks")
-                    .on_press(Message::SwitchView(ViewState::Tasks))
-                    .width(iced::Length::Fill)
-                    .padding(10)
-                    .style(if self.current_view == ViewState::Tasks {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
-                            text_color: theme.palette().text,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::primary(theme, status)
-                        }
-                    } else {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
-                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::secondary(theme, status)
-                        }
-                    }),
-                button("🧠 Memory")
-                    .on_press(Message::SwitchView(ViewState::Memory))
-                    .width(iced::Length::Fill)
-                    .padding(10)
-                    .style(if self.current_view == ViewState::Memory {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
-                            text_color: theme.palette().text,
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::primary(theme, status)
-                        }
-                    } else {
-                        |theme: &iced::Theme, status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
-                            text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
-                            border: iced::Border {
-                                radius: 8.0.into(),
-                                ..Default::default()
-                            },
-                            ..button::secondary(theme, status)
-                        }
-                    }),
-            ]
-            .spacing(8)
-            .padding(15)
-            .width(iced::Length::Fixed(sidebar_width));
+        // Sidebar overlay (rendered as an overlay to avoid reflowing the main content)
+        let sidebar_max_width = 180.0;
 
-            let sidebar_animation = self.sidebar_animation;
-            let sidebar_container = container(sidebar)
-                .style(move |_theme: &iced::Theme| {
-                    let mut color = iced::Color::from_rgb(0.12, 0.12, 0.15);
-                    color.a = sidebar_animation;
-                    container::Style {
-                        background: Some(iced::Background::Color(color)),
-                        border: iced::Border {
-                            width: 0.0,
-                            color: iced::Color::from_rgb(0.3, 0.3, 0.35),
-                            radius: 0.0.into(),
-                        },
-                        ..container::Style::default()
-                    }
-                })
+        let layout = {
+            // Base content row (main content doesn't get resized by the sidebar overlay)
+            let base_content = row![main_content].spacing(0);
+
+            if self.sidebar_animation > 0.01 {
+                // Show compact icons while animating; reveal labels when mostly open
+                let show_labels = self.sidebar_animation > 0.6;
+
+                let sidebar = column![
+                    if show_labels {
+                        button("💬 Chat")
+                            .on_press(Message::SwitchView(ViewState::Chat))
+                            .width(iced::Length::Fill)
+                            .padding(10)
+                            .style(if self.current_view == ViewState::Chat {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                                    text_color: theme.palette().text,
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::primary(theme, status)
+                                }
+                            } else {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                                    text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::secondary(theme, status)
+                                }
+                            })
+                    } else {
+                        button(text("💬"))
+                            .on_press(Message::SwitchView(ViewState::Chat))
+                            .width(iced::Length::Fixed(48.0))
+                            .padding(8)
+                    },
+                    if show_labels {
+                        button("📜 Sessions")
+                            .on_press(Message::SwitchView(ViewState::Sessions))
+                            .width(iced::Length::Fill)
+                            .padding(10)
+                            .style(if self.current_view == ViewState::Sessions {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                                    text_color: theme.palette().text,
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::primary(theme, status)
+                                }
+                            } else {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                                    text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::secondary(theme, status)
+                                }
+                            })
+                    } else {
+                        button(text("📜"))
+                            .on_press(Message::SwitchView(ViewState::Sessions))
+                            .width(iced::Length::Fixed(48.0))
+                            .padding(8)
+                    },
+                    if show_labels {
+                        button("✓ Tasks")
+                            .on_press(Message::SwitchView(ViewState::Tasks))
+                            .width(iced::Length::Fill)
+                            .padding(10)
+                            .style(if self.current_view == ViewState::Tasks {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                                    text_color: theme.palette().text,
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::primary(theme, status)
+                                }
+                            } else {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                                    text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::secondary(theme, status)
+                                }
+                            })
+                    } else {
+                        button(text("✓"))
+                            .on_press(Message::SwitchView(ViewState::Tasks))
+                            .width(iced::Length::Fixed(48.0))
+                            .padding(8)
+                    },
+                    if show_labels {
+                        button("🧠 Memory")
+                            .on_press(Message::SwitchView(ViewState::Memory))
+                            .width(iced::Length::Fill)
+                            .padding(10)
+                            .style(if self.current_view == ViewState::Memory {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.25, 0.45, 0.75))),
+                                    text_color: theme.palette().text,
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::primary(theme, status)
+                                }
+                            } else {
+                                |theme: &iced::Theme, status| button::Style {
+                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                                    text_color: iced::Color::from_rgb(0.8, 0.8, 0.85),
+                                    border: iced::Border {
+                                        radius: 8.0.into(),
+                                        ..Default::default()
+                                    },
+                                    ..button::secondary(theme, status)
+                                }
+                            })
+                    } else {
+                        button(text("🧠"))
+                            .on_press(Message::SwitchView(ViewState::Memory))
+                            .width(iced::Length::Fixed(48.0))
+                            .padding(8)
+                    },
+                ]
+                .spacing(8)
+                .padding(15)
+                .width(iced::Length::Fixed(sidebar_max_width));
+
+                let sidebar_alpha = self.sidebar_animation;
+                let sidebar_container = container(sidebar)
+                    .style(move |_theme: &iced::Theme| {
+                        let mut color = iced::Color::from_rgb(0.12, 0.12, 0.15);
+                        color.a = sidebar_alpha;
+                        container::Style {
+                            background: Some(iced::Background::Color(color)),
+                            border: iced::Border {
+                                width: 0.0,
+                                color: iced::Color::from_rgb(0.3, 0.3, 0.35),
+                                radius: 0.0.into(),
+                            },
+                            ..container::Style::default()
+                        }
+                    })
+                    .height(iced::Length::Fill);
+
+                // Overlay that places the sidebar on top of the main content without affecting layout
+                let overlay = container(row![
+                    column![sidebar_container].spacing(0),
+                    container(text(""))
+                        .width(iced::Length::Fill)
+                ])
+                .width(iced::Length::Fill)
                 .height(iced::Length::Fill);
 
-            row![
-                column![sidebar_container].spacing(0),
-                main_content
-            ]
-            .spacing(0)
-        } else {
-            // Just content (menu is in top bar)
-            row![main_content]
-            .spacing(0)
+                iced::widget::stack![base_content, overlay]
+            } else {
+                // Just content (menu is in top bar) - wrap in stack for consistent return type
+                iced::widget::stack![base_content]
+            }
         };
 
         let main_layout = column![top_bar, layout]
