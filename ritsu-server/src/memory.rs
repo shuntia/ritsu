@@ -28,7 +28,7 @@ impl MemoryManager {
         let role = role.to_string();
         let content = content.to_string();
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             conn.execute(
                 "INSERT INTO daily_conversations (date, role, content) VALUES (?1, ?2, ?3)",
                 (date.to_string(), &role, &content),
@@ -59,7 +59,7 @@ impl MemoryManager {
 
         // Get all conversations for the date
         let date_str = date.to_string();
-        let conversations = self.conn.call(move |conn| {
+        let conversations = self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT role, content FROM daily_conversations 
                  WHERE date = ?1 ORDER BY timestamp"
@@ -85,12 +85,16 @@ impl MemoryManager {
         // Get previous day's summary for context
         let previous_summary = if let Some(previous_day) = date.pred_opt() {
             let prev_str = previous_day.to_string();
-            self.conn.call(move |conn| {
-                conn.query_row(
+            self.conn.call(move |conn| -> rusqlite::Result<Option<String>> {
+                match conn.query_row(
                     "SELECT summary FROM daily_summaries WHERE date = ?1",
                     [&prev_str],
                     |row| row.get::<_, String>(0),
-                ).ok()
+                ) {
+                    Ok(summary) => Ok(Some(summary)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e),
+                }
             }).await?
         } else {
             None
@@ -140,7 +144,7 @@ impl MemoryManager {
 
         // Insert daily summary
         let date_str = date.to_string();
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             conn.execute(
                 "INSERT OR REPLACE INTO daily_summaries (date, summary, tags, conversation_count) 
                  VALUES (?1, ?2, ?3, ?4)",
@@ -159,7 +163,7 @@ impl MemoryManager {
 
         // Get all daily summaries for the month
         let pattern = format!("{year_month}%");
-        let summaries = self.conn.call(move |conn| {
+        let summaries = self.conn.call(move |conn| -> rusqlite::Result<Vec<(String, String)>> {
             let mut stmt = conn.prepare(
                 "SELECT date, summary FROM daily_summaries 
                  WHERE date LIKE ?1 ORDER BY date"
@@ -187,13 +191,17 @@ impl MemoryManager {
 
         // Get previous month's summary for continuity
         let year_month_str = year_month.to_string();
-        let prev_month_summary = self.conn.call(move |conn| {
-            conn.query_row(
+        let prev_month_summary = self.conn.call(move |conn| -> rusqlite::Result<Option<String>> {
+            match conn.query_row(
                 "SELECT summary FROM monthly_summaries 
                  WHERE year_month < ?1 ORDER BY year_month DESC LIMIT 1",
                 [&year_month_str],
                 |row| row.get::<_, String>(0),
-            ).ok()
+            ) {
+                Ok(summary) => Ok(Some(summary)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e),
+            }
         }).await?;
 
         // Generate monthly summary with LLM (no lock held)
@@ -237,7 +245,7 @@ impl MemoryManager {
 
         // Insert monthly summary
         let year_month_str = year_month.to_string();
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             conn.execute(
                 "INSERT OR REPLACE INTO monthly_summaries (year_month, summary, tags, days_included) 
                  VALUES (?1, ?2, ?3, ?4)",
@@ -274,7 +282,7 @@ impl MemoryManager {
         let prompt_type = prompt_type.to_string();
         let content = content.to_string();
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             // Deactivate previous prompts of this type
             conn.execute(
                 "UPDATE system_prompts SET active = 0 WHERE prompt_type = ?1",
@@ -440,9 +448,10 @@ impl MemoryManager {
     ) -> Result<()> {
         let findings_json = serde_json::to_string(findings)?;
         let analysis_type = analysis_type.to_string();
+        let analysis_type_for_log = analysis_type.clone();
         let prompted_changes = prompted_changes.map(String::from);
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             conn.execute(
                 "INSERT INTO idle_analyses (analysis_type, findings, prompted_changes) 
                  VALUES (?1, ?2, ?3)",
@@ -451,7 +460,7 @@ impl MemoryManager {
             Ok(())
         }).await?;
 
-        info!("Stored {analysis_type} idle analysis");
+        info!("Stored {analysis_type_for_log} idle analysis");
         Ok(())
     }
 
@@ -576,7 +585,7 @@ impl MemoryManager {
             let query = match summary_type.as_str() {
                 "daily" => "SELECT date, summary, tags FROM daily_summaries ORDER BY date DESC LIMIT ?1",
                 "monthly" => "SELECT year_month, summary, tags FROM monthly_summaries ORDER BY year_month DESC LIMIT ?1",
-                _ => return Err(anyhow::anyhow!("Invalid summary type: {summary_type}. Use 'daily' or 'monthly'").into()),
+                _ => return Err(rusqlite::Error::InvalidQuery),
             };
             
             let mut stmt = conn.prepare(query)?;
@@ -671,7 +680,7 @@ impl MemoryManager {
     /// Clear all memory tables (for testing)
     #[allow(clippy::significant_drop_tightening)]
     pub async fn clear_all(&self) -> Result<()> {
-        self.conn.call(|conn| {
+        self.conn.call(|conn| -> rusqlite::Result<()> {
             conn.execute("DELETE FROM notes", [])?;
             conn.execute("DELETE FROM daily_conversations", [])?;
             conn.execute("DELETE FROM daily_summaries", [])?;
@@ -789,7 +798,7 @@ impl MemoryManager {
         self.conn.call(|conn| -> rusqlite::Result<()> {
             conn.execute("REINDEX", [])?;
             Ok(())
-        }).await.map_err(Into::into)?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         
         info!("Database reindexed");
         Ok(())

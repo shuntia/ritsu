@@ -37,6 +37,9 @@ impl PreferencesManager {
         let category = category.to_string();
         let key = key.to_string();
         let value = value.to_string();
+        let category_for_log = category.clone();
+        let key_for_log = key.clone();
+        let value_for_log = value.clone();
         let source = source.map(|s| s.to_string());
         
         self.db.call(move |conn| -> rusqlite::Result<()> {
@@ -47,9 +50,9 @@ impl PreferencesManager {
                 rusqlite::params![&category, &key, &value, confidence, &source],
             )?;
             Ok(())
-        }).await.map_err(Into::into)?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         
-        info!("Set preference: {} / {} = {}", category, key, value);
+        info!("Set preference: {} / {} = {}", category_for_log, key_for_log, value_for_log);
         Ok(())
     }
 
@@ -179,6 +182,7 @@ impl PreferencesManager {
     #[allow(dead_code)]
     pub async fn clear_category(&self, category: &str) -> Result<usize> {
         let category = category.to_string();
+        let category_for_log = category.clone();
         
         let rows = self.db.call(move |conn| -> rusqlite::Result<usize> {
             let rows = conn.execute(
@@ -186,9 +190,9 @@ impl PreferencesManager {
                 [&category],
             )?;
             Ok(rows)
-        }).await.map_err(Into::into)?;
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         
-        info!("Cleared {} preferences from category: {}", rows, category);
+        info!("Cleared {} preferences from category: {}", rows, category_for_log);
         Ok(rows)
     }
 }

@@ -2,12 +2,11 @@
 
 use anyhow::Result;
 use ritsu_common::ToolResult;
-use rusqlite::Connection;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 pub type ToolFuture = Pin<Box<dyn Future<Output = ToolResult> + Send>>;
@@ -35,7 +34,7 @@ pub struct ToolParameter {
 
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Tool>>,
-    db_conn: Option<Arc<Mutex<Connection>>>,
+    db_conn: Option<Arc<tokio_rusqlite::Connection>>,
 }
 
 impl ToolRegistry {
@@ -48,7 +47,7 @@ impl ToolRegistry {
     }
 
     /// Set database connection for usage tracking
-    pub fn with_database(mut self, conn: Arc<Mutex<Connection>>) -> Self {
+    pub fn with_database(mut self, conn: Arc<tokio_rusqlite::Connection>) -> Self {
         self.db_conn = Some(conn);
         self
     }
@@ -108,19 +107,25 @@ impl ToolRegistry {
     }
 
     async fn log_tool_usage(
-        db: &Arc<Mutex<Connection>>,
+        db: &Arc<tokio_rusqlite::Connection>,
         tool_name: &str,
         args: &str,
         success: bool,
         result: &str,
         execution_time_ms: i64,
     ) -> Result<()> {
-        let conn = db.lock().await;
-        conn.execute(
-            "INSERT INTO tool_usage (tool_name, arguments, success, result, execution_time_ms, triggered_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'ai')",
-            (tool_name, args, success, result, execution_time_ms),
-        )?;
+        let tool_name = tool_name.to_string();
+        let args = args.to_string();
+        let result = result.to_string();
+        
+        db.call(move |conn| -> rusqlite::Result<()> {
+            conn.execute(
+                "INSERT INTO tool_usage (tool_name, arguments, success, result, execution_time_ms, triggered_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'ai')",
+                (&tool_name, &args, success, &result, execution_time_ms),
+            )?;
+            Ok(())
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))?;
         Ok(())
     }
 

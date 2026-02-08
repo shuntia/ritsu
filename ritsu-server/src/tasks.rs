@@ -45,13 +45,15 @@ impl TaskManager {
         due_date: Option<&str>,
     ) -> Result<i64> {
         let title = title.to_string();
+        let title_for_log = title.clone();
         let description = description.map(|s| s.to_string());
         let tags = tags.to_vec();
         let due_date = due_date.map(|s| s.to_string());
         let priority = priority.clone();
         
-        let id = self.conn.call(move |conn| {
-            let tags_json = serde_json::to_string(&tags)?;
+        let id = self.conn.call(move |conn| -> rusqlite::Result<i64> {
+            let tags_json = serde_json::to_string(&tags)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             let priority_str = match priority {
                 TaskPriority::Low => "low",
                 TaskPriority::Medium => "medium",
@@ -68,7 +70,7 @@ impl TaskManager {
             Ok(conn.last_insert_rowid())
         }).await?;
         
-        info!("Created task #{}: {}", id, title);
+        info!("Created task #{}: {}", id, title_for_log);
         Ok(id)
     }
 
@@ -76,7 +78,7 @@ impl TaskManager {
     pub async fn update_task_status(&self, id: i64, status: &TaskStatus) -> Result<()> {
         let status = status.clone();
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             let status_str = match status {
                 TaskStatus::Pending => "pending",
                 TaskStatus::InProgress => "in_progress",
@@ -100,14 +102,14 @@ impl TaskManager {
 
             info!("Updated task #{} status to {}", id, status_str);
             Ok(())
-        }).await?
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))
     }
 
     /// Update task priority
     pub async fn update_task_priority(&self, id: i64, priority: &TaskPriority) -> Result<()> {
         let priority = priority.clone();
         
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             let priority_str = match priority {
                 TaskPriority::Low => "low",
                 TaskPriority::Medium => "medium",
@@ -122,12 +124,12 @@ impl TaskManager {
 
             info!("Updated task #{} priority to {}", id, priority_str);
             Ok(())
-        }).await?
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))
     }
 
     /// Delete a task
     pub async fn delete_task(&self, id: i64) -> Result<()> {
-        self.conn.call(move |conn| {
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
             let rows_affected = conn.execute(
                 "DELETE FROM tasks WHERE id = ?1",
                 [&id],
@@ -137,9 +139,9 @@ impl TaskManager {
                 info!("Deleted task #{}", id);
                 Ok(())
             } else {
-                Err(anyhow::anyhow!("Task with id {} not found", id).into())
+                Err(rusqlite::Error::QueryReturnedNoRows)
             }
-        }).await?
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))
     }
 
     /// List tasks with optional filters
@@ -155,13 +157,11 @@ impl TaskManager {
             let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
 
             if let Some(status) = &status_filter {
-                use std::fmt::Write;
-                write!(query, " AND status = '{}'", status)?;
+                query.push_str(&format!(" AND status = '{}'", status));
             }
 
             if let Some(priority) = &priority_filter {
-                use std::fmt::Write;
-                write!(query, " AND priority = '{}'", priority)?;
+                query.push_str(&format!(" AND priority = '{}'", priority));
             }
 
             query.push_str(" ORDER BY created_at DESC");
@@ -211,7 +211,7 @@ impl TaskManager {
 
     /// Get task summary statistics for AI context
     pub async fn get_task_summary(&self) -> Result<String> {
-        self.conn.call(|conn| {
+        self.conn.call(|conn| -> rusqlite::Result<String> {
             // Count by status
             let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM tasks GROUP BY status")?;
             let status_counts: HashMap<String, i64> = stmt
@@ -260,7 +260,7 @@ impl TaskManager {
             }
             
             Ok(summary)
-        }).await?
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {}", e))
     }
 
     /// Get detailed list of active tasks for AI context
