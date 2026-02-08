@@ -1,14 +1,14 @@
 //! Client daemon for handling notifications, GUI launches, and request proxying
 
 use anyhow::{Context, Result};
-use ritsu_common::protocol::{ClientToServerResponse, NotificationUrgency, ServerToClientRequest};
+use ritsu_common::protocol::{ClientToServerResponse, NotificationUrgency, ServerPush, ServerToClientRequest};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tokio::sync::{mpsc, Mutex};
+use tracing::{debug, error, info, warn};
 
 pub async fn run() -> Result<()> {
     info!("Starting Ritsu client daemon...");
@@ -34,6 +34,10 @@ pub async fn run() -> Result<()> {
     let server_conn_clone = Arc::clone(&server_connection);
     let server_socket_clone = server_socket.clone();
 
+    // Registry of GUI push channels so server->client tool requests can be forwarded to active GUIs
+    let gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>> = Arc::new(Mutex::new(Vec::new()));
+    let gui_pushers_for_reconnector = gui_pushers.clone();
+
     // Spawn task to handle incoming tool requests from server
     // Use quadratic backoff for reconnect attempts: delay = base * attempt^2 (ms), capped to 5 minutes
     let retry_cfg = config.retry.clone();
@@ -48,7 +52,7 @@ pub async fn run() -> Result<()> {
                     *server_conn_clone.lock().await = Some(stream);
                     
                     // Wait for tool requests from server
-                    if let Err(e) = handle_server_tool_requests(&server_conn_clone).await {
+                    if let Err(e) = handle_server_tool_requests(&server_conn_clone, gui_pushers_for_reconnector.clone()).await {
                         error!("Error handling server tool requests: {}", e);
                     }
                     
@@ -79,8 +83,9 @@ pub async fn run() -> Result<()> {
             Ok((stream, _)) => {
                 info!("New GUI connection accepted");
                 let server_socket_clone = server_socket.clone();
+                let gui_pushers_clone = gui_pushers.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_gui_connection(stream, &server_socket_clone).await {
+                    if let Err(e) = handle_gui_connection(stream, &server_socket_clone, gui_pushers_clone).await {
                         error!("Error handling GUI connection: {}", e);
                     }
                 });
@@ -100,6 +105,7 @@ async fn connect_to_server(server_socket: &str) -> Result<UnixStream> {
 
 async fn handle_server_tool_requests(
     server_connection: &Arc<Mutex<Option<UnixStream>>>,
+    gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>,
 ) -> Result<()> {
     loop {
         let mut guard = server_connection.lock().await;
@@ -124,8 +130,8 @@ async fn handle_server_tool_requests(
         let request: ServerToClientRequest = postcard::from_bytes(&buf)?;
         drop(guard); // Release lock while handling request
 
-        // Handle tool request
-        let response = match handle_tool_request(request).await {
+        // Handle tool request, forwarding GUI-focused requests to GUI pushers when possible
+        let response = match handle_tool_request(request, gui_pushers.clone()).await {
             Ok(()) => ClientToServerResponse::Success,
             Err(e) => ClientToServerResponse::Error {
                 message: e.to_string(),
@@ -145,7 +151,7 @@ async fn handle_server_tool_requests(
     }
 }
 
-async fn handle_tool_request(request: ServerToClientRequest) -> Result<()> {
+async fn handle_tool_request(request: ServerToClientRequest, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
     match request {
         ServerToClientRequest::NotifyUser {
             title,
@@ -155,19 +161,47 @@ async fn handle_tool_request(request: ServerToClientRequest) -> Result<()> {
         ServerToClientRequest::OpenChat { message, session_id } => {
             handle_open_chat(message.as_deref(), session_id.as_deref()).await
         }
-        ServerToClientRequest::FocusChat => handle_focus_chat().await,
+        ServerToClientRequest::FocusChat => handle_focus_chat(gui_pushers).await,
     }
 }
 
-async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> Result<()> {
+async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
     info!("Handling new GUI connection, connecting to server...");
     let mut server_stream = connect_to_server(server_socket).await?;
     info!("Connected to server, starting proxy loop");
 
+    // Create a dedicated outgoing queue for this GUI connection and register it
+    let (push_tx, mut push_rx) = mpsc::channel::<Vec<u8>>(32);
+    {
+        let mut guard = gui_pushers.lock().await;
+        guard.push(push_tx.clone());
+        debug!("Registered GUI pusher, total clients: {}", guard.len());
+    }
+
+    // Split GUI stream into read/write halves so writer task can own writer
+    let (mut gui_reader, mut gui_writer) = tokio::io::split(stream);
+
+    // Spawn writer task that serializes all outgoing writes to the GUI to avoid concurrent writes
+    let writer_handle = tokio::spawn(async move {
+        while let Some(body) = push_rx.recv().await {
+            let len_bytes = (body.len() as u32).to_be_bytes();
+            if let Err(e) = gui_writer.write_all(&len_bytes).await {
+                error!("Failed to write length to GUI: {}", e);
+                break;
+            }
+            if let Err(e) = gui_writer.write_all(&body).await {
+                error!("Failed to write body to GUI: {}", e);
+                break;
+            }
+            let _ = gui_writer.flush().await;
+        }
+        debug!("GUI writer task exiting");
+    });
+
     loop {
         // Read request from GUI (using big-endian to match IpcClient)
         let mut len_buf = [0u8; 4];
-        if stream.read_exact(&mut len_buf).await.is_err() {
+        if gui_reader.read_exact(&mut len_buf).await.is_err() {
             info!("GUI disconnected");
             break;
         }
@@ -180,7 +214,7 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> R
 
         info!("Received {} bytes from GUI, proxying to server", len);
         let mut buf = vec![0u8; len];
-        stream.read_exact(&mut buf).await?;
+        gui_reader.read_exact(&mut buf).await?;
 
         // Check if this is a SendMessage request (needs streaming support)
         let is_send_message = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&buf)
@@ -207,11 +241,11 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> R
                 let mut buf = vec![0u8; len];
                 server_stream.read_exact(&mut buf).await?;
 
-                // Forward to GUI
-                let len_bytes = (buf.len() as u32).to_be_bytes();
-                stream.write_all(&len_bytes).await?;
-                stream.write_all(&buf).await?;
-                stream.flush().await?;
+                // Forward to GUI via push channel
+                if push_tx.send(buf.clone()).await.is_err() {
+                    error!("Failed to forward push to GUI writer (channel closed)");
+                    break;
+                }
 
                 // Check if this is the final chunk
                 if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) =
@@ -228,13 +262,10 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> R
                             if resp_len <= 10_000_000 {
                                 let mut resp_data = vec![0u8; resp_len];
                                 if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_data)).await.is_ok() {
-                                    // Forward to GUI
-                                    let resp_len_bytes = (resp_data.len() as u32).to_be_bytes();
-                                    if stream.write_all(&resp_len_bytes).await.is_ok() {
-                                        let _ = stream.write_all(&resp_data).await;
-                                        let _ = stream.flush().await;
+                                    // Forward to GUI via push channel
+                                    if push_tx.send(resp_data).await.is_ok() {
+                                        info!("Forwarded final ServerResponse to GUI");
                                     }
-                                    info!("Forwarded final ServerResponse to GUI");
                                 }
                             }
                         } else {
@@ -256,14 +287,19 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> R
             let mut buf = vec![0u8; len];
             server_stream.read_exact(&mut buf).await?;
 
-            // Forward to GUI
-            let len_bytes = (buf.len() as u32).to_be_bytes();
-            stream.write_all(&len_bytes).await?;
-            stream.write_all(&buf).await?;
-            stream.flush().await?;
+            // Forward to GUI via push channel
+            if push_tx.send(buf).await.is_err() {
+                error!("Failed to forward server response to GUI (channel closed)");
+                break;
+            }
+
             info!("Response forwarded successfully");
         }
     }
+
+    // Writer task will exit when push_tx is dropped; ensure it is dropped and wait for writer
+    drop(push_tx);
+    let _ = writer_handle.await;
 
     Ok(())
 }
@@ -327,28 +363,73 @@ async fn handle_open_chat(message: Option<&str>, session_id: Option<&str>) -> Re
     Ok(())
 }
 
-async fn handle_focus_chat() -> Result<()> {
-    info!("Attempting to focus chat GUI");
+async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
+    info!("Attempting to focus chat GUI via GUI push channel");
 
-    #[cfg(target_os = "linux")]
-    {
-        // Try using xdotool to focus the window
-        let output = Command::new("xdotool")
-            .args(["search", "--name", "Ritsu", "windowactivate"])
-            .output();
+    // Prepare ServerPush::OpenChat payload
+    let push = ServerPush::OpenChat { message: None, urgency: NotificationUrgency::Normal };
+    let body = postcard::to_allocvec(&push)?;
 
-        match output {
-            Ok(output) if output.status.success() => {
-                info!("Successfully focused chat window");
-                return Ok(());
+    // Snapshot current pushers without holding lock during send
+    let senders = {
+        let guard = gui_pushers.lock().await;
+        guard.clone()
+    };
+
+    if senders.is_empty() {
+        info!("No GUI clients connected via client daemon, falling back to launching GUI or xdotool");
+
+        // Fallback: try to open chat if no GUI connected
+        #[cfg(target_os = "linux")]
+        {
+            // Try launching GUI if not present
+            if let Err(e) = handle_open_chat(None, None).await {
+                warn!("Failed to launch GUI fallback: {}", e);
             }
-            Ok(_) => warn!("xdotool failed to find/focus window"),
-            Err(e) => warn!("xdotool not available: {}", e),
+        }
+
+        // Try xdotool as a last resort on Linux
+        #[cfg(target_os = "linux")]
+        {
+            let output = Command::new("xdotool")
+                .args(["search", "--name", "Ritsu", "windowactivate"])
+                .output();
+
+            match output {
+                Ok(output) if output.status.success() => {
+                    info!("Successfully focused chat window via xdotool");
+                    return Ok(());
+                }
+                Ok(_) => warn!("xdotool failed to find/focus window"),
+                Err(e) => warn!("xdotool not available: {}", e),
+            }
+        }
+
+        warn!("Window focus not supported on this platform or window not found");
+        return Ok(());
+    }
+
+    // Send the push to each connected GUI asynchronously; remove closed senders
+    let mut any_sent = false;
+    for sender in senders.into_iter() {
+        match sender.clone().send(body.clone()).await {
+            Ok(_) => {
+                any_sent = true;
+            }
+            Err(e) => {
+                warn!("Failed to send focus push to GUI: {}", e);
+            }
         }
     }
 
-    // If focus fails or not supported, just log
-    warn!("Window focus not supported on this platform or window not found");
+    if !any_sent {
+        warn!("No GUI accepted focus push; falling back to launch/xdotool");
+        #[cfg(target_os = "linux")]
+        {
+            let _ = handle_open_chat(None, None).await;
+        }
+    }
+
     Ok(())
 }
 
