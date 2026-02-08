@@ -39,28 +39,31 @@ pub struct ToolCallInfo {
 pub struct LlmClient {
     provider: Box<dyn LLMProvider>,
     tool_registry: Arc<ToolRegistry>,
+    timeout_seconds: u64,
 }
 
 impl LlmClient {
     pub fn new(
         config: &LlmConfig,
-        _timeout_config: &TimeoutConfig,
+        timeout_config: &TimeoutConfig,
         tool_registry: Arc<ToolRegistry>,
     ) -> Result<Self> {
         // Use the first backend for now (can be extended to support multiple)
         let backend = config.backends.first()
             .context("No LLM backends configured")?;
 
-        let provider = Self::create_provider(backend, &tool_registry)?;
+        let provider = Self::create_provider(backend, timeout_config, &tool_registry)?;
 
         Ok(Self {
             provider,
             tool_registry,
+            timeout_seconds: timeout_config.llm_request_seconds,
         })
     }
 
     fn create_provider(
         backend: &LlmBackend,
+        timeout_config: &TimeoutConfig,
         tool_registry: &Arc<ToolRegistry>,
     ) -> Result<Box<dyn LLMProvider>> {
         // Detect provider from endpoint
@@ -92,7 +95,7 @@ impl LlmClient {
             .base_url(&backend.endpoint)
             .max_tokens(2048)
             .temperature(0.7)
-            .timeout_seconds(120); // 2 minutes timeout for streaming (default is 30s)
+            .timeout_seconds(timeout_config.llm_request_seconds);
 
         if !api_key.is_empty() {
             builder = builder.api_key(api_key);
@@ -221,12 +224,12 @@ impl LlmClient {
                 Err(e) => {
                     warn!("Tool calling failed ({}), retrying without tools", e);
                     self.provider.chat(&chat_messages).await
-                        .context("Failed to send chat request without tools")?
+                        .with_context(|| format!("Failed to send chat request without tools (timeout: {}s)", self.timeout_seconds))?
                 }
             }
         } else {
             self.provider.chat(&chat_messages).await
-                .context("Failed to send chat request")?
+                .with_context(|| format!("Failed to send chat request to LLM (timeout: {}s)", self.timeout_seconds))?
         };
 
         // Extract content
