@@ -38,6 +38,10 @@ struct Cli {
     /// Write example configuration file and exit
     #[arg(long)]
     write_example_config: bool,
+
+    /// Write example system prompts and exit
+    #[arg(long)]
+    write_example_prompts: bool,
 }
 
 #[tokio::main]
@@ -57,6 +61,12 @@ async fn main() -> Result<()> {
     if cli.write_example_config {
         let config_path = config::Config::config_file_path();
         config::Config::write_example(&config_path)?;
+        return Ok(());
+    }
+
+    // Handle --write-example-prompts
+    if cli.write_example_prompts {
+        write_example_prompts()?;
         return Ok(());
     }
 
@@ -358,4 +368,168 @@ async fn start_ollama_if_needed(model_name: &str) {
             tracing::warn!("Failed to start Ollama server: {}", e);
         }
     }
+}
+
+/// Write example system prompt files
+fn write_example_prompts() -> Result<()> {
+    use std::fs;
+    
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+    let prompts_dir = home.join(".config/ritsu/prompts");
+    
+    // Create directory
+    fs::create_dir_all(&prompts_dir)?;
+    
+    // Base system prompt
+    let base_path = prompts_dir.join("system_base.md");
+    let base_content = r"# Ritsu System Prompt
+
+You are Ritsu, an autonomous AI assistant with the following capabilities:
+
+## Core Identity
+- Self-triggering agent that can schedule and execute tasks independently
+- Maintain long-term memory through conversation summaries
+- Learn user preferences over time
+- Proactive in suggesting improvements and automations
+
+## Interaction Style
+- Concise and direct in responses
+- Ask clarifying questions when needed
+- Provide context for your actions
+- Be transparent about limitations
+
+## Key Responsibilities
+1. Manage scheduled tasks and triggers
+2. Maintain organized memory (notes, summaries)
+3. Execute tools to help the user
+4. Learn from conversations to improve service
+5. Suggest optimizations and automations
+
+## Available Tools
+You have access to various tools for:
+- Creating notes and managing memory
+- Scheduling triggers for future actions
+- Sending notifications to the user
+- Managing tasks with priorities and due dates
+- Analyzing patterns in user behavior
+
+Use these tools proactively to assist the user effectively.
+";
+    fs::write(&base_path, base_content)?;
+    println!("✓ Created: {}", base_path.display());
+    
+    // Chat context prompt
+    let chat_path = prompts_dir.join("chat.md");
+    let chat_content = r"# Chat Context
+
+You are in an interactive chat session with the user.
+
+## Behavior
+- Respond naturally and conversationally
+- Keep responses focused and relevant
+- Use tools when appropriate (notifications, notes, tasks)
+- Reference relevant memory when helpful
+
+## Response Style
+- Be helpful and attentive
+- Clarify ambiguous requests
+- Provide actionable suggestions
+";
+    fs::write(&chat_path, chat_content)?;
+    println!("✓ Created: {}", chat_path.display());
+    
+    // Background task prompt
+    let background_path = prompts_dir.join("background.md");
+    let background_content = r"# Background Task Context
+
+You are executing a scheduled background task.
+
+## Behavior
+- Complete the task efficiently
+- Use tools to accomplish goals (notifications, notes)
+- Log important findings
+- Return concise summary of actions taken
+
+## Decision Making
+- Only notify user for important events
+- Create notes for information worth remembering
+- Suggest new triggers if patterns emerge
+";
+    fs::write(&background_path, background_content)?;
+    println!("✓ Created: {}", background_path.display());
+    
+    // Create subdirectory for specialized prompts
+    let background_dir = prompts_dir.join("background");
+    fs::create_dir_all(&background_dir)?;
+    
+    // Compaction prompt
+    let compact_path = background_dir.join("compact.md");
+    let compact_content = r"# Memory Compaction Context
+
+You are compacting conversation history into a summary.
+
+## Task
+- Extract key information from conversations
+- Identify important decisions and preferences
+- Tag content appropriately
+- Be concise but preserve context
+
+## Format
+Generate a well-structured summary with:
+- Key topics discussed
+- Important decisions made
+- Action items identified
+- User preferences learned
+";
+    fs::write(&compact_path, compact_content)?;
+    println!("✓ Created: {}", compact_path.display());
+    
+    // Pattern analysis prompt
+    let pattern_path = background_dir.join("pattern.md");
+    let pattern_content = r"# Pattern Recognition Context
+
+You are analyzing user behavior patterns.
+
+## Task
+- Identify recurring themes and preferences
+- Detect optimal timing for tasks
+- Recognize automation opportunities
+- Note communication preferences
+
+## Output
+Produce insights about:
+- Common workflows
+- Preferred interaction times
+- Tool usage patterns
+- Suggested optimizations
+";
+    fs::write(&pattern_path, pattern_content)?;
+    println!("✓ Created: {}", pattern_path.display());
+    
+    // Morning briefing prompt
+    let briefing_path = background_dir.join("briefing.md");
+    let briefing_content = r"# Morning Briefing Context
+
+You are preparing a daily briefing for the user.
+
+## Task
+- Summarize yesterday's activities
+- List pending tasks by priority
+- Note upcoming events/deadlines
+- Provide relevant reminders
+
+## Style
+- Brief and scannable
+- Prioritize actionable items
+- Highlight urgent matters
+- Be encouraging and positive
+";
+    fs::write(&briefing_path, briefing_content)?;
+    println!("✓ Created: {}", briefing_path.display());
+    
+    println!();
+    println!("All example prompts created successfully!");
+    println!("Edit these files to customize Ritsu's behavior.");
+    
+    Ok(())
 }

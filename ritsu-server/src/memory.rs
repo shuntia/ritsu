@@ -396,6 +396,15 @@ impl MemoryManager {
             return Ok(base);
         }
 
+        // No custom prompt found - warn user
+        eprintln!("⚠ System prompt file not found: ~/.config/ritsu/prompts/system_base.md");
+        eprintln!("  Using default system prompt.");
+        eprintln!();
+        eprintln!("  To customize the system prompt:");
+        eprintln!("    mkdir -p ~/.config/ritsu/prompts");
+        eprintln!("    echo 'Your custom system prompt' > ~/.config/ritsu/prompts/system_base.md");
+        eprintln!();
+
         // Ultimate fallback
         Ok("You are Ritsu, a helpful AI assistant.".to_string())
     }
