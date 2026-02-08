@@ -32,6 +32,7 @@ pub async fn handle(cmd: crate::DevCommands) -> Result<()> {
         DevCommands::ToolStats => show_tool_stats().await,
         DevCommands::MemoryStatus => show_memory_status().await,
         DevCommands::ForceCompact { noconfirm } => force_compact(noconfirm).await,
+        DevCommands::DbReset { noconfirm } => db_reset(noconfirm).await,
         DevCommands::ReindexDb { noconfirm } => reindex_db(noconfirm).await,
     }
 }
@@ -368,6 +369,43 @@ async fn force_compact(noconfirm: bool) -> Result<()> {
         }
         Err(e) => {
             eprintln!("❌ Failed to force compaction: {}", e);
+        }
+    }
+    
+    Ok(())
+}
+
+async fn db_reset(noconfirm: bool) -> Result<()> {
+    if !noconfirm {
+        println!("⚠️  WARNING: This will RESET the entire database and delete ALL data!");
+        println!("   This includes conversations, memory, tasks, triggers, preferences, and system prompts.");
+        println!();
+        print!("   Continue? [y/N]: ");
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Cancelled.");
+            return Ok(());
+        }
+    }
+    
+    println!("\n🔄 Resetting database...\n");
+    
+    let socket_path = super::get_server_socket()?;
+    let client = crate::ipc::IpcClient::new(socket_path);
+    
+    match client.send_request(ClientRequest::ResetDatabase { confirm: true }).await {
+        Ok(response) => {
+            let msg = extract_message(response)?;
+            println!("{}", msg);
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to reset database: {}", e);
+            eprintln!("\nMake sure the server is running: ritsu server start");
         }
     }
     

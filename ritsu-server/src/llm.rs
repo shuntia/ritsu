@@ -43,7 +43,7 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
-    pub fn new(
+    pub async fn new(
         config: &LlmConfig,
         timeout_config: &TimeoutConfig,
         tool_registry: Arc<ToolRegistry>,
@@ -54,7 +54,7 @@ impl LlmClient {
             .first()
             .context("No LLM backends configured")?;
 
-        let provider = Self::create_provider(backend, timeout_config, &tool_registry)?;
+        let provider = Self::create_provider(backend, timeout_config, &tool_registry).await?;
 
         Ok(Self {
             provider,
@@ -63,7 +63,7 @@ impl LlmClient {
         })
     }
 
-    fn create_provider(
+    async fn create_provider(
         backend: &LlmBackend,
         timeout_config: &TimeoutConfig,
         tool_registry: &Arc<ToolRegistry>,
@@ -110,7 +110,7 @@ impl LlmClient {
         }
 
         // Build LLM with all tools registered
-        let tools_info = futures::executor::block_on(tool_registry.get_tools_for_ai());
+        let tools_info = tool_registry.get_tools_for_ai().await;
 
         let mut builder = LLMBuilder::new()
             .backend(provider_type)

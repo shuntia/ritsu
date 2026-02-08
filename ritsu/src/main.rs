@@ -291,6 +291,12 @@ enum DevCommands {
         noconfirm: bool,
     },
     
+    /// Reset the server database (destructive)
+    DbReset {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        noconfirm: bool,
+    },
     /// Rebuild database indexes
     ReindexDb {
         /// Skip confirmation

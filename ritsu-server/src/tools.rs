@@ -220,8 +220,14 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let state = state.clone();
                 Box::pin(async move {
-                    let title = args.get("title").cloned().unwrap_or_default();
-                    let message = args.get("message").cloned().unwrap_or_default();
+                    let title = match args.get("title") {
+                        Some(v) if !v.trim().is_empty() => v.clone(),
+                        _ => return ToolResult::error("Missing required parameter: title".to_string()),
+                    };
+                    let message = match args.get("message") {
+                        Some(v) if !v.trim().is_empty() => v.clone(),
+                        _ => return ToolResult::error("Missing required parameter: message".to_string()),
+                    };
                     let urgency_str = args.get("urgency").cloned().unwrap_or_else(|| "normal".to_string());
 
                     let urgency = match urgency_str.as_str() {
@@ -280,7 +286,10 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 Box::pin(async move {
-                    let content = args.get("content").cloned().unwrap_or_default();
+                    let content = match args.get("content") {
+                        Some(c) if !c.trim().is_empty() => c.clone(),
+                        _ => return ToolResult::error("Missing required parameter: content".to_string()),
+                    };
                     let tags_str = args.get("tags").cloned().unwrap_or_default();
                     
                     // Parse tags
@@ -334,7 +343,10 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 Box::pin(async move {
-                    let query_type = args.get("type").cloned().unwrap_or_default();
+                    let query_type = match args.get("type") {
+                        Some(t) if !t.trim().is_empty() => t.clone(),
+                        _ => return ToolResult::error("Missing required parameter: type".to_string()),
+                    };
                     let query = args.get("query").cloned().unwrap_or_default();
                     let limit = args.get("limit")
                         .and_then(|s| s.parse::<i64>().ok())
@@ -497,8 +509,14 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
-                    let name = args.get("name").cloned().unwrap_or_default();
-                    let schedule = args.get("schedule").cloned().unwrap_or_default();
+                    let name = match args.get("name") {
+                        Some(n) if !n.trim().is_empty() => n.clone(),
+                        _ => return ToolResult::error("Missing required parameter: name".to_string()),
+                    };
+                    let schedule = match args.get("schedule") {
+                        Some(s) if !s.trim().is_empty() => s.clone(),
+                        _ => return ToolResult::error("Missing required parameter: schedule".to_string()),
+                    };
                     let trigger_type = args.get("type").cloned().unwrap_or_else(|| "time".to_string());
                     let tag = args.get("tag").cloned();
                     let description = args.get("description").cloned();
@@ -696,7 +714,10 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let task_manager = task_manager.clone();
                 Box::pin(async move {
-                    let title = args.get("title").cloned().unwrap_or_default();
+                    let title = match args.get("title") {
+                        Some(t) if !t.trim().is_empty() => t.clone(),
+                        _ => return ToolResult::error("Missing required parameter: title".to_string()),
+                    };
                     let priority_str = args.get("priority").cloned().unwrap_or_else(|| "medium".to_string());
                     let due_date = args.get("due_date").cloned();
                     let description = args.get("description").cloned();
@@ -762,7 +783,10 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let task_manager = task_manager.clone();
                 Box::pin(async move {
-                    let id_str = args.get("id").cloned().unwrap_or_default();
+                    let id_str = match args.get("id") {
+                        Some(i) if !i.trim().is_empty() => i.clone(),
+                        _ => return ToolResult::error("Missing required parameter: id".to_string()),
+                    };
                     let status = args.get("status").cloned();
                     let priority = args.get("priority").cloned();
 
@@ -911,9 +935,18 @@ mod tool_impls {
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let preferences = preferences.clone();
                 Box::pin(async move {
-                    let category = args.get("category").cloned().unwrap_or_default();
-                    let key = args.get("key").cloned().unwrap_or_default();
-                    let value = args.get("value").cloned().unwrap_or_default();
+                    let category = match args.get("category") {
+                        Some(c) if !c.trim().is_empty() => c.clone(),
+                        _ => return ToolResult::error("Missing required parameter: category".to_string()),
+                    };
+                    let key = match args.get("key") {
+                        Some(k) if !k.trim().is_empty() => k.clone(),
+                        _ => return ToolResult::error("Missing required parameter: key".to_string()),
+                    };
+                    let value = match args.get("value") {
+                        Some(v) if !v.trim().is_empty() => v.clone(),
+                        _ => return ToolResult::error("Missing required parameter: value".to_string()),
+                    };
 
                     match preferences.set_preference(&category, &key, &value, 1.0, Some("user")).await {
                         Ok(()) => {

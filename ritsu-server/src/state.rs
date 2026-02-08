@@ -61,42 +61,39 @@ impl ServerState {
 
     /// Send a request to the client daemon
     pub async fn send_to_client_daemon(&self, request: ServerToClientRequest) -> anyhow::Result<()> {
-        let mut guard = self.client_daemon.lock().await;
-        
-        // Try to connect if not connected
-        if guard.is_none() {
-            match UnixStream::connect("/tmp/ritsu-client.sock").await {
-                Ok(stream) => {
-                    *guard = Some(stream);
-                }
-                Err(e) => {
-                    warn!("Client daemon not available: {}", e);
-                    return Err(anyhow::anyhow!("Client daemon not running"));
-                }
+        // Connect per-request to avoid holding mutex across awaits and to allow configurable socket path.
+        let socket_path = std::env::var("RITSU_CLIENT_SOCKET").unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string());
+        // Use a short connect timeout to avoid hanging the server
+        let connect_timeout = std::time::Duration::from_secs(5);
+        let stream = match tokio::time::timeout(connect_timeout, UnixStream::connect(&socket_path)).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                warn!("Client daemon not available: {}", e);
+                return Err(anyhow::anyhow!("Client daemon not running"));
             }
-        }
-
-        let stream = guard.as_mut().ok_or_else(|| anyhow::anyhow!("Client daemon connection lost"))?;
+            Err(_) => {
+                warn!("Timeout connecting to client daemon at {}", socket_path);
+                return Err(anyhow::anyhow!("Client daemon connection timed out"));
+            }
+        };
 
         // Serialize and send request
         let request_bytes = postcard::to_allocvec(&request)?;
         let len_bytes = (request_bytes.len() as u32).to_be_bytes();
+        let mut stream = stream;
 
         if let Err(e) = stream.write_all(&len_bytes).await {
             error!("Failed to send to client daemon: {}", e);
-            *guard = None; // Disconnect
             return Err(anyhow::anyhow!("Failed to send to client daemon"));
         }
 
         if let Err(e) = stream.write_all(&request_bytes).await {
             error!("Failed to send to client daemon: {}", e);
-            *guard = None;
             return Err(anyhow::anyhow!("Failed to send to client daemon"));
         }
 
         if let Err(e) = stream.flush().await {
             error!("Failed to flush to client daemon: {}", e);
-            *guard = None;
             return Err(anyhow::anyhow!("Failed to flush to client daemon"));
         }
 
@@ -104,16 +101,14 @@ impl ServerState {
         let mut len_buf = [0u8; 4];
         if let Err(e) = stream.read_exact(&mut len_buf).await {
             error!("Failed to read response from client daemon: {}", e);
-            *guard = None;
             return Err(anyhow::anyhow!("Failed to read response"));
         }
 
         let len = u32::from_be_bytes(len_buf) as usize;
         let mut buf = vec![0u8; len];
-        
+
         if let Err(e) = stream.read_exact(&mut buf).await {
             error!("Failed to read response from client daemon: {}", e);
-            *guard = None;
             return Err(anyhow::anyhow!("Failed to read response"));
         }
 

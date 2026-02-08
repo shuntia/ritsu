@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
+use tokio_rusqlite::rusqlite;
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
@@ -127,8 +128,7 @@ async fn handle_client(
                                 config.llm.disable_tools,
                             ).await {
                                 Ok(()) => {
-                                    // Send final response to satisfy clients waiting for ServerResponse
-                                    send_response(&mut stream, ServerResponse::Ok).await?;
+                                    // Streaming handler has already sent the final ServerResponse::Ok
                                 }
                                 Err(e) => {
                                     error!("Error handling streaming message: {}", e);
@@ -390,6 +390,11 @@ async fn handle_send_message_streaming(
         is_final: true,
     };
     send_push(stream, push).await?;
+
+    // Also send a final ServerResponse::Ok immediately after the final push so the client receives a response before
+    // any potentially long-running post-processing (e.g., title generation). This prevents Broken pipe errors if the
+    // client closes the connection after the final push.
+    send_response(stream, ServerResponse::Ok).await?;
 
     info!("Streaming complete: {} chunks received, {} bytes total", chunk_count, full_response.len());
 
@@ -980,6 +985,55 @@ async fn handle_request(
                     message: format!("Failed to reindex database: {}", e),
                 },
             }
+        }
+        ClientRequest::ResetDatabase { confirm } => {
+            if !confirm {
+                return ServerResponse::Error {
+                    message: "ResetDatabase requires confirm=true to prevent accidental deletion".to_string(),
+                };
+            }
+
+            info!("Resetting full database (destructive operation requested by client)");
+
+            // Execute deletion of key tables in a blocking context with backup and transaction
+            let db_path = config.server.database_path.clone();
+            let exec_result = crate::database::Database::execute_blocking(db_path.clone(), move |conn: &rusqlite::Connection| -> anyhow::Result<()> {
+                // Create a filesystem-level backup before destructive reset
+                let backup_path = format!("{}.reset_backup.{}", db_path, chrono::Utc::now().timestamp());
+                std::fs::copy(&db_path, &backup_path).map_err(|e| anyhow::anyhow!(e))?;
+
+                // Perform deletes inside a transaction to ensure atomicity
+                conn.execute_batch(
+                    "BEGIN IMMEDIATE;\nDELETE FROM conversation_turns;\nDELETE FROM conversations;\nDELETE FROM notes;\nDELETE FROM daily_conversations;\nDELETE FROM daily_summaries;\nDELETE FROM monthly_summaries;\nDELETE FROM idle_analyses;\nDELETE FROM tool_usage;\nDELETE FROM tasks;\nDELETE FROM triggers;\nDELETE FROM system_prompts;\nDELETE FROM preferences;\nCOMMIT;",
+                ).map_err(|e| anyhow::anyhow!(e))?;
+                Ok(())
+            }).await;
+
+            if let Err(e) = exec_result {
+                return ServerResponse::Error {
+                    message: format!("Failed to reset database: {}", e),
+                };
+            }
+
+            // Reload triggers
+            if let Err(e) = trigger_registry.load_from_database().await {
+                warn!("Failed to reload triggers after reset: {}", e);
+            }
+
+            // Ensure managers clear in-memory caches
+            if let Err(e) = conversation_manager.clear_all().await {
+                warn!("Failed to clear conversations after reset: {}", e);
+            }
+            if let Err(e) = memory.clear_all().await {
+                warn!("Failed to clear memory after reset: {}", e);
+            }
+
+            // Reindex database
+            if let Err(e) = memory.reindex_database().await {
+                warn!("Failed to reindex database after reset: {}", e);
+            }
+
+            ServerResponse::Success { message: "Database reset successfully".to_string() }
         }
     }
 }

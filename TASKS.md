@@ -163,3 +163,10 @@
 **Estimated Total Time**: 20+ hours
 **Priority**: Start immediately with Phase 1
 **Last Updated**: 2026-02-07
+
+Active Implementation (2026-02-08):
+- [ ] Add NDJSON vs SSE unit tests for llm streaming (in progress)
+- [ ] Tool parameter validation in ritsu-server/src/tools.rs (in progress)
+- [ ] Use configurable client-daemon socket & per-request connect with timeouts (in progress)
+- [ ] Make LlmClient::new async to avoid blocking (in progress)
+- [ ] Wrap ResetDatabase in transaction + backup (pending)

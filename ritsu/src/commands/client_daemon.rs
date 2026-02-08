@@ -35,11 +35,16 @@ pub async fn run() -> Result<()> {
     let server_socket_clone = server_socket.clone();
 
     // Spawn task to handle incoming tool requests from server
+    // Use quadratic backoff for reconnect attempts: delay = base * attempt^2 (ms), capped to 5 minutes
+    let retry_cfg = config.retry.clone();
     tokio::spawn(async move {
+        let mut attempt: u64 = 0;
         loop {
             match connect_to_server(&server_socket_clone).await {
                 Ok(stream) => {
                     info!("Connected to server for tool requests");
+                    // Reset attempt counter on successful connection
+                    attempt = 0;
                     *server_conn_clone.lock().await = Some(stream);
                     
                     // Wait for tool requests from server
@@ -50,8 +55,19 @@ pub async fn run() -> Result<()> {
                     *server_conn_clone.lock().await = None;
                 }
                 Err(e) => {
-                    warn!("Could not connect to server: {}, retrying in 5s", e);
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    attempt = attempt.saturating_add(1);
+                    // Quadratic backoff in milliseconds
+                    let base_delay_ms = retry_cfg.retry_delay_ms;
+                    let max_delay_ms: u64 = 5 * 60 * 1000; // 5 minutes
+                    let mut delay_ms = base_delay_ms.saturating_mul(attempt.saturating_mul(attempt));
+                    if delay_ms == 0 {
+                        delay_ms = base_delay_ms.max(1);
+                    }
+                    if delay_ms > max_delay_ms {
+                        delay_ms = max_delay_ms;
+                    }
+                    warn!("Could not connect to server: {}, retrying in {}ms (attempt {})", e, delay_ms, attempt);
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                 }
             }
         }

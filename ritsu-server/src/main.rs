@@ -165,7 +165,7 @@ async fn main() -> Result<()> {
         &config.llm,
         &config.timeouts,
         tool_registry.clone(),
-    )?);
+    ).await?);
     info!(
         "LLM client initialized with {} backend(s)",
         config.llm.backends.len()

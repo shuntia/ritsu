@@ -81,6 +81,12 @@ pub enum ClientRequest {
     GetDatabaseStats,
     /// Export full database
     ExportDatabase,
+    /// Reset the entire database (destructive). Confirm flag required.
+    ResetDatabase {
+        /// Confirm flag to prevent accidental deletion
+        confirm: bool,
+    },
+
     /// Inspect a conversation session
     InspectSession {
         session_id: String,
