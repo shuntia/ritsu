@@ -9,7 +9,7 @@ use ritsu_common::protocol::{ServerPush, ServerToClientRequest, ClientToServerRe
 use tracing::{warn, error};
 
 /// Push notification channel capacity
-const PUSH_CHANNEL_CAPACITY: usize = 100;
+pub const PUSH_CHANNEL_CAPACITY: usize = 100;
 
 /// Global server state
 pub struct ServerState {
