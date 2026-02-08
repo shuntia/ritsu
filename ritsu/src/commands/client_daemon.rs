@@ -225,58 +225,6 @@ async fn handle_tool_request(request: ServerToClientRequest, gui_pushers: Arc<Mu
     }
 }
 
-async fn handle_incoming_server_connection(mut stream: UnixStream, initial_req: Option<Vec<u8>>, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
-    // Process an optional initial request that was read during accept
-    if let Some(body) = initial_req {
-        match postcard::from_bytes::<ServerToClientRequest>(&body) {
-            Ok(req) => {
-                let resp = match handle_tool_request(req, gui_pushers.clone()).await {
-                    Ok(()) => ClientToServerResponse::Success,
-                    Err(e) => ClientToServerResponse::Error { message: e.to_string() },
-                };
-                let resp_bytes = postcard::to_allocvec(&resp)?;
-                let len_bytes = (resp_bytes.len() as u32).to_be_bytes();
-                stream.write_all(&len_bytes).await?;
-                stream.write_all(&resp_bytes).await?;
-                stream.flush().await?;
-            }
-            Err(e) => {
-                // Invalid initial frame; log and continue
-                warn!("Invalid initial frame on server->client conn: {}", e);
-            }
-        }
-    }
-
-    // Continue handling further requests on this connection
-    loop {
-        let mut len_buf = [0u8; 4];
-        if stream.read_exact(&mut len_buf).await.is_err() {
-            debug!("Incoming server connection closed");
-            return Ok(());
-        }
-
-        let len = u32::from_be_bytes(len_buf) as usize;
-        if len > 10_000_000 {
-            warn!("Incoming server request too large: {}", len);
-            return Ok(());
-        }
-
-        let mut buf = vec![0u8; len];
-        stream.read_exact(&mut buf).await?;
-
-        let req: ServerToClientRequest = postcard::from_bytes(&buf)?;
-        let resp = match handle_tool_request(req, gui_pushers.clone()).await {
-            Ok(()) => ClientToServerResponse::Success,
-            Err(e) => ClientToServerResponse::Error { message: e.to_string() },
-        };
-
-        let resp_bytes = postcard::to_allocvec(&resp)?;
-        let len_bytes = (resp_bytes.len() as u32).to_be_bytes();
-        stream.write_all(&len_bytes).await?;
-        stream.write_all(&resp_bytes).await?;
-        stream.flush().await?;
-    }
-}
 
 async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socket: &str, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>, initial_req: Option<Vec<u8>>) -> Result<()> {
     info!("Handling new GUI connection, connecting to server...");
@@ -479,6 +427,69 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
     let _ = writer_handle.await;
 
     Ok(())
+}
+
+async fn handle_incoming_server_connection(mut stream: UnixStream, initial_body: Option<Vec<u8>>, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
+    info!("Handling incoming server->client connection");
+
+    // If there's an initial body, handle it first
+    if let Some(body) = initial_body {
+        match postcard::from_bytes::<ServerToClientRequest>(&body) {
+            Ok(req) => {
+                let res = match handle_tool_request(req, gui_pushers.clone()).await {
+                    Ok(_) => ClientToServerResponse::Success,
+                    Err(e) => ClientToServerResponse::Error { message: e.to_string() },
+                };
+                let res_bytes = postcard::to_allocvec(&res)?;
+                let len_bytes = (res_bytes.len() as u32).to_be_bytes();
+                stream.write_all(&len_bytes).await?;
+                stream.write_all(&res_bytes).await?;
+                stream.flush().await?;
+            }
+            Err(e) => {
+                warn!("Initial payload on incoming server connection not parseable as ServerToClientRequest: {}", e);
+            }
+        }
+    }
+
+    loop {
+        // Read request frame
+        let mut len_buf = [0u8; 4];
+        if stream.read_exact(&mut len_buf).await.is_err() {
+            info!("Incoming server connection closed");
+            return Ok(());
+        }
+        let len = u32::from_be_bytes(len_buf) as usize;
+        if len > 10_000_000 {
+            warn!("Incoming server connection sent too-large message: {}", len);
+            return Ok(());
+        }
+        let mut buf = vec![0u8; len];
+        if stream.read_exact(&mut buf).await.is_err() {
+            info!("Incoming server connection closed during read");
+            return Ok(());
+        }
+
+        let request = match postcard::from_bytes::<ServerToClientRequest>(&buf) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("Failed to parse ServerToClientRequest on accepted connection: {}", e);
+                continue;
+            }
+        };
+
+        let response = match handle_tool_request(request, gui_pushers.clone()).await {
+            Ok(_) => ClientToServerResponse::Success,
+            Err(e) => ClientToServerResponse::Error { message: e.to_string() },
+        };
+
+        let response_bytes = postcard::to_allocvec(&response)?;
+        let response_len_bytes = (response_bytes.len() as u32).to_be_bytes();
+        if stream.write_all(&response_len_bytes).await.is_err() || stream.write_all(&response_bytes).await.is_err() || stream.flush().await.is_err() {
+            warn!("Failed writing response to incoming server connection");
+            return Ok(());
+        }
+    }
 }
 
 async fn handle_notification(
