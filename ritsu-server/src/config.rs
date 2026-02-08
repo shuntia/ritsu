@@ -38,6 +38,9 @@ pub struct LlmBackend {
     pub name: String,
     pub endpoint: String,
     pub model: String,
+    /// Direct API key (less secure, but convenient)
+    pub api_key: Option<String>,
+    /// Environment variable name containing the API key (more secure)
     pub api_key_env: Option<String>,
 }
 
@@ -77,6 +80,7 @@ impl Default for LlmConfig {
                 name: "ollama".to_string(),
                 endpoint: "http://localhost:11434".to_string(),
                 model: "llama3.2".to_string(),
+                api_key: None,
                 api_key_env: None,
             }],
             disable_streaming: false,
@@ -169,26 +173,34 @@ name = "ollama"
 endpoint = "http://localhost:11434"
 model = "llama3.2"
 
-# Groq (fast cloud inference) - uncomment and set GROQ_API_KEY env var
+# Groq (fast cloud inference)
+# Option 1: API key from environment variable (more secure)
 # [[llm.backends]]
 # name = "groq"
 # endpoint = "https://api.groq.com/openai/v1"
 # model = "llama-3.3-70b-versatile"
 # api_key_env = "GROQ_API_KEY"
 
-# OpenAI - uncomment and set OPENAI_API_KEY env var
+# Option 2: API key directly in config (less secure, but convenient)
+# [[llm.backends]]
+# name = "groq"
+# endpoint = "https://api.groq.com/openai/v1"
+# model = "llama-3.3-70b-versatile"
+# api_key = "gsk_your_groq_api_key_here"
+
+# OpenAI
 # [[llm.backends]]
 # name = "openai"
 # endpoint = "https://api.openai.com/v1"
 # model = "gpt-4"
-# api_key_env = "OPENAI_API_KEY"
+# api_key_env = "OPENAI_API_KEY"  # or use: api_key = "sk-..."
 
-# Anthropic - uncomment and set ANTHROPIC_API_KEY env var
+# Anthropic
 # [[llm.backends]]
 # name = "anthropic"
 # endpoint = "https://api.anthropic.com"
 # model = "claude-3-5-sonnet-20241022"
-# api_key_env = "ANTHROPIC_API_KEY"
+# api_key_env = "ANTHROPIC_API_KEY"  # or use: api_key = "sk-ant-..."
 
 [server]
 socket_path = "{socket_path}"

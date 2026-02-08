@@ -91,11 +91,9 @@ impl LlmClient {
             provider_type, backend.model, backend.endpoint
         );
 
-        // Get API key from environment if specified
-        let api_key = backend
-            .api_key_env
-            .as_ref()
-            .and_then(|env_var| {
+        // Get API key: prioritize direct key, then environment variable
+        let api_key = backend.api_key.clone().or_else(|| {
+            backend.api_key_env.as_ref().and_then(|env_var| {
                 std::env::var(env_var).ok().or_else(|| {
                     if provider_type != LLMBackend::Ollama {
                         warn!("API key environment variable '{}' not set for {} backend", 
@@ -103,7 +101,13 @@ impl LlmClient {
                     }
                     None
                 })
-            });
+            })
+        });
+
+        // Warn if no API key for non-Ollama backends
+        if api_key.is_none() && provider_type != LLMBackend::Ollama {
+            warn!("No API key configured for {} backend ({})", backend.name, backend.endpoint);
+        }
 
         // Build LLM with all tools registered
         let tools_info = futures::executor::block_on(tool_registry.get_tools_for_ai());
