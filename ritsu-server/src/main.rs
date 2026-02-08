@@ -146,6 +146,9 @@ async fn main() -> Result<()> {
     let server_state = std::sync::Arc::new(state::ServerState::new());
     info!("Server state initialized");
 
+    // Start background reconnection task to client daemon (preferred persistent connection)
+    server_state.clone().start_client_daemon_reconnector();
+
     // Initialize tool registry (needs memory, task_manager, trigger_registry, database, server_state, preferences)
     let tool_registry =
         std::sync::Arc::new(tools::ToolRegistry::new().with_database(db.connection.clone()));

@@ -217,28 +217,21 @@ impl LlmClient {
         // Convert our messages to llm crate format
         let mut chat_messages = Vec::new();
 
+        // If a system prompt is provided, send it as a distinct system message
+        if let Some(prompt) = system_prompt {
+            chat_messages.push(ChatMessage::system().content(prompt).build());
+        }
+
         // Add conversation messages
-        for (i, msg) in messages.iter().enumerate() {
+        for msg in messages.iter() {
             let message_builder = match msg.role.as_str() {
                 "user" => ChatMessage::user(),
                 "assistant" => ChatMessage::assistant(),
-                _ => {
-                    // System messages become user messages
-                    ChatMessage::user()
-                }
+                "system" => ChatMessage::system(),
+                _ => ChatMessage::user(),
             };
 
-            // Prepend system prompt to first user message if provided
-            let content = if i == 0 {
-                system_prompt.as_ref().map_or_else(
-                    || msg.content.clone(),
-                    |prompt| format!("{prompt}\n\n{}", msg.content),
-                )
-            } else {
-                msg.content.clone()
-            };
-
-            chat_messages.push(message_builder.content(&content).build());
+            chat_messages.push(message_builder.content(&msg.content).build());
         }
 
         debug!(
@@ -459,24 +452,20 @@ impl LlmClient {
         // Convert our messages to llm crate format
         let mut chat_messages = Vec::new();
 
+        // If a system prompt is provided, send it as a distinct system message
+        if let Some(prompt) = system_prompt {
+            chat_messages.push(ChatMessage::system().content(prompt).build());
+        }
+
         // Add conversation messages
-        for (i, msg) in messages.iter().enumerate() {
+        for msg in messages.iter() {
             let message_builder = match msg.role.as_str() {
                 "assistant" => ChatMessage::assistant(),
+                "system" => ChatMessage::system(),
                 _ => ChatMessage::user(),
             };
 
-            // Prepend system prompt to first user message if provided
-            let content = if i == 0 {
-                system_prompt.as_ref().map_or_else(
-                    || msg.content.clone(),
-                    |prompt| format!("{prompt}\n\n{}", msg.content),
-                )
-            } else {
-                msg.content.clone()
-            };
-
-            chat_messages.push(message_builder.content(&content).build());
+            chat_messages.push(message_builder.content(&msg.content).build());
         }
 
         debug!(
@@ -507,6 +496,9 @@ impl LlmClient {
             .await
             .context("Failed to start streaming chat with LLM provider")?;
 
+        // Clone tool registry for executing tool calls during streaming
+        let tool_registry = self.tool_registry.clone();
+
         // Spawn a task to forward stream items to the channel
         tokio::spawn(async move {
             while let Some(chunk_result) = stream.next().await {
@@ -522,19 +514,50 @@ impl LlmClient {
                                 }
                             }
                             StreamChunk::ToolUseComplete { index, tool_call } => {
-                                // For now, just log tool calls but don't send them to the stream
-                                // Tool execution will be handled in non-streaming mode
+                                // Execute tool call now and stream the result back to client
                                 tracing::debug!(
                                     "Tool call received in stream (#{index}): {} with args: {}",
                                     tool_call.function.name,
                                     tool_call.function.arguments
                                 );
 
-                                // Send a placeholder message to user indicating tool is being called
-                                let tool_msg =
-                                    format!("\n\n🔧 Calling tool: {}\n", tool_call.function.name);
-                                if tx.send(Ok(tool_msg)).await.is_err() {
-                                    break;
+                                // Parse arguments JSON into HashMap<String, String>
+                                let args_map: HashMap<String, serde_json::Value> =
+                                    match serde_json::from_str(&tool_call.function.arguments) {
+                                        Ok(m) => m,
+                                        Err(e) => {
+                                            let _ = tx.send(Ok(format!("\n\n🔧 Failed to parse tool arguments for '{}': {}\n", tool_call.function.name, e))).await;
+                                            continue;
+                                        }
+                                    };
+
+                                let mut args: HashMap<String, String> = HashMap::new();
+                                for (k, v) in args_map.into_iter() {
+                                    let val_str = match v {
+                                        serde_json::Value::String(s) => s,
+                                        other => other.to_string(),
+                                    };
+                                    args.insert(k, val_str);
+                                }
+
+                                // Execute the tool
+                                match tool_registry.execute(&tool_call.function.name, args).await {
+                                    Ok(tool_result) => {
+                                        let result_msg = if tool_result.success {
+                                            format!("\n\n🔧 Tool '{}' result: {}\n", tool_call.function.name, tool_result.output)
+                                        } else {
+                                            // prefer showing error field if present
+                                            let err_text = tool_result.error.clone().unwrap_or(tool_result.output.clone());
+                                            format!("\n\n🔧 Tool '{}' error: {}\n", tool_call.function.name, err_text)
+                                        };
+
+                                        if tx.send(Ok(result_msg)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(Ok(format!("\n\n🔧 Tool '{}' execution failed: {}\n", tool_call.function.name, e))).await;
+                                    }
                                 }
                             }
                             StreamChunk::ToolUseStart { index, id, name } => {
