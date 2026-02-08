@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_rusqlite::rusqlite;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 pub type ToolFuture = Pin<Box<dyn Future<Output = ToolResult> + Send>>;
 pub type ToolFunction = Arc<dyn Fn(HashMap<String, String>) -> ToolFuture + Send + Sync>;
@@ -67,11 +67,16 @@ impl ToolRegistry {
     #[allow(dead_code)]
     pub async fn execute(&self, name: &str, args: HashMap<String, String>) -> Result<ToolResult> {
         let start = std::time::Instant::now();
+        // Summarize args: keys and lengths to avoid logging sensitive values
+        let args_summary: Vec<(String, usize)> = args.iter().map(|(k,v)| (k.clone(), v.len())).collect();
+        debug!(tool = %name, args_keys = ?args.keys().cloned().collect::<Vec<_>>(), args_summary = ?args_summary, "ToolRegistry.execute called");
         
         // Clone the handler to avoid holding lock across await
         let handler = {
             let tools = self.tools.read().await;
-            tools.get(name).map(|tool| tool.handler.clone())
+            let h = tools.get(name).map(|tool| tool.handler.clone());
+            debug!(tool = %name, has_handler = %h.is_some(), "Handler lookup result");
+            h
         };
         
         let result = if let Some(handler) = handler {
@@ -81,16 +86,20 @@ impl ToolRegistry {
         };
         
         let execution_time = start.elapsed().as_millis() as i64;
-        
+        debug!(tool = %name, execution_time_ms = %execution_time, success = ?result.success, output_len = %result.output.len(), "Tool handler completed");
+
         // Log tool usage to database
         if let Some(db) = &self.db_conn {
             let name_clone = name.to_string();
             let args_json = serde_json::to_string(&args).unwrap_or_default();
             let result_str = result.output.clone();
             let success = result.success;
+
+            debug!(tool = %name, "Scheduling background DB log for tool usage");
             
             let db_clone = db.clone();
             tokio::spawn(async move {
+                debug!(tool = %name_clone, "Performing DB log for tool usage");
                 if let Err(e) = Self::log_tool_usage(
                     &db_clone,
                     &name_clone,
@@ -100,10 +109,13 @@ impl ToolRegistry {
                     execution_time,
                 ).await {
                     warn!("Failed to log tool usage: {}", e);
+                } else {
+                    debug!(tool = %name_clone, "DB log completed for tool usage");
                 }
             });
         }
-        
+
+        debug!(tool = %name, "Returning tool result");
         Ok(result)
     }
 

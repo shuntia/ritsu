@@ -304,6 +304,10 @@ impl LlmClient {
 
         if !tool_calls.is_empty() {
             debug!("LLM requested {} tool call(s)", tool_calls.len());
+            for (i, call) in tool_calls.iter().enumerate() {
+                let keys: Vec<_> = call.arguments.keys().cloned().collect();
+                debug!(index = i, tool = %call.name, arg_keys = ?keys, "Parsed tool call");
+            }
         }
 
         Ok(LlmResponse {
@@ -505,7 +509,8 @@ impl LlmClient {
             use llm::chat::StreamChunk;
 
             let mut full_response = String::new();
-            let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
+            // Collect raw tool calls (name, raw_arguments) during streaming and defer parsing until after stream completes
+            let mut collected_raw_calls: Vec<(String, String)> = Vec::new();
 
             while let Some(chunk_result) = stream.next().await {
                 debug!("Received stream chunk result");
@@ -528,32 +533,16 @@ impl LlmClient {
                             }
 
                             StreamChunk::ToolUseComplete { index: _, tool_call } => {
-                                // Collect tool calls for post-stream execution
+                                // Collect raw tool call data for post-stream parsing/execution
                                 tracing::debug!(
-                                    "Collected tool call in stream: {} with args: {}",
+                                    "Collected raw tool call in stream: {} (args_len={})",
                                     tool_call.function.name,
-                                    tool_call.function.arguments
+                                    tool_call.function.arguments.len()
                                 );
-                                debug!(tool = %tool_call.function.name, args_len = %tool_call.function.arguments.len(), "Collected tool call details");
+                                debug!(tool = %tool_call.function.name, args_len = %tool_call.function.arguments.len(), "Collected raw tool call details");
 
-                                // Parse arguments JSON into HashMap<String, String>
-                                let args_map: HashMap<String, serde_json::Value> = serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
-
-                                debug!(tool=%tool_call.function.name, arg_keys = ?args_map.keys().cloned().collect::<Vec<_>>(), "Parsed tool call argument keys");
-
-                                let mut args: HashMap<String, String> = HashMap::new();
-                                for (k, v) in args_map.into_iter() {
-                                    let val_str = match v {
-                                        serde_json::Value::String(s) => s,
-                                        other => other.to_string(),
-                                    };
-                                    args.insert(k, val_str);
-                                }
-
-                                collected_calls.push(ToolCallInfo {
-                                    name: tool_call.function.name.clone(),
-                                    arguments: args,
-                                });
+                                // Store raw arguments; parse only once the stream completes
+                                collected_raw_calls.push((tool_call.function.name.clone(), tool_call.function.arguments.clone()));
                             }
 
                             StreamChunk::ToolUseStart { index: _, id: _, name } => {
@@ -579,7 +568,32 @@ impl LlmClient {
             }
 
             debug!(full_response_len = %full_response.len(), "Streaming complete");
-            debug!(tool_calls = ?collected_calls.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "Collected tool call names");
+            debug!(tool_calls = ?collected_raw_calls.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), "Collected raw tool call names");
+
+            // Parse raw tool calls once the stream has completed to avoid partial/fragmented JSON during streaming
+            let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
+            if !collected_raw_calls.is_empty() {
+                for (name, raw_args) in collected_raw_calls.into_iter() {
+                    let args_map: HashMap<String, serde_json::Value> = match serde_json::from_str(&raw_args) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!(tool=%name, "Failed to parse tool call arguments JSON at stream end: {}", e);
+                            HashMap::new()
+                        }
+                    };
+
+                    let mut args: HashMap<String, String> = HashMap::new();
+                    for (k, v) in args_map.into_iter() {
+                        let val_str = match v {
+                            serde_json::Value::String(s) => s,
+                            other => other.to_string(),
+                        };
+                        args.insert(k, val_str);
+                    }
+
+                    collected_calls.push(ToolCallInfo { name, arguments: args });
+                }
+            }
 
             // If tool calls were collected, execute them now using a bounded worker pool with per-tool timeouts
             if !collected_calls.is_empty() {
