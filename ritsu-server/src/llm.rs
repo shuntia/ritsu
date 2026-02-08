@@ -500,6 +500,7 @@ impl LlmClient {
         let tool_registry = self.tool_registry.clone();
 
         // Spawn a task to forward stream items to the channel and collect tool calls
+        debug!("Spawning streaming forward task for LLM stream");
         tokio::spawn(async move {
             use llm::chat::StreamChunk;
 
@@ -507,15 +508,21 @@ impl LlmClient {
             let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
 
             while let Some(chunk_result) = stream.next().await {
+                debug!("Received stream chunk result");
                 match chunk_result {
                     Ok(chunk) => {
                         match chunk {
                             StreamChunk::Text(text) => {
                                 // Accumulate textual output for later synthesis
+                                let text_preview: String = text.chars().take(120).collect();
+                                let text_len = text.len();
+                                debug!(len = %text_len, preview = %text_preview, "StreamChunk::Text received");
                                 full_response.push_str(&text);
 
+                                // Send chunk to receiver
                                 if tx.send(Ok(text)).await.is_err() {
                                     // Receiver dropped, stop streaming
+                                    debug!("Receiver dropped while sending text chunk");
                                     break;
                                 }
                             }
@@ -527,10 +534,12 @@ impl LlmClient {
                                     tool_call.function.name,
                                     tool_call.function.arguments
                                 );
+                                debug!(tool = %tool_call.function.name, args_len = %tool_call.function.arguments.len(), "Collected tool call details");
 
                                 // Parse arguments JSON into HashMap<String, String>
-                                let args_map: HashMap<String, serde_json::Value> =
-                                    serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+                                let args_map: HashMap<String, serde_json::Value> = serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
+
+                                debug!(tool=%tool_call.function.name, arg_keys = ?args_map.keys().cloned().collect::<Vec<_>>(), "Parsed tool call argument keys");
 
                                 let mut args: HashMap<String, String> = HashMap::new();
                                 for (k, v) in args_map.into_iter() {
@@ -562,11 +571,15 @@ impl LlmClient {
                         }
                     }
                     Err(e) => {
+                        debug!("Streaming error encountered: {:?}", e);
                         let _ = tx.send(Err(anyhow::anyhow!("Streaming error: {e}"))).await;
                         break;
                     }
                 }
             }
+
+            debug!(full_response_len = %full_response.len(), "Streaming complete");
+            debug!(tool_calls = ?collected_calls.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "Collected tool call names");
 
             // If tool calls were collected, execute them now using a bounded worker pool with per-tool timeouts
             if !collected_calls.is_empty() {
@@ -586,6 +599,7 @@ impl LlmClient {
                     let call_name = call.name.clone();
                     let call_args = call.arguments.clone();
 
+                    debug!(tool=%call_name, "Spawning tool executor task");
                     let handle = tokio::spawn(async move {
                         // Acquire a permit (await inside spawned task so we don't block the outer task)
                         let _permit = permit_sem.acquire_owned().await.expect("semaphore closed");
@@ -600,6 +614,7 @@ impl LlmClient {
                                 let duration = start.elapsed();
                                 let result_text = if res.success { res.output.clone() } else { res.error.clone().unwrap_or_else(|| res.output.clone()) };
                                 info!(tool=%call_name, duration_ms = %duration.as_millis(), success = res.success, "Tool execution completed");
+                                debug!(tool=%call_name, result_len = %result_text.len(), "Tool result length");
 
                                 let msg = format!("\n\n🔧 Tool '{}' result:\n{}\n", call_name, result_text);
                                 let _ = tx_clone.send(Ok(msg)).await;
@@ -627,6 +642,7 @@ impl LlmClient {
 
                 // Wait for all spawned tool tasks to finish and then close the sender
                 let _ = futures::future::join_all(handles).await;
+                debug!("All tool worker tasks completed, joined");
             }
 
             // Drop the sender to close the channel
