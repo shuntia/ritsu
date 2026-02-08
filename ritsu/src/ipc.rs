@@ -21,46 +21,85 @@ impl IpcClient {
         }
     }
 
-    /// Get or establish connection to the daemon
+    /// Get or establish connection to the daemon without holding the lock across await.
     async fn get_connection(&self) -> Result<tokio::sync::MutexGuard<'_, Option<UnixStream>>> {
+        // Fast path: if a connection exists, return it while holding the lock.
+        {
+            let guard = self.connection.lock().await;
+            if guard.is_some() {
+                return Ok(guard);
+            }
+            // Drop the guard and create connection outside of the lock
+        }
+
+        // Establish a new connection without holding the mutex
+        let stream = UnixStream::connect(&self.socket_path).await?;
+
+        // Insert the new stream under the lock
         let mut guard = self.connection.lock().await;
-        
-        // Don't test connection liveness - let actual protocol operations fail
-        // Testing with try_read() would consume bytes and corrupt the stream
-        
-        // If no connection exists, establish new one
         if guard.is_none() {
-            let stream = UnixStream::connect(&self.socket_path).await?;
             *guard = Some(stream);
         }
-        
         Ok(guard)
     }
 
     pub async fn send_request(&self, request: ClientRequest) -> Result<ServerResponse> {
-        let mut guard = self.get_connection().await?;
-        let stream = guard.as_mut().ok_or_else(|| anyhow::anyhow!("Failed to establish connection"))?;
-
-        // Serialize request
+        // Pre-serialize the request before taking the stream
         let request_data = postcard::to_allocvec(&request)?;
         let request_len = (request_data.len() as u32).to_be_bytes();
 
-        // Send request
-        stream.write_all(&request_len).await?;
-        stream.write_all(&request_data).await?;
-        stream.flush().await?;
+        // Ensure a connection exists
+        let mut guard = self.get_connection().await?;
+        // Take ownership of the stream so we don't hold the mutex across awaits
+        let mut stream = guard.take().ok_or_else(|| anyhow::anyhow!("Failed to establish connection"))?;
+        drop(guard);
+
+        use std::time::Duration;
+        let write_timeout = Duration::from_secs(5);
+        // Write length
+        match tokio::time::timeout(write_timeout, stream.write_all(&request_len)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => return Err(anyhow::anyhow!("Timeout writing to IPC socket")),
+        }
+        // Write data
+        match tokio::time::timeout(write_timeout, stream.write_all(&request_data)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => return Err(anyhow::anyhow!("Timeout writing to IPC socket")),
+        }
+        // Flush
+        match tokio::time::timeout(write_timeout, stream.flush()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => return Err(anyhow::anyhow!("Timeout flushing IPC socket")),
+        }
 
         // Read response length
+        let read_timeout = Duration::from_secs(5);
         let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).await?;
+        match tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => return Err(anyhow::anyhow!("Timeout reading response length from IPC socket")),
+        }
         let len = u32::from_be_bytes(len_buf) as usize;
 
         // Read response data
         let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).await?;
+        match tokio::time::timeout(read_timeout, stream.read_exact(&mut data)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => return Err(anyhow::anyhow!("Timeout reading response from IPC socket")),
+        }
 
         // Deserialize response
         let response: ServerResponse = postcard::from_bytes(&data)?;
+
+        // Reinsert the stream for reuse
+        let mut guard = self.connection.lock().await;
+        *guard = Some(stream);
+
         Ok(response)
     }
 
