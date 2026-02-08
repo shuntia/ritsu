@@ -71,6 +71,8 @@ impl LlmClient {
             LLMBackend::OpenAI
         } else if backend.endpoint.contains("anthropic") || backend.endpoint.contains("api.anthropic.com") {
             LLMBackend::Anthropic
+        } else if backend.endpoint.contains("groq") || backend.endpoint.contains("api.groq.com") {
+            LLMBackend::Groq
         } else if backend.endpoint.contains("localhost") || backend.endpoint.contains("ollama") {
             LLMBackend::Ollama
         } else {

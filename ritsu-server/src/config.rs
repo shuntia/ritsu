@@ -158,11 +158,61 @@ impl Config {
                 .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
         }
 
-        let example_config = Self::default();
-        let toml_string = toml::to_string_pretty(&example_config)
-            .context("Failed to serialize example config")?;
+        let example = format!(r#"[llm]
+default_backend = "ollama"
+disable_streaming = false
+disable_tools = false
+
+# Ollama (local)
+[[llm.backends]]
+name = "ollama"
+endpoint = "http://localhost:11434"
+model = "llama3.2"
+
+# Groq (fast cloud inference) - uncomment and set GROQ_API_KEY env var
+# [[llm.backends]]
+# name = "groq"
+# endpoint = "https://api.groq.com/openai/v1"
+# model = "llama-3.3-70b-versatile"
+# api_key_env = "GROQ_API_KEY"
+
+# OpenAI - uncomment and set OPENAI_API_KEY env var
+# [[llm.backends]]
+# name = "openai"
+# endpoint = "https://api.openai.com/v1"
+# model = "gpt-4"
+# api_key_env = "OPENAI_API_KEY"
+
+# Anthropic - uncomment and set ANTHROPIC_API_KEY env var
+# [[llm.backends]]
+# name = "anthropic"
+# endpoint = "https://api.anthropic.com"
+# model = "claude-3-5-sonnet-20241022"
+# api_key_env = "ANTHROPIC_API_KEY"
+
+[server]
+socket_path = "{socket_path}"
+database_path = "{database_path}"
+client_binary_path = "{client_binary_path}"
+
+[memory]
+daily_rotation_days = {rotation_days}
+
+[timeouts]
+user_response_seconds = {user_response}
+http_request_seconds = {http_request}
+llm_request_seconds = {llm_request}
+"#,
+            socket_path = default_socket_path(),
+            database_path = default_database_path(),
+            client_binary_path = default_client_binary(),
+            rotation_days = default_rotation_days(),
+            user_response = default_user_response(),
+            http_request = default_http_request(),
+            llm_request = default_llm_request(),
+        );
         
-        std::fs::write(path, toml_string)
+        std::fs::write(path, example)
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
         
         eprintln!("✓ Created example config: {}", path.display());
