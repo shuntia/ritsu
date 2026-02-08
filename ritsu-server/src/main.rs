@@ -34,6 +34,10 @@ struct Cli {
     /// Database path (overrides config file)
     #[arg(short, long, value_name = "PATH")]
     database: Option<String>,
+
+    /// Write example configuration file and exit
+    #[arg(long)]
+    write_example_config: bool,
 }
 
 #[tokio::main]
@@ -48,6 +52,13 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    // Handle --write-example-config
+    if cli.write_example_config {
+        let config_path = config::Config::config_file_path();
+        config::Config::write_example(&config_path)?;
+        return Ok(());
+    }
 
     info!("Starting ritsu-server v{}", env!("CARGO_PKG_VERSION"));
 

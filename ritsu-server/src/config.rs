@@ -127,8 +127,16 @@ impl Config {
                 .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+            eprintln!("✓ Loaded configuration from: {}", path.display());
             Ok(config)
         } else {
+            eprintln!("⚠ Configuration file not found: {}", path.display());
+            eprintln!("  Using default configuration.");
+            eprintln!();
+            eprintln!("  To customize settings, create a config file:");
+            eprintln!("    mkdir -p ~/.config/ritsu");
+            eprintln!("    ritsu-server --write-example-config");
+            eprintln!();
             Ok(Self::default())
         }
     }
@@ -140,6 +148,25 @@ impl Config {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("ritsu")
             .join("config.toml")
+    }
+
+    /// Write an example configuration file
+    pub fn write_example(path: &PathBuf) -> Result<()> {
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+        }
+
+        let example_config = Self::default();
+        let toml_string = toml::to_string_pretty(&example_config)
+            .context("Failed to serialize example config")?;
+        
+        std::fs::write(path, toml_string)
+            .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
+        
+        eprintln!("✓ Created example config: {}", path.display());
+        Ok(())
     }
 }
 
