@@ -746,6 +746,7 @@ impl MemoryManager {
     }
 
     /// Export database to JSON
+    #[allow(clippy::unused_async)]
     pub async fn export_database(&self) -> Result<String> {
         // For now, return a simple message
         // Full implementation would serialize all tables
@@ -786,6 +787,7 @@ impl MemoryManager {
     }
 
     /// Force memory compaction
+    #[allow(clippy::unused_async)]
     pub async fn force_compact(&self) -> Result<()> {
         // For now, just return success
         // Full implementation would run daily compaction logic

@@ -311,7 +311,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let db_path = temp_dir.join(format!("ritsu_test_{}.db", std::process::id()));
         
-        let result = Database::new(&db_path);
+        let result = Database::new(&db_path).await;
         assert!(result.is_ok());
         
         // Cleanup
@@ -323,8 +323,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let db_path = temp_dir.join(format!("ritsu_test_schema_{}.db", std::process::id()));
         
-        let db = Database::new(&db_path).unwrap();
-        let conn = db.connection.lock().await;
+        let db = Database::new(&db_path).await.unwrap();
         
         // Check if key tables exist
         let tables = vec![
@@ -334,15 +333,16 @@ mod tests {
         ];
         
         for table in tables {
-            let result: Result<i64, _> = conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-                [table],
-                |row| row.get(0),
-            );
-            assert!(result.unwrap() > 0, "Table '{table}' should exist");
+            let result = db.connection.call(move |conn| -> rusqlite::Result<i64> {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                    [table],
+                    |row| row.get(0),
+                )
+            }).await;
+            assert!(result.unwrap() > 0, "Table '{}' should exist", table);
         }
         
-        drop(conn);
         // Cleanup
         let _ = std::fs::remove_file(&db_path);
     }
