@@ -8,11 +8,14 @@ use chrono::{DateTime, Utc};
 use ritsu_common::protocol::{ServerPush, ServerToClientRequest, ClientToServerResponse};
 use tracing::{warn, error};
 
+/// Push notification channel capacity
+const PUSH_CHANNEL_CAPACITY: usize = 100;
+
 /// Global server state
 pub struct ServerState {
     pub last_activity: Arc<RwLock<DateTime<Utc>>>,
     /// Connected clients for push notifications
-    clients: Arc<RwLock<Vec<mpsc::UnboundedSender<ServerPush>>>>,
+    clients: Arc<RwLock<Vec<mpsc::Sender<ServerPush>>>>,
     /// Connection to client daemon for tool requests
     client_daemon: Arc<Mutex<Option<UnixStream>>>,
 }
@@ -44,7 +47,7 @@ impl ServerState {
     }
 
     /// Register a new client for push notifications
-    pub async fn register_client(&self, sender: mpsc::UnboundedSender<ServerPush>) {
+    pub async fn register_client(&self, sender: mpsc::Sender<ServerPush>) {
         let mut clients = self.clients.write().await;
         clients.push(sender);
     }
@@ -52,7 +55,8 @@ impl ServerState {
     /// Broadcast a push notification to all connected clients
     pub async fn broadcast_push(&self, push: ServerPush) {
         let mut clients = self.clients.write().await;
-        clients.retain(|client| client.send(push.clone()).is_ok());
+        // Use try_send to avoid blocking on slow clients
+        clients.retain(|client| client.try_send(push.clone()).is_ok());
     }
 
     /// Send a request to the client daemon

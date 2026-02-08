@@ -101,8 +101,8 @@ async fn handle_client(
     state: Arc<ServerState>,
     config: Arc<Config>,
 ) -> Result<()> {
-    // Register this client for push notifications
-    let (push_tx, mut push_rx) = mpsc::unbounded_channel();
+    // Register this client for push notifications (bounded channel with backpressure)
+    let (push_tx, mut push_rx) = mpsc::channel(100);
     state.register_client(push_tx).await;
     
     loop {
