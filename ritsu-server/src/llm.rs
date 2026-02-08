@@ -496,9 +496,8 @@ impl LlmClient {
             .await
             .context("Failed to start streaming chat with LLM provider")?;
 
-        // Clone tool registry and self for post-processing
+        // Clone tool registry for post-processing
         let tool_registry = self.tool_registry.clone();
-        let self_clone = self.clone();
 
         // Spawn a task to forward stream items to the channel and collect tool calls
         tokio::spawn(async move {

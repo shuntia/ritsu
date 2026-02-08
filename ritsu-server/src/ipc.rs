@@ -299,7 +299,7 @@ async fn handle_send_message_streaming(
 
     // Start streaming
     info!("Starting streaming response");
-    let stream_rx_result = llm_client.generate_streaming(&messages, system_prompt.as_deref()).await;
+    let stream_rx_result = llm_client.clone().generate_streaming(&messages, system_prompt.as_deref()).await;
     
     let mut stream_rx = match stream_rx_result {
         Ok(rx) => rx,
