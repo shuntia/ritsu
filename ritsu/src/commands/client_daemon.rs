@@ -80,15 +80,75 @@ pub async fn run() -> Result<()> {
     // Accept GUI/CLI connections
     loop {
         match listener.accept().await {
-            Ok((stream, _)) => {
-                info!("New GUI connection accepted");
+            Ok((mut stream, _)) => {
+                info!("New connection accepted on client socket");
+
+                // Try to read an initial frame quickly to determine whether this is
+                // a GUI client (which sends a ClientRequest immediately) or the
+                // server connecting for server->client requests (may be idle).
+                use std::time::Duration;
+                let initial_frame = match tokio::time::timeout(Duration::from_millis(50), async {
+                    let mut len_buf = [0u8; 4];
+                    // Try read length
+                    if stream.read_exact(&mut len_buf).await.is_err() {
+                        return None;
+                    }
+                    let len = u32::from_be_bytes(len_buf) as usize;
+                    if len > 10_000_000 {
+                        return None;
+                    }
+                    let mut body = vec![0u8; len];
+                    // Give some time to read the body
+                    let _ = tokio::time::timeout(Duration::from_millis(200), stream.read_exact(&mut body)).await;
+                    Some(body)
+                }).await {
+                    Ok(opt) => opt,
+                    Err(_) => None,
+                };
+
                 let server_socket_clone = server_socket.clone();
                 let gui_pushers_clone = gui_pushers.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_gui_connection(stream, &server_socket_clone, gui_pushers_clone).await {
-                        error!("Error handling GUI connection: {}", e);
+
+                // Decide handler based on initial frame content if any
+                if let Some(body) = initial_frame {
+                    // Try parsing as ServerToClientRequest (server connection)
+                    if postcard::from_bytes::<ServerToClientRequest>(&body).is_ok() {
+                        info!("Accepted connection identified as server->client connection");
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_incoming_server_connection(stream, Some(body), gui_pushers_clone).await {
+                                error!("Error handling incoming server connection: {}", e);
+                            }
+                        });
+                        continue;
                     }
-                });
+
+                    // Try parsing as ClientRequest (GUI)
+                    if postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&body).is_ok() {
+                        info!("Accepted connection identified as GUI client (initial request present)");
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_gui_connection_with_initial(stream, &server_socket_clone, gui_pushers_clone, Some(body)).await {
+                                error!("Error handling GUI connection: {}", e);
+                            }
+                        });
+                        continue;
+                    }
+
+                    // Unknown initial payload - default to GUI handler
+                    info!("Accepted connection with unknown initial payload; treating as GUI");
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_gui_connection_with_initial(stream, &server_socket_clone, gui_pushers_clone, Some(body)).await {
+                            error!("Error handling GUI connection: {}", e);
+                        }
+                    });
+                } else {
+                    // No initial data: likely the server connecting (idle). Treat as incoming server connection.
+                    info!("No immediate data on accepted connection; treating as server->client connection");
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_incoming_server_connection(stream, None, gui_pushers_clone).await {
+                            error!("Error handling incoming server connection: {}", e);
+                        }
+                    });
+                }
             }
             Err(e) => {
                 error!("Failed to accept connection: {}", e);
@@ -165,7 +225,60 @@ async fn handle_tool_request(request: ServerToClientRequest, gui_pushers: Arc<Mu
     }
 }
 
-async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
+async fn handle_incoming_server_connection(mut stream: UnixStream, initial_req: Option<Vec<u8>>, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
+    // Process an optional initial request that was read during accept
+    if let Some(body) = initial_req {
+        match postcard::from_bytes::<ServerToClientRequest>(&body) {
+            Ok(req) => {
+                let resp = match handle_tool_request(req, gui_pushers.clone()).await {
+                    Ok(()) => ClientToServerResponse::Success,
+                    Err(e) => ClientToServerResponse::Error { message: e.to_string() },
+                };
+                let resp_bytes = postcard::to_allocvec(&resp)?;
+                let len_bytes = (resp_bytes.len() as u32).to_be_bytes();
+                stream.write_all(&len_bytes).await?;
+                stream.write_all(&resp_bytes).await?;
+                stream.flush().await?;
+            }
+            Err(e) => {
+                // Invalid initial frame; log and continue
+                warn!("Invalid initial frame on server->client conn: {}", e);
+            }
+        }
+    }
+
+    // Continue handling further requests on this connection
+    loop {
+        let mut len_buf = [0u8; 4];
+        if stream.read_exact(&mut len_buf).await.is_err() {
+            debug!("Incoming server connection closed");
+            return Ok(());
+        }
+
+        let len = u32::from_be_bytes(len_buf) as usize;
+        if len > 10_000_000 {
+            warn!("Incoming server request too large: {}", len);
+            return Ok(());
+        }
+
+        let mut buf = vec![0u8; len];
+        stream.read_exact(&mut buf).await?;
+
+        let req: ServerToClientRequest = postcard::from_bytes(&buf)?;
+        let resp = match handle_tool_request(req, gui_pushers.clone()).await {
+            Ok(()) => ClientToServerResponse::Success,
+            Err(e) => ClientToServerResponse::Error { message: e.to_string() },
+        };
+
+        let resp_bytes = postcard::to_allocvec(&resp)?;
+        let len_bytes = (resp_bytes.len() as u32).to_be_bytes();
+        stream.write_all(&len_bytes).await?;
+        stream.write_all(&resp_bytes).await?;
+        stream.flush().await?;
+    }
+}
+
+async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socket: &str, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>, initial_req: Option<Vec<u8>>) -> Result<()> {
     info!("Handling new GUI connection, connecting to server...");
     let mut server_stream = connect_to_server(server_socket).await?;
     info!("Connected to server, starting proxy loop");
@@ -197,6 +310,70 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str, gui_
         }
         debug!("GUI writer task exiting");
     });
+
+    // If an initial request was already read from socket, process it first
+    if let Some(initial) = initial_req {
+        info!("Processing initial GUI request read during accept");
+        let is_send_message = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&initial)
+            .is_ok_and(|req| matches!(req, ritsu_common::protocol::ClientRequest::SendMessage { .. }));
+
+        // Proxy initial request to server
+        let len_bytes = (initial.len() as u32).to_be_bytes();
+        server_stream.write_all(&len_bytes).await?;
+        server_stream.write_all(&initial).await?;
+        server_stream.flush().await?;
+
+        if is_send_message {
+            // Forward streaming responses for this initial SendMessage
+            info!("Proxying streaming responses for initial SendMessage...");
+            loop {
+                let mut len_buf = [0u8; 4];
+                if server_stream.read_exact(&mut len_buf).await.is_err() {
+                    error!("Server disconnected during streaming");
+                    break;
+                }
+                let len = u32::from_be_bytes(len_buf) as usize;
+                let mut buf = vec![0u8; len];
+                server_stream.read_exact(&mut buf).await?;
+
+                if push_tx.send(buf.clone()).await.is_err() {
+                    error!("Failed to forward push to GUI writer (channel closed)");
+                    break;
+                }
+
+                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) =
+                    postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
+                {
+                    info!("Final chunk received for initial request, streaming complete");
+                    // Try to forward final ServerResponse if any
+                    use std::time::Duration;
+                    let mut resp_len_buf = [0u8; 4];
+                    if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_len_buf)).await.is_ok() {
+                        let resp_len = u32::from_be_bytes(resp_len_buf) as usize;
+                        if resp_len <= 10_000_000 {
+                            let mut resp_data = vec![0u8; resp_len];
+                            if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_data)).await.is_ok() {
+                                if push_tx.send(resp_data).await.is_ok() {
+                                    info!("Forwarded final ServerResponse to GUI for initial request");
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        } else {
+            // Wait for server response and forward
+            let mut len_buf = [0u8; 4];
+            server_stream.read_exact(&mut len_buf).await?;
+            let len = u32::from_be_bytes(len_buf) as usize;
+            let mut buf = vec![0u8; len];
+            server_stream.read_exact(&mut buf).await?;
+            if push_tx.send(buf).await.is_err() {
+                error!("Failed to forward server response to GUI (channel closed)");
+            }
+        }
+    }
 
     loop {
         // Read request from GUI (using big-endian to match IpcClient)
@@ -409,29 +586,32 @@ async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) 
         return Ok(());
     }
 
-    // Send the push to each connected GUI asynchronously; remove closed senders
-    let mut any_sent = false;
-    for sender in senders.into_iter() {
+    // Prefer a single GUI client: try the most recently registered pusher (LIFO).
+    let mut guard = gui_pushers.lock().await;
+    while let Some(sender) = guard.pop() {
         match sender.clone().send(body.clone()).await {
             Ok(_) => {
-                any_sent = true;
+                info!("Focus push accepted by one GUI client");
+                return Ok(());
             }
             Err(e) => {
-                warn!("Failed to send focus push to GUI: {}", e);
+                warn!("Failed to send focus push to GUI (removing pusher): {}", e);
+                // try previous pusher
+                continue;
             }
         }
     }
 
-    if !any_sent {
-        warn!("No GUI accepted focus push; falling back to launch/xdotool");
-        #[cfg(target_os = "linux")]
-        {
-            let _ = handle_open_chat(None, None).await;
-        }
+    // No GUI accepted the push; fallback to launching/xdotool
+    warn!("No GUI accepted focus push; falling back to launch/xdotool");
+    #[cfg(target_os = "linux")]
+    {
+        let _ = handle_open_chat(None, None).await;
     }
 
     Ok(())
 }
+
 
 pub async fn stop() -> Result<()> {
     println!("Stopping client daemon...");
