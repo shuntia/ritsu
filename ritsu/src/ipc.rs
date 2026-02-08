@@ -136,15 +136,15 @@ impl IpcClient {
                     
                     if is_final {
                         // After the final push, attempt to read the server's final ServerResponse (if any)
-                        // This prevents the server from getting a Broken pipe when it writes the response.
+                        // Use a short timeout to avoid blocking indefinitely if the server doesn't send one.
+                        use std::time::Duration;
                         let mut resp_len_buf = [0u8; 4];
-                        if stream.read_exact(&mut resp_len_buf).await.is_ok() {
+                        if tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut resp_len_buf)).await.is_ok() {
                             let resp_len = u32::from_be_bytes(resp_len_buf) as usize;
                             let mut resp_data = vec![0u8; resp_len];
-                            // Try to read and parse the ServerResponse; ignore errors
-                            if stream.read_exact(&mut resp_data).await.is_ok() {
-                                let _ = postcard::from_bytes::<ServerResponse>(&resp_data);
-                            }
+                            // Try to read and parse the ServerResponse; ignore errors/timeouts
+                            let _ = tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut resp_data)).await;
+                            let _ = postcard::from_bytes::<ServerResponse>(&resp_data);
                         }
                         break;
                     }

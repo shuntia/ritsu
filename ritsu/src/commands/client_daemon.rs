@@ -214,10 +214,34 @@ async fn handle_gui_connection(mut stream: UnixStream, server_socket: &str) -> R
                 stream.flush().await?;
 
                 // Check if this is the final chunk
-                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) = 
+                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) =
                     postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
                 {
                     info!("Final chunk received, streaming complete");
+
+                    // Attempt to read and forward a final ServerResponse (if present) with a short timeout
+                    {
+                        use std::time::Duration;
+                        let mut resp_len_buf = [0u8; 4];
+                        if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_len_buf)).await.is_ok() {
+                            let resp_len = u32::from_be_bytes(resp_len_buf) as usize;
+                            if resp_len <= 10_000_000 {
+                                let mut resp_data = vec![0u8; resp_len];
+                                if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_data)).await.is_ok() {
+                                    // Forward to GUI
+                                    let resp_len_bytes = (resp_data.len() as u32).to_be_bytes();
+                                    if stream.write_all(&resp_len_bytes).await.is_ok() {
+                                        let _ = stream.write_all(&resp_data).await;
+                                        let _ = stream.flush().await;
+                                    }
+                                    info!("Forwarded final ServerResponse to GUI");
+                                }
+                            }
+                        } else {
+                            info!("No final ServerResponse or timed out after final chunk");
+                        }
+                    }
+
                     break;
                 }
             }

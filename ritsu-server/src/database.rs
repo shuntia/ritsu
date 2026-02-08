@@ -340,7 +340,7 @@ mod tests {
                     |row| row.get(0),
                 )
             }).await;
-            assert!(result.unwrap() > 0, "Table '{}' should exist", table);
+            assert!(result.unwrap() > 0, "Table '{table}' should exist");
         }
         
         // Cleanup

@@ -216,12 +216,25 @@ async fn handle_send_message_streaming(
     let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
     let session = conversation_manager.get_or_create_session(&session_id).await?;
 
-    // Store user message
+    // Store user message (fatal on failure)
     if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None, None).await {
-        warn!("Failed to store user turn: {}", e);
+        error!("Failed to store user turn: {}", e);
+        let push = ServerPush::MessageChunk {
+            content: format!("❌ Failed to store user message: {}\n", e),
+            is_final: true,
+        };
+        // Inform client and stop processing
+        send_push(stream, push).await?;
+        return Ok(());
     }
     if let Err(e) = memory.store_conversation("user", &content).await {
-        warn!("Failed to store in conversations: {}", e);
+        error!("Failed to store in conversations: {}", e);
+        let push = ServerPush::MessageChunk {
+            content: format!("❌ Failed to store message in memory: {}\n", e),
+            is_final: true,
+        };
+        send_push(stream, push).await?;
+        return Ok(());
     }
 
     // Get chat-specific system prompt
@@ -341,7 +354,8 @@ async fn handle_send_message_streaming(
                         is_final: true,
                     };
                     send_push(stream, push).await?;
-                    return Err(e.context(format!("Fallback also failed: {}", fallback_error)));
+                    // We've informed the client via push; return Ok to avoid duplicate ServerResponse writes
+                    return Ok(());
                 }
             }
         }
@@ -377,7 +391,8 @@ async fn handle_send_message_streaming(
                     is_final: true,
                 };
                 send_push(stream, push).await?;
-                return Err(e);
+                // Don't propagate error to caller; we've already informed the client
+                return Ok(());
             }
         }
     }
@@ -390,11 +405,6 @@ async fn handle_send_message_streaming(
         is_final: true,
     };
     send_push(stream, push).await?;
-
-    // Also send a final ServerResponse::Ok immediately after the final push so the client receives a response before
-    // any potentially long-running post-processing (e.g., title generation). This prevents Broken pipe errors if the
-    // client closes the connection after the final push.
-    send_response(stream, ServerResponse::Ok).await?;
 
     info!("Streaming complete: {} chunks received, {} bytes total", chunk_count, full_response.len());
 

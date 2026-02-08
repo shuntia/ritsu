@@ -112,55 +112,58 @@ impl ServerState {
     /// Send a request to the client daemon
     ///
     /// Prefers a long-lived background connection maintained by
-    /// start_client_daemon_reconnector(). If no persistent connection
+    /// `start_client_daemon_reconnector()`. If no persistent connection
     /// is available, falls back to a short per-request connect with a
     /// short timeout.
     pub async fn send_to_client_daemon(&self, request: ServerToClientRequest) -> anyhow::Result<()> {
-        // Try to use an existing persistent connection if present
+        // Attempt to use an existing persistent connection if present. Take the stream out of the mutex
+        // temporarily to avoid holding the lock across I/O; reinsert it after I/O completes.
         {
             let mut guard = self.client_daemon.lock().await;
-            if let Some(stream) = guard.as_mut() {
-                // Serialize and send request
+            if guard.is_some() {
+                // Take ownership of the stream and drop the lock while we talk to it
+                let mut stream = guard.take().unwrap();
+                drop(guard);
+
+                // Serialize request
                 let request_bytes = postcard::to_allocvec(&request)?;
                 let len_bytes = (request_bytes.len() as u32).to_be_bytes();
 
-                if let Err(e) = stream.write_all(&len_bytes).await {
-                    error!("Failed to send to client daemon (persistent): {}", e);
-                    // Drop persistent connection on error
-                    *guard = None;
-                    return Err(anyhow::anyhow!("Failed to send to client daemon"));
+                let write_timeout = std::time::Duration::from_secs(5);
+                // Write with timeout to avoid blocking forever
+                if let Err(_) = tokio::time::timeout(write_timeout, stream.write_all(&len_bytes)).await {
+                    warn!("Timeout writing to client daemon (persistent)");
+                    // Do not reinsert the stream; let the reconnector re-establish
+                    return Err(anyhow::anyhow!("Failed to send to client daemon (timeout)"));
                 }
-
                 if let Err(e) = stream.write_all(&request_bytes).await {
                     error!("Failed to send to client daemon (persistent): {}", e);
-                    *guard = None;
                     return Err(anyhow::anyhow!("Failed to send to client daemon"));
                 }
-
-                if let Err(e) = stream.flush().await {
-                    error!("Failed to flush to client daemon (persistent): {}", e);
-                    *guard = None;
+                if let Err(_) = tokio::time::timeout(write_timeout, stream.flush()).await {
+                    warn!("Timeout flushing to client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to flush to client daemon"));
                 }
 
-                // Read response
+                // Read response with timeout
+                let read_timeout = std::time::Duration::from_secs(5);
                 let mut len_buf = [0u8; 4];
-                if let Err(e) = stream.read_exact(&mut len_buf).await {
-                    error!("Failed to read response from client daemon (persistent): {}", e);
-                    *guard = None;
+                if let Err(_) = tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await {
+                    warn!("Timeout reading response from client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to read response"));
                 }
-
                 let len = u32::from_be_bytes(len_buf) as usize;
                 let mut buf = vec![0u8; len];
-
-                if let Err(e) = stream.read_exact(&mut buf).await {
-                    error!("Failed to read response from client daemon (persistent): {}", e);
-                    *guard = None;
+                if let Err(_) = tokio::time::timeout(read_timeout, stream.read_exact(&mut buf)).await {
+                    warn!("Timeout reading response from client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to read response"));
                 }
 
                 let response: ClientToServerResponse = postcard::from_bytes(&buf)?;
+
+                // Reinsert the stream for persistent use
+                let mut guard = self.client_daemon.lock().await;
+                *guard = Some(stream);
 
                 return match response {
                     ClientToServerResponse::Success => Ok(()),

@@ -342,44 +342,52 @@ impl ConversationManager {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+    use tokio_rusqlite::Connection;
 
-    fn create_test_db() -> Arc<tokio_rusqlite::Connection> {
-        let conn = Connection::open_in_memory().unwrap();
+
+    async fn create_test_db() -> Arc<tokio_rusqlite::Connection> {
+        let conn = Connection::open_in_memory().await.unwrap();
         
         // Create minimal schema for testing
-        conn.execute(
-            "CREATE TABLE conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT UNIQUE NOT NULL,
-                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                turn_count INTEGER DEFAULT 0,
-                metadata TEXT
-            )",
-            [],
-        ).unwrap();
+        conn.call(|conn| -> rusqlite::Result<()> {
+            conn.execute(
+                "CREATE TABLE conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT UNIQUE NOT NULL,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    turn_count INTEGER DEFAULT 0,
+                    metadata TEXT
+                )",
+                [],
+            )?;
+            Ok(())
+        }).await.unwrap();
         
-        conn.execute(
-            "CREATE TABLE conversation_turns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                turn_number INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                tool_calls TEXT,
-                tool_results TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES conversations(session_id) ON DELETE CASCADE
-            )",
-            [],
-        ).unwrap();
+        conn.call(|conn| -> rusqlite::Result<()> {
+            conn.execute(
+                "CREATE TABLE conversation_turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    turn_number INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tool_calls TEXT,
+                    tool_results TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES conversations(session_id) ON DELETE CASCADE
+                )",
+                [],
+            )?;
+            Ok(())
+        }).await.unwrap();
         
-        Arc::new(Mutex::new(conn))
+        Arc::new(conn)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_session() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = ConversationManager::new(db);
         
         let session = manager.get_or_create_session("test_session").await.unwrap();
@@ -389,7 +397,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_add_turn() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = ConversationManager::new(db);
         
         let _session = manager.get_or_create_session("test_session").await.unwrap();
@@ -408,7 +416,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_get_history() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = ConversationManager::new(db);
         
         let _session = manager.get_or_create_session("test_session").await.unwrap();

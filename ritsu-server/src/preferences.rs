@@ -202,31 +202,35 @@ impl PreferencesManager {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+    use tokio_rusqlite::Connection;
+    
+    async fn create_test_db() -> Arc<tokio_rusqlite::Connection> {
+        let conn = Connection::open_in_memory().await.unwrap();
 
-    fn create_test_db() -> Arc<Mutex<Connection>> {
-        let conn = Connection::open_in_memory().unwrap();
-        
-        conn.execute(
-            "CREATE TABLE preferences (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                category TEXT NOT NULL,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                confidence REAL DEFAULT 1.0,
-                source TEXT,
-                extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(category, key)
-            )",
-            [],
-        ).unwrap();
-        
-        Arc::new(Mutex::new(conn))
+        conn.call(|conn| -> rusqlite::Result<()> {
+            conn.execute(
+                "CREATE TABLE preferences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    confidence REAL DEFAULT 1.0,
+                    source TEXT,
+                    extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(category, key)
+                )",
+                [],
+            )?;
+            Ok(())
+        }).await.unwrap();
+
+        Arc::new(conn)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_set_and_get_preference() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("schedule", "wake_time", "7:00AM", 0.9, Some("user")).await.unwrap();
@@ -243,7 +247,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_get_category() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("schedule", "wake_time", "7:00AM", 1.0, None).await.unwrap();
@@ -256,7 +260,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_format_for_prompt() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("schedule", "wake_time", "7:00AM", 1.0, None).await.unwrap();
@@ -270,7 +274,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_remove_preference() {
-        let db = create_test_db();
+        let db = create_test_db().await;
         let manager = PreferencesManager::new(db);
         
         manager.set_preference("test", "key", "value", 1.0, None).await.unwrap();
