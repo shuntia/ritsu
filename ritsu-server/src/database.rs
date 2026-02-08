@@ -6,6 +6,11 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
+/// Helper to convert tokio_rusqlite errors to anyhow
+fn convert_db_result<T>(res: std::result::Result<T, tokio_rusqlite::Error<rusqlite::Error>>) -> Result<T> {
+    res.map_err(|e| anyhow::anyhow!("{:?}", e))
+}
+
 pub struct Database {
     pub connection: Arc<tokio_rusqlite::Connection>,
 }
@@ -26,9 +31,9 @@ impl Database {
             .context("Failed to open database")?;
         
         // Initialize schema
-        conn.call(|conn| {
+        convert_db_result(conn.call(|conn| {
             Self::initialize_schema_sync(conn)
-        }).await?;
+        }).await)?;
         
         let db = Self { connection: Arc::new(conn) };
         Ok(db)
@@ -36,7 +41,7 @@ impl Database {
 
     /// Initialize or migrate database schema
     #[allow(clippy::too_many_lines)]
-    fn initialize_schema_sync(conn: &Connection) -> Result<()> {
+    fn initialize_schema_sync(conn: &Connection) -> rusqlite::Result<()> {
         info!("Initializing database schema");
 
         // Enable foreign keys

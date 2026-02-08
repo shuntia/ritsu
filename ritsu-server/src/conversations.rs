@@ -40,7 +40,7 @@ impl ConversationManager {
     pub async fn get_or_create_session(&self, session_id: &str) -> Result<ConversationSession> {
         let session_id = session_id.to_string();
         
-        self.db.call(move |conn| {
+        self.db.call(move |conn| -> rusqlite::Result<ConversationSession> {
             // Try to get existing session
             let mut stmt = conn.prepare(
                 "SELECT session_id, turn_count, started_at, last_activity, title 
@@ -79,7 +79,7 @@ impl ConversationManager {
                     title: None,
                 })
             }
-        }).await
+        }).await.map_err(Into::into)
     }
 
     /// Add a turn to the conversation

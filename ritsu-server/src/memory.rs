@@ -43,7 +43,7 @@ impl MemoryManager {
         let tags_json = serde_json::to_string(tags)?;
         let content = content.to_string();
         
-        let id = self.conn.call(move |conn| {
+        let id = self.conn.call(move |conn| -> rusqlite::Result<i64> {
             conn.execute(
                 "INSERT INTO notes (content, tags) VALUES (?1, ?2)",
                 (&content, &tags_json),
@@ -91,7 +91,7 @@ impl MemoryManager {
                     [&prev_str],
                     |row| row.get::<_, String>(0),
                 ).ok()
-            }).await
+            }).await?
         } else {
             None
         };
@@ -194,7 +194,7 @@ impl MemoryManager {
                 [&year_month_str],
                 |row| row.get::<_, String>(0),
             ).ok()
-        }).await;
+        }).await?;
 
         // Generate monthly summary with LLM (no lock held)
         let summaries_text = summaries.iter()
@@ -299,7 +299,8 @@ impl MemoryManager {
 
             info!("Stored {prompt_type} system prompt (version {version})");
             Ok(())
-        }).await
+        }).await?;
+        Ok(())
     }
 
     /// Get the active system prompt of a specific type
@@ -474,7 +475,7 @@ impl MemoryManager {
 
             let results: Vec<(String, String, String)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Query daily summaries
@@ -497,7 +498,7 @@ impl MemoryManager {
 
             let results: Vec<(String, String)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Query monthly summaries
@@ -514,7 +515,7 @@ impl MemoryManager {
 
             let results: Vec<(String, String, i32)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Get daily summary for a specific date
@@ -527,7 +528,7 @@ impl MemoryManager {
                 |row| row.get::<_, String>(0),
             ).ok();
             Ok(result)
-        }).await
+        }).await?
     }
 
     /// Query notes
@@ -544,7 +545,7 @@ impl MemoryManager {
 
             let results: Vec<(i64, String, String)> = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Get recent conversations (last N days)
@@ -564,7 +565,7 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Get recent summaries (daily or monthly)
@@ -585,7 +586,7 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Get tool usage statistics
@@ -614,7 +615,7 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Get recent tool usage
@@ -639,7 +640,7 @@ impl MemoryManager {
 
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
-        }).await
+        }).await?
     }
 
     /// Get tool effectiveness summary
@@ -732,7 +733,7 @@ impl MemoryManager {
                  Tasks: {tasks}\n\
                  Triggers: {triggers}"
             ))
-        }).await
+        }).await?
     }
 
     /// Export database to JSON
@@ -772,7 +773,7 @@ impl MemoryManager {
                 last_monthly.unwrap_or_else(|| "None".to_string()),
                 oldest_conv.unwrap_or_else(|| "None".to_string()),
             ))
-        }).await
+        }).await?
     }
 
     /// Force memory compaction

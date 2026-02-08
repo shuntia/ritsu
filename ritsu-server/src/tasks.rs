@@ -100,7 +100,7 @@ impl TaskManager {
 
             info!("Updated task #{} status to {}", id, status_str);
             Ok(())
-        }).await
+        }).await?
     }
 
     /// Update task priority
@@ -122,7 +122,7 @@ impl TaskManager {
 
             info!("Updated task #{} priority to {}", id, priority_str);
             Ok(())
-        }).await
+        }).await?
     }
 
     /// Delete a task
@@ -139,7 +139,7 @@ impl TaskManager {
             } else {
                 Err(anyhow::anyhow!("Task with id {} not found", id).into())
             }
-        }).await
+        }).await?
     }
 
     /// List tasks with optional filters
@@ -206,7 +206,7 @@ impl TaskManager {
                 .collect();
 
             Ok(tasks)
-        }).await
+        }).await?
     }
 
     /// Get task summary statistics for AI context
@@ -260,7 +260,7 @@ impl TaskManager {
             }
             
             Ok(summary)
-        }).await
+        }).await?
     }
 
     /// Get detailed list of active tasks for AI context
