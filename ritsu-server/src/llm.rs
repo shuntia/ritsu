@@ -568,33 +568,52 @@ impl LlmClient {
                 }
             }
 
-            // If tool calls were collected, execute them now (sequentially) and stream results back
+            // If tool calls were collected, execute them now using a bounded worker pool with per-tool timeouts
             if !collected_calls.is_empty() {
                 tracing::info!("Executing {} collected tool call(s) after stream completion", collected_calls.len());
 
-                for call in collected_calls.into_iter() {
-                    // Execute each collected tool and stream its result regardless of tool type
-                    match tool_registry.execute(&call.name, call.arguments.clone()).await {
-                        Ok(res) => {
-                            let result_text = if res.success {
-                                res.output.clone()
-                            } else {
-                                res.error.clone().unwrap_or_else(|| res.output.clone())
-                            };
+                // Bounded concurrency for tool execution to avoid resource exhaustion
+                let max_concurrent_tools = 4usize;
+                let tool_timeout = std::time::Duration::from_secs(30);
+                let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent_tools));
 
-                            let msg = format!("\n\n🔧 Tool '{}' result:\n{}\n", call.name, result_text);
-                            if tx.send(Ok(msg)).await.is_err() {
-                                break;
+                // Spawn each tool execution into its own task, limited by the semaphore
+                let mut handles = Vec::new();
+                for call in collected_calls.into_iter() {
+                    let permit_sem = semaphore.clone();
+                    let tool_registry = tool_registry.clone();
+                    let tx_clone = tx.clone();
+                    let call_name = call.name.clone();
+                    let call_args = call.arguments.clone();
+
+                    let handle = tokio::spawn(async move {
+                        // Acquire a permit (await inside spawned task so we don't block the outer task)
+                        let _permit = permit_sem.acquire_owned().await.expect("semaphore closed");
+
+                        // Execute with timeout to prevent a single tool from blocking forever
+                        match tokio::time::timeout(tool_timeout, tool_registry.execute(&call_name, call_args.clone())).await {
+                            Ok(Ok(res)) => {
+                                let result_text = if res.success { res.output.clone() } else { res.error.clone().unwrap_or_else(|| res.output.clone()) };
+                                let msg = format!("\n\n🔧 Tool '{}' result:\n{}\n", call_name, result_text);
+                                let _ = tx_clone.send(Ok(msg)).await;
+                            }
+                            Ok(Err(e)) => {
+                                let msg = format!("\n\n🔧 Tool '{}' execution failed: {}\n", call_name, e);
+                                let _ = tx_clone.send(Ok(msg)).await;
+                            }
+                            Err(_) => {
+                                let msg = format!("\n\n🔧 Tool '{}' execution timed out after {}s\n", call_name, tool_timeout.as_secs());
+                                let _ = tx_clone.send(Ok(msg)).await;
                             }
                         }
-                        Err(e) => {
-                            let msg = format!("\n\n🔧 Tool '{}' execution failed: {}\n", call.name, e);
-                            if tx.send(Ok(msg)).await.is_err() {
-                                break;
-                            }
-                        }
-                    }
+                        // _permit dropped here
+                    });
+
+                    handles.push(handle);
                 }
+
+                // Wait for all spawned tool tasks to finish and then close the sender
+                let _ = futures::future::join_all(handles).await;
             }
 
             // Drop the sender to close the channel
