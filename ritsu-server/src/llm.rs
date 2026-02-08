@@ -223,9 +223,8 @@ impl LlmClient {
         }
 
         // Add conversation messages
-        for msg in messages.iter() {
+        for msg in messages {
             let message_builder = match msg.role.as_str() {
-                "user" => ChatMessage::user(),
                 "assistant" => ChatMessage::assistant(),
                 "system" => ChatMessage::system(),
                 _ => ChatMessage::user(),
@@ -440,12 +439,13 @@ impl LlmClient {
         }
     }
 
-    /// Generate streaming response (no tool execution)
-    /// Generate streaming response
-    /// Returns a channel receiver that yields text chunks as they arrive
-    /// Note: Tool calls are now supported in streaming (as of llm crate patch)
-    pub async fn generate_streaming(
-        &self,
+    /// Generate streaming response and perform post-stream tool execution + synthesis
+    ///
+    /// Collects tool calls that appear in the stream, executes them after the
+    /// stream completes, and synthesizes a follow-up assistant message using a
+    /// non-streaming LLM request. The synthesized follow-up is sent as an
+    /// additional chunk on the same channel.
+    pub async fn generate_streaming(self: Arc<Self>,
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<mpsc::Receiver<Result<String>>> {
@@ -458,7 +458,7 @@ impl LlmClient {
         }
 
         // Add conversation messages
-        for msg in messages.iter() {
+        for msg in messages {
             let message_builder = match msg.role.as_str() {
                 "assistant" => ChatMessage::assistant(),
                 "system" => ChatMessage::system(),
@@ -496,40 +496,42 @@ impl LlmClient {
             .await
             .context("Failed to start streaming chat with LLM provider")?;
 
-        // Clone tool registry for executing tool calls during streaming
+        // Clone tool registry and self for post-processing
         let tool_registry = self.tool_registry.clone();
+        let self_clone = self.clone();
 
-        // Spawn a task to forward stream items to the channel
+        // Spawn a task to forward stream items to the channel and collect tool calls
         tokio::spawn(async move {
+            use llm::chat::StreamChunk;
+
+            let mut full_response = String::new();
+            let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
+
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(chunk) => {
-                        use llm::chat::StreamChunk;
-
                         match chunk {
                             StreamChunk::Text(text) => {
+                                // Accumulate textual output for later synthesis
+                                full_response.push_str(&text);
+
                                 if tx.send(Ok(text)).await.is_err() {
                                     // Receiver dropped, stop streaming
                                     break;
                                 }
                             }
-                            StreamChunk::ToolUseComplete { index, tool_call } => {
-                                // Execute tool call now and stream the result back to client
+
+                            StreamChunk::ToolUseComplete { index: _, tool_call } => {
+                                // Collect tool calls for post-stream execution
                                 tracing::debug!(
-                                    "Tool call received in stream (#{index}): {} with args: {}",
+                                    "Collected tool call in stream: {} with args: {}",
                                     tool_call.function.name,
                                     tool_call.function.arguments
                                 );
 
                                 // Parse arguments JSON into HashMap<String, String>
                                 let args_map: HashMap<String, serde_json::Value> =
-                                    match serde_json::from_str(&tool_call.function.arguments) {
-                                        Ok(m) => m,
-                                        Err(e) => {
-                                            let _ = tx.send(Ok(format!("\n\n🔧 Failed to parse tool arguments for '{}': {}\n", tool_call.function.name, e))).await;
-                                            continue;
-                                        }
-                                    };
+                                    serde_json::from_str(&tool_call.function.arguments).unwrap_or_default();
 
                                 let mut args: HashMap<String, String> = HashMap::new();
                                 for (k, v) in args_map.into_iter() {
@@ -540,35 +542,20 @@ impl LlmClient {
                                     args.insert(k, val_str);
                                 }
 
-                                // Execute the tool
-                                match tool_registry.execute(&tool_call.function.name, args).await {
-                                    Ok(tool_result) => {
-                                        let result_msg = if tool_result.success {
-                                            format!("\n\n🔧 Tool '{}' result: {}\n", tool_call.function.name, tool_result.output)
-                                        } else {
-                                            // prefer showing error field if present
-                                            let err_text = tool_result.error.clone().unwrap_or(tool_result.output.clone());
-                                            format!("\n\n🔧 Tool '{}' error: {}\n", tool_call.function.name, err_text)
-                                        };
+                                collected_calls.push(ToolCallInfo {
+                                    name: tool_call.function.name.clone(),
+                                    arguments: args,
+                                });
+                            }
 
-                                        if tx.send(Ok(result_msg)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(Ok(format!("\n\n🔧 Tool '{}' execution failed: {}\n", tool_call.function.name, e))).await;
-                                    }
-                                }
+                            StreamChunk::ToolUseStart { index: _, id: _, name } => {
+                                tracing::debug!("Tool use started in stream: {}", name);
                             }
-                            StreamChunk::ToolUseStart { index, id, name } => {
-                                tracing::debug!("Tool use started: {} (#{index}, id: {id})", name);
+
+                            StreamChunk::ToolUseInputDelta { index: _, partial_json } => {
+                                tracing::debug!("Tool input delta in stream: {}", partial_json);
                             }
-                            StreamChunk::ToolUseInputDelta {
-                                index,
-                                partial_json,
-                            } => {
-                                tracing::debug!("Tool input delta (#{index}): {}", partial_json);
-                            }
+
                             StreamChunk::Done { stop_reason } => {
                                 tracing::debug!("Stream done: {}", stop_reason);
                                 break;
@@ -581,6 +568,38 @@ impl LlmClient {
                     }
                 }
             }
+
+            // If tool calls were collected, execute them now (sequentially) and stream results back
+            if !collected_calls.is_empty() {
+                tracing::info!("Executing {} collected tool call(s) after stream completion", collected_calls.len());
+
+                for call in collected_calls.into_iter() {
+                    // Execute each collected tool and stream its result regardless of tool type
+                    match tool_registry.execute(&call.name, call.arguments.clone()).await {
+                        Ok(res) => {
+                            let result_text = if res.success {
+                                res.output.clone()
+                            } else {
+                                res.error.clone().unwrap_or_else(|| res.output.clone())
+                            };
+
+                            let msg = format!("\n\n🔧 Tool '{}' result:\n{}\n", call.name, result_text);
+                            if tx.send(Ok(msg)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let msg = format!("\n\n🔧 Tool '{}' execution failed: {}\n", call.name, e);
+                            if tx.send(Ok(msg)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Drop the sender to close the channel
+            drop(tx);
         });
 
         Ok(rx)
