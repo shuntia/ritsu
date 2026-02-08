@@ -488,9 +488,17 @@ impl LlmClient {
         let (tx, rx) = mpsc::channel(32);
 
         // Get tools in llm crate format
-        let tools = self.get_llm_tools().await;
+        let mut tools = self.get_llm_tools().await;
         let tool_count = tools.len();
         debug!("Streaming with {} tools available", tool_count);
+
+        // Limit tools sent during streaming to avoid very large payloads that can
+        // slow down or break streaming in some LLM servers (e.g., Ollama).
+        const STREAM_TOOL_LIMIT: usize = 10;
+        if tool_count > STREAM_TOOL_LIMIT {
+            debug!("Tool count {} exceeds streaming threshold; limiting to first {} tools", tool_count, STREAM_TOOL_LIMIT);
+            tools.truncate(STREAM_TOOL_LIMIT);
+        }
 
         // Get the provider's streaming response with tools
         let mut stream = self
