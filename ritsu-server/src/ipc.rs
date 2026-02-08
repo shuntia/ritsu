@@ -279,8 +279,23 @@ async fn handle_send_message_streaming(
     // Check if streaming is disabled in config
     if disable_streaming {
         info!("Streaming disabled in config, using non-streaming mode (tools: {})", !disable_tools);
-        match llm_client.generate_with_tools(&messages, system_prompt.as_deref(), !disable_tools).await {
+
+        // For non-streaming mode, if tools are enabled, run the tool execution loop which will
+        // call tools and synthesize a follow-up response. Otherwise, just do a simple request.
+        let response_result = if !disable_tools {
+            // Run up to 3 iterations of tool execution
+            llm_client.generate_with_tool_execution(&messages, system_prompt.as_deref(), 3).await
+        } else {
+            llm_client.generate_with_tools(&messages, system_prompt.as_deref(), false).await
+        };
+
+        match response_result {
             Ok(response) => {
+                debug!("Non-streaming response ready (tool_calls: {})", response.tool_calls.len());
+                if !response.tool_calls.is_empty() {
+                    debug!(tool_calls = ?response.tool_calls.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "Tool calls executed in non-streaming flow");
+                }
+
                 info!("Non-streaming request succeeded");
                 let push = ServerPush::MessageChunk {
                     content: response.content.clone(),
@@ -318,46 +333,13 @@ async fn handle_send_message_streaming(
         Ok(rx) => rx,
         Err(e) => {
             error!("Failed to start streaming: {}", e);
-            
-            // Fallback: Try non-streaming request
-            warn!("Attempting fallback to non-streaming request...");
+            // Send error as a message chunk so GUI knows what happened
             let push = ServerPush::MessageChunk {
-                content: "⚠️ Streaming failed, trying non-streaming mode...\n\n".to_string(),
-                is_final: false,
+                content: format!("❌ Failed to connect to LLM: {}\n\nPlease check that Ollama is running and the model is available.", e),
+                is_final: true,
             };
             send_push(stream, push).await?;
-            
-            match llm_client.generate_with_tools(&messages, system_prompt.as_deref(), !disable_tools).await {
-                Ok(response) => {
-                    info!("Non-streaming fallback succeeded");
-                    let push = ServerPush::MessageChunk {
-                        content: response.content.clone(),
-                        is_final: true,
-                    };
-                    send_push(stream, push).await?;
-                    
-                    // Store the response
-                    let full_response = format!("⚠️ Streaming failed, trying non-streaming mode...\n\n{}", response.content);
-                    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None, None).await {
-                        warn!("Failed to store assistant turn: {}", e);
-                    }
-                    if let Err(e) = memory.store_conversation("assistant", &full_response).await {
-                        warn!("Failed to store assistant response: {}", e);
-                    }
-                    
-                    return Ok(());
-                }
-                Err(fallback_error) => {
-                    error!("Non-streaming fallback also failed: {}", fallback_error);
-                    let push = ServerPush::MessageChunk {
-                        content: format!("❌ Both streaming and non-streaming failed.\n\nStreaming error: {}\nFallback error: {}\n\nPlease check that Ollama is running and the model is available.", e, fallback_error),
-                        is_final: true,
-                    };
-                    send_push(stream, push).await?;
-                    // We've informed the client via push; return Ok to avoid duplicate ServerResponse writes
-                    return Ok(());
-                }
-            }
+            return Err(e);
         }
     };
 
