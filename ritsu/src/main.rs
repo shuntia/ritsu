@@ -103,6 +103,9 @@ enum Commands {
         noconfirm: bool,
     },
     
+    /// Write example client configuration file
+    WriteExampleConfig,
+    
     /// Developer tools and inspection commands (hidden)
     #[command(subcommand, hide = true)]
     Dev(DevCommands),
@@ -308,6 +311,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::WriteExampleConfig => {
+            let config_path = config::ClientConfig::config_file_path();
+            config::ClientConfig::write_example(&config_path)?;
+            Ok(())
+        }
         Commands::Chat => {
             println!("Starting Ritsu GUI...");
             // Run GUI - it creates its own runtime
@@ -339,7 +347,7 @@ fn main() -> Result<()> {
                     Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
                     Commands::ClearMemory { noconfirm } => commands::memory::clear_memory(noconfirm).await?,
                     Commands::Dev(cmd) => commands::dev::handle(cmd).await?,
-                    Commands::Chat => unreachable!(),
+                    Commands::Chat | Commands::WriteExampleConfig => unreachable!(),
                 }
                 Ok(())
             })

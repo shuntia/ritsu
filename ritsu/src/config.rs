@@ -227,12 +227,7 @@ impl ClientConfig {
     /// Load configuration from file or use defaults
     pub fn load() -> Result<Self> {
         let config_path = Self::config_file_path();
-        
-        if config_path.exists() {
-            Self::load_from_path(&config_path)
-        } else {
-            Ok(Self::default())
-        }
+        Self::load_from_path(&config_path)
     }
     
     /// Load configuration from specific path
@@ -242,8 +237,16 @@ impl ClientConfig {
                 .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+            eprintln!("✓ Loaded client configuration from: {}", path.display());
             Ok(config)
         } else {
+            eprintln!("⚠ Client configuration file not found: {}", path.display());
+            eprintln!("  Using default configuration.");
+            eprintln!();
+            eprintln!("  To customize client settings, create a config file:");
+            eprintln!("    mkdir -p ~/.config/ritsu");
+            eprintln!("    ritsu --write-example-config");
+            eprintln!();
             Ok(Self::default())
         }
     }
@@ -255,6 +258,25 @@ impl ClientConfig {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("ritsu")
             .join("client.toml")
+    }
+    
+    /// Write an example configuration file
+    pub fn write_example(path: &PathBuf) -> Result<()> {
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+        }
+
+        let example_config = Self::default();
+        let toml_string = toml::to_string_pretty(&example_config)
+            .context("Failed to serialize example config")?;
+        
+        std::fs::write(path, toml_string)
+            .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
+        
+        eprintln!("✓ Created example client config: {}", path.display());
+        Ok(())
     }
     
     /// Get client socket path (respects environment variable)
