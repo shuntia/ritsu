@@ -78,7 +78,10 @@ async fn main() -> Result<()> {
         config::Config::load_from_path(&config_path)?
     } else {
         let default_path = config::Config::config_file_path();
-        info!("Loading configuration from default path: {}", default_path.display());
+        info!(
+            "Loading configuration from default path: {}",
+            default_path.display()
+        );
         config::Config::load()?
     };
 
@@ -93,7 +96,10 @@ async fn main() -> Result<()> {
     }
 
     // Auto-start Ollama if installed but not running (with model name from config)
-    let model_name = config.llm.backends.first()
+    let model_name = config
+        .llm
+        .backends
+        .first()
         .map_or("llama3.2:3b", |b| b.model.as_str()); // Fallback only if no backends configured
     start_ollama_if_needed(model_name).await;
 
@@ -102,15 +108,21 @@ async fn main() -> Result<()> {
     info!("Database initialized at: {}", config.server.database_path);
 
     // Initialize memory manager
-    let memory = std::sync::Arc::new(memory::MemoryManager::new(db.connection.clone(), config.server.database_path.clone()));
+    let memory = std::sync::Arc::new(memory::MemoryManager::new(
+        db.connection.clone(),
+        config.server.database_path.clone(),
+    ));
     info!("Memory manager initialized");
 
     // Initialize conversation manager
-    let conversation_manager = std::sync::Arc::new(conversations::ConversationManager::new(db.connection.clone()));
+    let conversation_manager = std::sync::Arc::new(conversations::ConversationManager::new(
+        db.connection.clone(),
+    ));
     info!("Conversation manager initialized");
 
     // Initialize preferences manager
-    let preferences_manager = std::sync::Arc::new(preferences::PreferencesManager::new(db.connection.clone()));
+    let preferences_manager =
+        std::sync::Arc::new(preferences::PreferencesManager::new(db.connection.clone()));
     info!("Preferences manager initialized");
 
     // Set up graceful shutdown signal
@@ -121,24 +133,43 @@ async fn main() -> Result<()> {
     info!("Task manager initialized");
 
     // Initialize trigger registry
-    let trigger_registry = std::sync::Arc::new(trigger::TriggerRegistry::new(config.server.database_path.clone()));
+    let trigger_registry = std::sync::Arc::new(trigger::TriggerRegistry::new(
+        config.server.database_path.clone(),
+    ));
     trigger_registry.register_builtin_triggers().await?;
-    info!("Trigger registry initialized with {} triggers", trigger_registry.get_all_triggers().await.len());
+    info!(
+        "Trigger registry initialized with {} triggers",
+        trigger_registry.get_all_triggers().await.len()
+    );
 
     // Initialize server state
     let server_state = std::sync::Arc::new(state::ServerState::new());
     info!("Server state initialized");
 
     // Initialize tool registry (needs memory, task_manager, trigger_registry, database, server_state, preferences)
-    let tool_registry = std::sync::Arc::new(
-        tools::ToolRegistry::new().with_database(db.connection.clone())
-    );
-    tools::register_all_tools(&tool_registry, memory.clone(), task_manager.clone(), trigger_registry.clone(), server_state.clone(), preferences_manager.clone()).await;
+    let tool_registry =
+        std::sync::Arc::new(tools::ToolRegistry::new().with_database(db.connection.clone()));
+    tools::register_all_tools(
+        &tool_registry,
+        memory.clone(),
+        task_manager.clone(),
+        trigger_registry.clone(),
+        server_state.clone(),
+        preferences_manager.clone(),
+    )
+    .await;
     info!("Tool registry initialized with usage tracking");
 
     // Initialize LLM client (needs tool registry for tool calling)
-    let llm_client = std::sync::Arc::new(llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone())?);
-    info!("LLM client initialized with {} backend(s)", config.llm.backends.len());
+    let llm_client = std::sync::Arc::new(llm::LlmClient::new(
+        &config.llm,
+        &config.timeouts,
+        tool_registry.clone(),
+    )?);
+    info!(
+        "LLM client initialized with {} backend(s)",
+        config.llm.backends.len()
+    );
 
     // Start trigger loop in background
     let trigger_registry_clone = trigger_registry.clone();
@@ -209,7 +240,8 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             // Signal setup failure is fatal - we need graceful shutdown capability
             #[allow(clippy::expect_used)]
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
             sigterm.recv().await;
             info!("Received SIGTERM! Shutting down gracefully...");
             shutdown_flag_clone.notify_waiters();
@@ -219,14 +251,15 @@ async fn main() -> Result<()> {
     // Wait for shutdown signal
     shutdown_flag.notified().await;
     info!("Shutdown signal received, waiting for tasks to complete...");
-    
+
     // Wait for background tasks to finish with timeout
     let shutdown_timeout = std::time::Duration::from_secs(5);
-    
+
     let _ = tokio::time::timeout(shutdown_timeout, async {
         let _ = tokio::join!(trigger_loop_handle, ipc_server_handle);
-    }).await;
-    
+    })
+    .await;
+
     info!("Shutting down ritsu... Good night!");
 
     Ok(())
@@ -241,19 +274,27 @@ async fn start_ollama_if_needed(model_name: &str) {
             .output()
             .ok()
             .is_some_and(|o| o.status.success())
-    }).await;
-    
+    })
+    .await;
+
     if !ollama_installed.unwrap_or(false) {
         tracing::debug!("Ollama not found in PATH");
         return;
     }
-    
+
     // Check if Ollama is already running by trying to connect
     let health_check = tokio::process::Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:11434/"])
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "http://localhost:11434/",
+        ])
         .output()
         .await;
-    
+
     if let Ok(output) = health_check {
         let status_code = String::from_utf8_lossy(&output.stdout);
         if status_code == "200" {
@@ -261,18 +302,20 @@ async fn start_ollama_if_needed(model_name: &str) {
             return;
         }
     }
-    
+
     // Start Ollama in background
     tracing::info!("Starting Ollama server (output: /tmp/ritsu-ollama.log)...");
-    
+
     // Open log file using spawn_blocking
     let log_file_result = tokio::task::spawn_blocking(|| {
         std::fs::OpenOptions::new()
             .create(true)
-            .append(true)
+            .truncate(true)
+            .write(true)
             .open("/tmp/ritsu-ollama.log")
-    }).await;
-    
+    })
+    .await;
+
     let log_file = match log_file_result {
         Ok(Ok(file)) => file,
         Ok(Err(e)) => {
@@ -284,7 +327,7 @@ async fn start_ollama_if_needed(model_name: &str) {
             return;
         }
     };
-    
+
     let stdout_file = match log_file.try_clone() {
         Ok(f) => f,
         Err(e) => {
@@ -292,14 +335,14 @@ async fn start_ollama_if_needed(model_name: &str) {
             return;
         }
     };
-    
+
     let result = tokio::process::Command::new("ollama")
         .arg("serve")
         .stdin(std::process::Stdio::null())
         .stdout(stdout_file)
         .stderr(log_file)
         .spawn();
-    
+
     match result {
         Ok(_child) => {
             tracing::info!("Ollama server started in background");
@@ -307,12 +350,19 @@ async fn start_ollama_if_needed(model_name: &str) {
             tracing::info!("Waiting for Ollama HTTP server to start...");
             for attempt in 1..=15 {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                
+
                 let health_check = tokio::process::Command::new("curl")
-                    .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:11434/"])
+                    .args([
+                        "-s",
+                        "-o",
+                        "/dev/null",
+                        "-w",
+                        "%{http_code}",
+                        "http://localhost:11434/",
+                    ])
                     .output()
                     .await;
-                
+
                 if let Ok(output) = health_check {
                     let status_code = String::from_utf8_lossy(&output.stdout);
                     if status_code == "200" {
@@ -320,7 +370,7 @@ async fn start_ollama_if_needed(model_name: &str) {
                         break;
                     }
                 }
-                
+
                 if attempt < 15 {
                     tracing::debug!("Ollama not ready yet, retrying... (attempt {}/15)", attempt);
                 } else {
@@ -328,9 +378,11 @@ async fn start_ollama_if_needed(model_name: &str) {
                     return;
                 }
             }
-            
+
             // Now do a warmup request to ensure the model is actually loaded
-            tracing::info!("Warming up Ollama model '{model_name}' (this may take 5-10 seconds)...");
+            tracing::info!(
+                "Warming up Ollama model '{model_name}' (this may take 5-10 seconds)..."
+            );
             let warmup_body = format!(
                 r#"{{"model":"{model_name}","messages":[{{"role":"user","content":"hi"}}],"stream":false}}"#
             );
@@ -339,14 +391,18 @@ async fn start_ollama_if_needed(model_name: &str) {
                 tokio::process::Command::new("curl")
                     .args([
                         "-s",
-                        "-X", "POST",
+                        "-X",
+                        "POST",
                         "http://localhost:11434/api/chat",
-                        "-d", &warmup_body,
-                        "-H", "Content-Type: application/json"
+                        "-d",
+                        &warmup_body,
+                        "-H",
+                        "Content-Type: application/json",
                     ])
-                    .output()
-            ).await;
-            
+                    .output(),
+            )
+            .await;
+
             match warmup {
                 Ok(Ok(output)) => {
                     if output.status.success() {
@@ -373,13 +429,14 @@ async fn start_ollama_if_needed(model_name: &str) {
 /// Write example system prompt files
 fn write_example_prompts() -> Result<()> {
     use std::fs;
-    
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
     let prompts_dir = home.join(".config/ritsu/prompts");
-    
+
     // Create directory
     fs::create_dir_all(&prompts_dir)?;
-    
+
     // Base system prompt
     let base_path = prompts_dir.join("system_base.md");
     let base_content = r"# Ritsu System Prompt
@@ -417,7 +474,7 @@ Use these tools proactively to assist the user effectively.
 ";
     fs::write(&base_path, base_content)?;
     println!("✓ Created: {}", base_path.display());
-    
+
     // Chat context prompt
     let chat_path = prompts_dir.join("chat.md");
     let chat_content = r"# Chat Context
@@ -437,7 +494,7 @@ You are in an interactive chat session with the user.
 ";
     fs::write(&chat_path, chat_content)?;
     println!("✓ Created: {}", chat_path.display());
-    
+
     // Background task prompt
     let background_path = prompts_dir.join("background.md");
     let background_content = r"# Background Task Context
@@ -457,11 +514,11 @@ You are executing a scheduled background task.
 ";
     fs::write(&background_path, background_content)?;
     println!("✓ Created: {}", background_path.display());
-    
+
     // Create subdirectory for specialized prompts
     let background_dir = prompts_dir.join("background");
     fs::create_dir_all(&background_dir)?;
-    
+
     // Compaction prompt
     let compact_path = background_dir.join("compact.md");
     let compact_content = r"# Memory Compaction Context
@@ -483,7 +540,7 @@ Generate a well-structured summary with:
 ";
     fs::write(&compact_path, compact_content)?;
     println!("✓ Created: {}", compact_path.display());
-    
+
     // Pattern analysis prompt
     let pattern_path = background_dir.join("pattern.md");
     let pattern_content = r"# Pattern Recognition Context
@@ -505,7 +562,7 @@ Produce insights about:
 ";
     fs::write(&pattern_path, pattern_content)?;
     println!("✓ Created: {}", pattern_path.display());
-    
+
     // Morning briefing prompt
     let briefing_path = background_dir.join("briefing.md");
     let briefing_content = r"# Morning Briefing Context
@@ -526,10 +583,10 @@ You are preparing a daily briefing for the user.
 ";
     fs::write(&briefing_path, briefing_content)?;
     println!("✓ Created: {}", briefing_path.display());
-    
+
     println!();
     println!("All example prompts created successfully!");
     println!("Edit these files to customize Ritsu's behavior.");
-    
+
     Ok(())
 }

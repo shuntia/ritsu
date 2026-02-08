@@ -49,7 +49,9 @@ impl LlmClient {
         tool_registry: Arc<ToolRegistry>,
     ) -> Result<Self> {
         // Use the first backend for now (can be extended to support multiple)
-        let backend = config.backends.first()
+        let backend = config
+            .backends
+            .first()
             .context("No LLM backends configured")?;
 
         let provider = Self::create_provider(backend, timeout_config, &tool_registry)?;
@@ -67,9 +69,13 @@ impl LlmClient {
         tool_registry: &Arc<ToolRegistry>,
     ) -> Result<Box<dyn LLMProvider>> {
         // Detect provider from endpoint
-        let provider_type = if backend.endpoint.contains("openai") || backend.endpoint.contains("api.openai.com") {
+        let provider_type = if backend.endpoint.contains("openai.com")
+            || backend.endpoint.contains("api.openai.com")
+        {
             LLMBackend::OpenAI
-        } else if backend.endpoint.contains("anthropic") || backend.endpoint.contains("api.anthropic.com") {
+        } else if backend.endpoint.contains("anthropic")
+            || backend.endpoint.contains("api.anthropic.com")
+        {
             LLMBackend::Anthropic
         } else if backend.endpoint.contains("groq") || backend.endpoint.contains("api.groq.com") {
             LLMBackend::Groq
@@ -80,17 +86,28 @@ impl LlmClient {
             LLMBackend::Ollama
         };
 
-        info!("Initializing {:?} provider with model: {} (endpoint: {})", 
-            provider_type, backend.model, backend.endpoint);
+        info!(
+            "Initializing {:?} provider with model: {} (endpoint: {})",
+            provider_type, backend.model, backend.endpoint
+        );
 
         // Get API key from environment if specified
-        let api_key = backend.api_key_env.as_ref()
-            .and_then(|env_var| std::env::var(env_var).ok())
-            .unwrap_or_default();
+        let api_key = backend
+            .api_key_env
+            .as_ref()
+            .and_then(|env_var| {
+                std::env::var(env_var).ok().or_else(|| {
+                    if provider_type != LLMBackend::Ollama {
+                        warn!("API key environment variable '{}' not set for {} backend", 
+                            env_var, backend.name);
+                    }
+                    None
+                })
+            });
 
         // Build LLM with all tools registered
         let tools_info = futures::executor::block_on(tool_registry.get_tools_for_ai());
-        
+
         let mut builder = LLMBuilder::new()
             .backend(provider_type)
             .model(&backend.model)
@@ -99,21 +116,20 @@ impl LlmClient {
             .temperature(0.7)
             .timeout_seconds(timeout_config.llm_request_seconds);
 
-        if !api_key.is_empty() {
-            builder = builder.api_key(api_key);
+        if let Some(key) = api_key {
+            builder = builder.api_key(key);
         }
 
         // Add all tools from registry
         for tool in tools_info {
-            let mut func_builder = FunctionBuilder::new(&tool.name)
-                .description(&tool.description);
+            let mut func_builder = FunctionBuilder::new(&tool.name).description(&tool.description);
 
             let mut required_params = Vec::new();
             for param in tool.parameters {
                 func_builder = func_builder.param(
                     ParamBuilder::new(&param.name)
                         .type_of(&param.param_type)
-                        .description(&param.description)
+                        .description(&param.description),
                 );
 
                 if param.required {
@@ -129,46 +145,52 @@ impl LlmClient {
         }
 
         let provider = builder.build().context("Failed to build LLM provider")?;
-        
+
         Ok(provider)
     }
 
     /// Get tools in llm crate format
     async fn get_llm_tools(&self) -> Vec<llm::chat::Tool> {
         let tools_info = self.tool_registry.get_tools_for_ai().await;
-        
-        tools_info.iter().map(|tool_info| {
-            // Convert parameters to JSON schema
-            let mut properties = serde_json::Map::new();
-            let mut required = Vec::new();
-            
-            for param in &tool_info.parameters {
-                // Build property schema
-                let mut prop = serde_json::Map::new();
-                prop.insert("type".to_string(), serde_json::json!(param.param_type));
-                prop.insert("description".to_string(), serde_json::json!(param.description));
-                properties.insert(param.name.clone(), serde_json::Value::Object(prop));
-                
-                if param.required {
-                    required.push(param.name.clone());
+
+        tools_info
+            .iter()
+            .map(|tool_info| {
+                // Convert parameters to JSON schema
+                let mut properties = serde_json::Map::new();
+                let mut required = Vec::new();
+
+                for param in &tool_info.parameters {
+                    // Build property schema
+                    let mut prop = serde_json::Map::new();
+                    prop.insert("type".to_string(), serde_json::json!(param.param_type));
+                    prop.insert(
+                        "description".to_string(),
+                        serde_json::json!(param.description),
+                    );
+                    properties.insert(param.name.clone(), serde_json::Value::Object(prop));
+
+                    if param.required {
+                        required.push(param.name.clone());
+                    }
                 }
-            }
-            
-            let parameters = serde_json::json!({
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            });
-            
-            llm::chat::Tool {
-                tool_type: "function".to_string(),
-                function: llm::chat::FunctionTool {
-                    name: tool_info.name.clone(),
-                    description: tool_info.description.clone(),
-                    parameters,
-                },
-            }
-        }).collect()
+
+                let parameters = serde_json::json!({
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                });
+
+                llm::chat::Tool {
+                    tool_type: "function".to_string(),
+                    function: llm::chat::FunctionTool {
+                        name: tool_info.name.clone(),
+                        description: tool_info.description.clone(),
+                        parameters,
+                    },
+                }
+            })
+            .collect()
     }
 
     /// Generate response with optional tool calling support
@@ -177,7 +199,8 @@ impl LlmClient {
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<LlmResponse> {
-        self.generate_with_tools(messages, system_prompt, true).await
+        self.generate_with_tools(messages, system_prompt, true)
+            .await
     }
 
     /// Generate response with control over tool usage
@@ -189,7 +212,7 @@ impl LlmClient {
     ) -> Result<LlmResponse> {
         // Convert our messages to llm crate format
         let mut chat_messages = Vec::new();
-        
+
         // Add conversation messages
         for (i, msg) in messages.iter().enumerate() {
             let message_builder = match msg.role.as_str() {
@@ -205,7 +228,7 @@ impl LlmClient {
             let content = if i == 0 {
                 system_prompt.as_ref().map_or_else(
                     || msg.content.clone(),
-                    |prompt| format!("{prompt}\n\n{}", msg.content)
+                    |prompt| format!("{prompt}\n\n{}", msg.content),
                 )
             } else {
                 msg.content.clone()
@@ -214,39 +237,57 @@ impl LlmClient {
             chat_messages.push(message_builder.content(&content).build());
         }
 
-        debug!("Sending {} messages to LLM (tools: {})", 
-            chat_messages.len(), 
+        debug!(
+            "Sending {} messages to LLM (tools: {})",
+            chat_messages.len(),
             enable_tools
         );
 
         // Make the chat request - try with tools first, fallback to without tools if it fails
         let response = if enable_tools {
-            match self.provider.chat_with_tools(&chat_messages, self.provider.tools()).await {
+            match self
+                .provider
+                .chat_with_tools(&chat_messages, self.provider.tools())
+                .await
+            {
                 Ok(resp) => resp,
                 Err(e) => {
                     warn!("Tool calling failed ({}), retrying without tools", e);
-                    self.provider.chat(&chat_messages).await
-                        .with_context(|| format!("Failed to send chat request without tools (timeout: {}s)", self.timeout_seconds))?
+                    self.provider.chat(&chat_messages).await.with_context(|| {
+                        format!(
+                            "Failed to send chat request without tools (timeout: {}s)",
+                            self.timeout_seconds
+                        )
+                    })?
                 }
             }
         } else {
-            self.provider.chat(&chat_messages).await
-                .with_context(|| format!("Failed to send chat request to LLM (timeout: {}s)", self.timeout_seconds))?
+            self.provider.chat(&chat_messages).await.with_context(|| {
+                format!(
+                    "Failed to send chat request to LLM (timeout: {}s)",
+                    self.timeout_seconds
+                )
+            })?
         };
 
         // Extract content
         let content = response.text().unwrap_or_default();
 
         // Extract tool calls
-        let tool_calls: Vec<ToolCallInfo> = response.tool_calls()
+        let tool_calls: Vec<ToolCallInfo> = response
+            .tool_calls()
             .map(|calls| {
-                calls.iter()
+                calls
+                    .iter()
                     .filter_map(|call| {
                         // Parse arguments from JSON string to HashMap
-                        let args_map = serde_json::from_str::<HashMap<String, serde_json::Value>>(&call.function.arguments)
-                            .ok()?;
-                        
-                        let args: HashMap<String, String> = args_map.into_iter()
+                        let args_map = serde_json::from_str::<HashMap<String, serde_json::Value>>(
+                            &call.function.arguments,
+                        )
+                        .ok()?;
+
+                        let args: HashMap<String, String> = args_map
+                            .into_iter()
                             .map(|(k, v)| {
                                 let value = match v {
                                     serde_json::Value::String(s) => s,
@@ -280,10 +321,17 @@ impl LlmClient {
         let mut results = Vec::new();
 
         for call in tool_calls {
-            info!("Executing tool: {} with args: {:?}", call.name, call.arguments);
+            info!(
+                "Executing tool: {} with args: {:?}",
+                call.name, call.arguments
+            );
 
             // Execute the tool
-            match self.tool_registry.execute(&call.name, call.arguments.clone()).await {
+            match self
+                .tool_registry
+                .execute(&call.name, call.arguments.clone())
+                .await
+            {
                 Ok(result) => {
                     let result_str = if result.success {
                         format!("Success: {}", result.output)
@@ -318,19 +366,26 @@ impl LlmClient {
         loop {
             iteration += 1;
             if iteration > max_iterations {
-                warn!("Reached max iterations ({}) for tool execution loop, returning last response", max_iterations);
-                
+                warn!(
+                    "Reached max iterations ({}) for tool execution loop, returning last response",
+                    max_iterations
+                );
+
                 // If we have a last response with content, return it
                 if let Some(resp) = last_response {
                     return Ok(resp);
                 }
-                
+
                 // Otherwise generate one final response without tools
-                return self.generate_with_tools(&current_messages, system_prompt, false).await;
+                return self
+                    .generate_with_tools(&current_messages, system_prompt, false)
+                    .await;
             }
 
             // Generate response with tools
-            let response = self.generate_with_tools(&current_messages, system_prompt, true).await?;
+            let response = self
+                .generate_with_tools(&current_messages, system_prompt, true)
+                .await?;
 
             // Store this response in case we need it
             last_response = Some(response.clone());
@@ -342,18 +397,27 @@ impl LlmClient {
 
             // Execute tool calls
             let tool_results = self.execute_tool_calls(&response.tool_calls).await;
-            
+
             // Check if all tools failed - if so, don't loop again
-            let all_failed = tool_results.iter().all(|(_, result)| result.starts_with("Error:"));
-            
+            let all_failed = tool_results
+                .iter()
+                .all(|(_, result)| result.starts_with("Error:"));
+
             if all_failed && iteration > 2 {
-                warn!("All tools failed for {} iterations, generating final response without tools", iteration);
+                warn!(
+                    "All tools failed for {} iterations, generating final response without tools",
+                    iteration
+                );
                 // Add a message explaining the tool failures
                 current_messages.push(Message {
                     role: "user".to_string(),
-                    content: "The tools are not working correctly. Please respond without using tools.".to_string(),
+                    content:
+                        "The tools are not working correctly. Please respond without using tools."
+                            .to_string(),
                 });
-                return self.generate_with_tools(&current_messages, system_prompt, false).await;
+                return self
+                    .generate_with_tools(&current_messages, system_prompt, false)
+                    .await;
             }
 
             // Add assistant message with tool calls (if it has content)
@@ -372,7 +436,10 @@ impl LlmClient {
                 });
             }
 
-            debug!("Tool execution iteration {} complete, continuing...", iteration);
+            debug!(
+                "Tool execution iteration {} complete, continuing...",
+                iteration
+            );
         }
     }
 
@@ -387,7 +454,7 @@ impl LlmClient {
     ) -> Result<mpsc::Receiver<Result<String>>> {
         // Convert our messages to llm crate format
         let mut chat_messages = Vec::new();
-        
+
         // Add conversation messages
         for (i, msg) in messages.iter().enumerate() {
             let message_builder = match msg.role.as_str() {
@@ -399,7 +466,7 @@ impl LlmClient {
             let content = if i == 0 {
                 system_prompt.as_ref().map_or_else(
                     || msg.content.clone(),
-                    |prompt| format!("{prompt}\n\n{}", msg.content)
+                    |prompt| format!("{prompt}\n\n{}", msg.content),
                 )
             } else {
                 msg.content.clone()
@@ -408,7 +475,10 @@ impl LlmClient {
             chat_messages.push(message_builder.content(&content).build());
         }
 
-        debug!("Starting streaming response for {} messages", chat_messages.len());
+        debug!(
+            "Starting streaming response for {} messages",
+            chat_messages.len()
+        );
 
         // Create a channel for streaming chunks
         let (tx, rx) = mpsc::channel(32);
@@ -419,7 +489,10 @@ impl LlmClient {
         debug!("Streaming with {} tools available", tool_count);
 
         // Get the provider's streaming response with tools
-        let mut stream = self.provider.chat_stream_with_tools(&chat_messages, Some(&tools)).await
+        let mut stream = self
+            .provider
+            .chat_stream_with_tools(&chat_messages, Some(&tools))
+            .await
             .context("Failed to start streaming chat with LLM provider")?;
 
         // Spawn a task to forward stream items to the channel
@@ -428,7 +501,7 @@ impl LlmClient {
                 match chunk_result {
                     Ok(chunk) => {
                         use llm::chat::StreamChunk;
-                        
+
                         match chunk {
                             StreamChunk::Text(text) => {
                                 if tx.send(Ok(text)).await.is_err() {
@@ -439,11 +512,15 @@ impl LlmClient {
                             StreamChunk::ToolUseComplete { index, tool_call } => {
                                 // For now, just log tool calls but don't send them to the stream
                                 // Tool execution will be handled in non-streaming mode
-                                tracing::debug!("Tool call received in stream (#{index}): {} with args: {}",
-                                    tool_call.function.name, tool_call.function.arguments);
-                                
+                                tracing::debug!(
+                                    "Tool call received in stream (#{index}): {} with args: {}",
+                                    tool_call.function.name,
+                                    tool_call.function.arguments
+                                );
+
                                 // Send a placeholder message to user indicating tool is being called
-                                let tool_msg = format!("\n\n🔧 Calling tool: {}\n", tool_call.function.name);
+                                let tool_msg =
+                                    format!("\n\n🔧 Calling tool: {}\n", tool_call.function.name);
                                 if tx.send(Ok(tool_msg)).await.is_err() {
                                     break;
                                 }
@@ -451,7 +528,10 @@ impl LlmClient {
                             StreamChunk::ToolUseStart { index, id, name } => {
                                 tracing::debug!("Tool use started: {} (#{index}, id: {id})", name);
                             }
-                            StreamChunk::ToolUseInputDelta { index, partial_json } => {
+                            StreamChunk::ToolUseInputDelta {
+                                index,
+                                partial_json,
+                            } => {
                                 tracing::debug!("Tool input delta (#{index}): {}", partial_json);
                             }
                             StreamChunk::Done { stop_reason } => {
