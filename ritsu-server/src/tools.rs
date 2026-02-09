@@ -207,7 +207,20 @@ mod tool_impls {
     pub fn notify_client(state: Arc<super::super::state::ServerState>) -> Tool {
         Tool {
             name: "notify_client".to_string(),
-            description: "Send a notification to the user's desktop/client".to_string(),
+            description: r#"Send a notification to the user's desktop/client (preferred: client daemon). Falls back to broadcasting a push notification if the client daemon is unavailable.
+
+Parameters:
+- title (string, required): Notification title.
+- message (string, required): Notification message body.
+- urgency (string, optional): 'low', 'normal', 'urgent'/'critical' (defaults to 'normal').
+
+Behavior:
+Validates required parameters, maps urgency to NotificationUrgency, sends ServerToClientRequest::NotifyUser to the client daemon via state.send_to_client_daemon. On failure, falls back to state.broadcast_push(ServerPush::Notification).
+
+Return:
+ToolResult::success("Notification sent: <title>") on success; ToolResult::error on missing params or unrecoverable errors.
+
+Example args: { "title": "Reminder", "message": "Stand up break", "urgency": "low" }"#.to_string(),
             tags: vec!["notification".to_string(), "ui".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -279,7 +292,19 @@ mod tool_impls {
     pub fn create_note(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
         Tool {
             name: "create_note".to_string(),
-            description: "Create a persistent note for future reference".to_string(),
+            description: r#"Create a persistent note for future reference (stored via MemoryManager).
+
+Parameters:
+- content (string, required): Note content.
+- tags (string, optional): Comma-separated tags (e.g., "work,meeting").
+
+Behavior:
+Validates content, parses tags into Vec<String>, and calls memory.create_note(&content, &tags).await to persist the note.
+
+Return:
+ToolResult::success("Note created successfully with N tags") on success; ToolResult::error on failure.
+
+Example args: { "content": "Met with Alice about roadmap", "tags": "meeting,roadmap" }"#.to_string(),
             tags: vec!["memory".to_string(), "note".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -330,7 +355,20 @@ mod tool_impls {
     pub fn query_memory(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
         Tool {
             name: "query_memory".to_string(),
-            description: "Query past conversations, summaries, or notes".to_string(),
+            description: r#"Query past conversations, daily/monthly summaries, or notes from MemoryManager.
+
+Parameters:
+- type (string, required): One of `conversations`, `daily`, `monthly`, `notes`.
+- query (string, optional): Substring filter applied to content/summaries.
+- limit (string, optional): Maximum number of results (defaults to 10).
+
+Behavior:
+Dispatches to appropriate MemoryManager methods depending on `type` and returns a formatted textual response listing matched items.
+
+Return:
+ToolResult::success(formatted_text) or ToolResult::error on unknown type or other failures.
+
+Example args: { "type": "notes", "query": "roadmap", "limit": "5" }"#.to_string(),
             tags: vec!["memory".to_string(), "search".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -466,7 +504,25 @@ mod tool_impls {
     pub fn create_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "create_trigger".to_string(),
-            description: "Create custom reminder/notification triggers. Use for meaningful, time-specific reminders. Examples: 'Remind me at 7 AM to review PRs', 'Check in every Monday at 9 AM'. Don't create triggers for things you can do immediately.".to_string(),
+            description: r#"Create custom reminder/notification triggers. Intended for meaningful, time-specific reminders; avoid creating triggers for trivial immediate actions.
+
+Parameters:
+- name (string, required): Unique trigger name (e.g., 'morning_pr_review').
+- schedule (string, required): Schedule format - 'HH:MM' for daily, a number of seconds (interval), or a cron expression.
+- type (string, optional): 'time', 'interval', 'cron', 'dynamic' (default: 'time').
+- note (string, optional): Instructional note describing what AI should do when the trigger fires.
+- open_chat (string, optional): 'true' to open the chat window on trigger.
+- urgency (string, optional): 'low', 'normal', 'critical'.
+- tag (string, optional): Tag for categorization.
+- description (string, optional): Short description of the trigger.
+
+Behavior:
+Validates 'name' and 'schedule', builds JSON metadata from optional parameters (note, open_chat, urgency, tag, description), inserts a row into the 'triggers' database table as created_by='ai', reloads triggers, and notifies the trigger loop to reschedule (trigger_registry.notify_changed()).
+
+Return:
+ToolResult::success on success or ToolResult::error on DB/migration errors.
+
+Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time", "note": "Send notification and open chat if no response" }"#.to_string(),
             tags: vec!["automation".to_string(), "trigger".to_string(), "reminder".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -602,7 +658,18 @@ mod tool_impls {
     pub fn analyze_now(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "analyze_now".to_string(),
-            description: "Trigger an immediate analysis or compaction".to_string(),
+            description: r#"Schedule an immediate analysis/compaction by creating a dynamic trigger (e.g., conversation analysis, pattern recognition).
+
+Parameters:
+- type (string, required): Analysis type: 'conversation', 'pattern', 'reflection', 'tool_effectiveness' (default: 'conversation').
+
+Behavior:
+Creates a dynamic trigger via trigger_registry.add_dynamic_trigger(...) with metadata { analysis_type } and returns success once scheduled.
+
+Return:
+ToolResult::success("Analysis scheduled: <type>") or ToolResult::error on failure.
+
+Example args: { "type": "conversation" }"#.to_string(),
             tags: vec!["analysis".to_string(), "immediate".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -642,7 +709,19 @@ mod tool_impls {
     pub fn open_chat(state: Arc<super::super::state::ServerState>) -> Tool {
         Tool {
             name: "open_chat".to_string(),
-            description: "Open the chat GUI window and request user attention".to_string(),
+            description: r#"Request that the client open the chat GUI and optionally display an initial message.
+
+Parameters:
+- message (string, optional): Initial message to display in the chat.
+- urgency (string, optional): Urgency level (unused by send_to_client_daemon path but included for parity).
+
+Behavior:
+Sends ServerToClientRequest::OpenChat to the client daemon via state.send_to_client_daemon; on failure, falls back to broadcasting ServerPush::OpenChat via state.broadcast_push.
+
+Return:
+ToolResult::success("Chat window opened") or ToolResult::success("Chat window opened (fallback)") on fallback; ToolResult::error for other failures.
+
+Example args: { "message": "Time to review PRs" }"#.to_string(),
             tags: vec!["ui".to_string(), "interaction".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -696,7 +775,21 @@ mod tool_impls {
     pub fn create_task(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "create_task".to_string(),
-            description: "Create a new task to track".to_string(),
+            description: r#"Create a new task via TaskManager.
+
+Parameters:
+- title (string, required): Task title.
+- priority (string, optional): 'low', 'medium', 'high', 'urgent' (default: 'medium').
+- due_date (string, optional): Due date in 'YYYY-MM-DD' format.
+- description (string, optional): Task description.
+
+Behavior:
+Validates 'title' and converts 'priority' into ritsu_common::TaskPriority, calls task_manager.create_task(...) and returns the created task ID in the success message.
+
+Return:
+ToolResult::success("Task created with ID <id>: <title>") or ToolResult::error on failure.
+
+Example args: { "title": "Write release notes", "priority": "high", "due_date": "2026-02-10" }"#.to_string(),
             tags: vec!["task".to_string(), "productivity".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -771,7 +864,20 @@ mod tool_impls {
     pub fn update_task(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "update_task".to_string(),
-            description: "Update an existing task's status or priority".to_string(),
+            description: r#"Update an existing task's status or priority via TaskManager.
+
+Parameters:
+- id (string, required): Task ID (parsable to integer).
+- status (string, optional): 'pending', 'in_progress', 'completed', 'cancelled'.
+- priority (string, optional): 'low', 'medium', 'high', 'urgent'.
+
+Behavior:
+Parses 'id' as i64 and applies updates via TaskManager; returns an error if neither status nor priority provided.
+
+Return:
+ToolResult::success("Task <id> updated: <updates>") or ToolResult::error on parse/validation/manager errors.
+
+Example args: { "id": "42", "status": "completed" }"#.to_string(),
             tags: vec!["task".to_string(), "productivity".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -867,7 +973,19 @@ mod tool_impls {
     pub fn list_tasks(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "list_tasks".to_string(),
-            description: "List tasks with optional filters".to_string(),
+            description: r#"List tasks with optional status/priority filters.
+
+Parameters:
+- status (string, optional): Filter by status.
+- priority (string, optional): Filter by priority.
+
+Behavior:
+Calls task_manager.list_tasks(status, priority) and returns a human-readable summary for each found task.
+
+Return:
+ToolResult::success("Found N tasks:\n<list>") or ToolResult::success("No tasks found matching the filters") or ToolResult::error on failure.
+
+Example args: { "status": "pending" }"#.to_string(),
             tags: vec!["task".to_string(), "productivity".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -923,7 +1041,20 @@ mod tool_impls {
     pub fn set_preference(preferences: Arc<super::super::preferences::PreferencesManager>) -> Tool {
         Tool {
             name: "set_preference".to_string(),
-            description: "Remember a user preference for future reference".to_string(),
+            description: r#"Persist a user preference using PreferencesManager.
+
+Parameters:
+- category (string, required): Preference category (e.g., schedule, communication).
+- key (string, required): Preference key (e.g., wake_time).
+- value (string, required): Preference value.
+
+Behavior:
+Calls preferences.set_preference(&category, &key, &value, 1.0, Some("user")).
+
+Return:
+ToolResult::success("Preference saved: category / key = value") or ToolResult::error on failure.
+
+Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#.to_string(),
             tags: vec!["preferences".to_string(), "memory".to_string()],
             parameters: vec![
                 ToolParameter {
@@ -979,7 +1110,18 @@ mod tool_impls {
     pub fn wait() -> Tool {
         Tool {
             name: "wait".to_string(),
-            description: "Pause for the specified duration in seconds.".to_string(),
+            description: r#"Pause asynchronously for a specified duration (seconds).
+
+Parameters:
+- seconds (string, required): Float or integer number of seconds to wait (e.g., "0.5", "2").
+
+Behavior:
+Parses 'seconds' as f64 and performs tokio::time::sleep(dur).await.
+
+Return:
+ToolResult::success("Waited X seconds") or ToolResult::error on invalid parameter.
+
+Example args: { "seconds": "1.5" }"#.to_string(),
             tags: vec!["utility".to_string(), "time".to_string()],
             parameters: vec![
                 ToolParameter {
