@@ -257,11 +257,11 @@ impl TaskManager {
             }
             
             if overdue > 0 {
-                summary = format!("{summary}\n⚠️  {overdue} tasks overdue");
+                summary = format!("{summary}\n{}  {overdue} tasks overdue", nerd_font::categories::Fa::ExclamationCircle);
             }
             
             if due_soon > 0 {
-                summary = format!("{summary}\n📅 {due_soon} tasks due within 3 days");
+                summary = format!("{summary}\n{} {due_soon} tasks due within 3 days", nerd_font::categories::Fa::CalendarDays);
             }
             
             Ok(summary)
@@ -284,10 +284,10 @@ impl TaskManager {
             .take(10) // Limit to top 10
             .map(|t| {
                 let priority_emoji = match t.priority {
-                    TaskPriority::Urgent => "🔴",
-                    TaskPriority::High => "🟠",
-                    TaskPriority::Medium => "🟡",
-                    TaskPriority::Low => "🟢",
+                    TaskPriority::Urgent => format!("{}", nerd_font::categories::Fa::Fire),
+                    TaskPriority::High => format!("{}", nerd_font::categories::Fa::ExclamationCircle),
+                    TaskPriority::Medium => format!("{}", nerd_font::categories::Fa::Exclamation),
+                    TaskPriority::Low => format!("{}", nerd_font::categories::Fa::Circle),
                 };
                 
                 let status_str = match t.status {

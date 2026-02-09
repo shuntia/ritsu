@@ -52,7 +52,7 @@ pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
     let mut stream = tokio::net::UnixStream::connect(&socket_path).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound || 
            e.kind() == std::io::ErrorKind::ConnectionRefused {
-            tracing::error!("✗ Client daemon not running. Start it with: ritsu start");
+            tracing::error!("{} Client daemon not running. Start it with: ritsu start", nerd_font::categories::Fa::Cross);
             anyhow::anyhow!("Client daemon not running")
         } else {
             tracing::error!("Failed to connect: {}", e);
@@ -104,27 +104,27 @@ pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
             match response {
                 ritsu_common::protocol::ServerResponse::Ok => {
                     if full_response.is_empty() {
-                        println!("✓ Message sent");
+                        println!("{} Message sent", nerd_font::categories::Fa::Check);
                     }
                     return Ok(());
                 }
                 ritsu_common::protocol::ServerResponse::Error { message } => {
                     if full_response.is_empty() {
-                        tracing::error!("✗ Error: {}", message);
+                        tracing::error!("{} Error: {}", nerd_font::categories::Fa::Cross, message);
                     }
                     anyhow::bail!(message)
                 }
                 ritsu_common::protocol::ServerResponse::Message { content } => {
-                    println!("🤖 {}", content);
+                    println!("{} {}", nerd_font::categories::Fa::Android, content);
                     return Ok(());
                 }
                 _ => {
-                    tracing::error!("✗ Unexpected response");
+                    tracing::error!("{} Unexpected response", nerd_font::categories::Fa::Cross);
                     anyhow::bail!("Unexpected response")
                 }
             }
         } else {
-            tracing::error!("✗ Failed to parse response");
+            tracing::error!("{} Failed to parse response", nerd_font::categories::Fa::Cross);
             anyhow::bail!("Failed to parse response")
         }
     }

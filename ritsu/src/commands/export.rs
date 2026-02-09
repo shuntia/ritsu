@@ -59,7 +59,7 @@ pub async fn export_conversation(session_id: Option<&str>, output_path: &str, fo
         _ => anyhow::bail!("Unsupported format: {}. Use txt, json, or md", format),
     }
     
-    println!("✓ Exported {} turns to {}", turns.len(), output_path);
+    println!("{} Exported {} turns to {}", nerd_font::categories::Fa::Check, turns.len(), output_path);
     Ok(())
 }
 

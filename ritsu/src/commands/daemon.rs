@@ -30,7 +30,7 @@ pub async fn start(config_path: Option<&str>) -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     if is_running().await {
-        println!("✓ Server started successfully");
+        println!("{} Server started successfully", nerd_font::categories::Fa::Check);
         Ok(())
     } else {
         anyhow::bail!("Server failed to start");
@@ -49,7 +49,7 @@ pub async fn stop() -> Result<()> {
     let client = crate::ipc::IpcClient::new(socket_path);
     match client.send_request(ritsu_common::protocol::ClientRequest::Shutdown).await {
         Ok(_) => {
-            println!("✓ Server stopped successfully");
+            println!("{} Server stopped successfully", nerd_font::categories::Fa::Check);
             Ok(())
         }
         Err(e) => {
@@ -61,9 +61,9 @@ pub async fn stop() -> Result<()> {
 
 pub async fn status() -> Result<()> {
     if is_running().await {
-        println!("✓ Server is running");
+        println!("{} Server is running", nerd_font::categories::Fa::Check);
     } else {
-        println!("✗ Server is not running");
+        println!("{} Server is not running", nerd_font::categories::Fa::Cross);
     }
     Ok(())
 }
@@ -92,7 +92,7 @@ pub async fn handle_halt(cmd: crate::HaltCommands) -> Result<()> {
 
 async fn halt_server(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("⚠️  WARNING: This will forcefully terminate the ritsu server.");
+        println!("{}  WARNING: This will forcefully terminate the ritsu server.", nerd_font::categories::Fa::ExclamationCircle);
         println!("Any in-progress operations will be interrupted.");
         print!("Are you sure you want to continue? [y/N]: ");
         
@@ -139,7 +139,7 @@ async fn halt_server(noconfirm: bool) -> Result<()> {
     
     if killed_count > 0 {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        println!("✓ Halted {} ritsu-server process(es)", killed_count);
+        println!("{} Halted {} ritsu-server process(es)", nerd_font::categories::Fa::Check, killed_count);
     }
     
     Ok(())
@@ -147,7 +147,7 @@ async fn halt_server(noconfirm: bool) -> Result<()> {
 
 async fn halt_client(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("⚠️  WARNING: This will forcefully close all ritsu GUI windows.");
+        println!("{}  WARNING: This will forcefully close all ritsu GUI windows.", nerd_font::categories::Fa::ExclamationCircle);
         print!("Are you sure you want to continue? [y/N]: ");
         
         use std::io::Write;
@@ -193,7 +193,7 @@ async fn halt_client(noconfirm: bool) -> Result<()> {
     
     if killed_count > 0 {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        println!("✓ Halted {} ritsu client process(es)", killed_count);
+        println!("{} Halted {} ritsu client process(es)", nerd_font::categories::Fa::Check, killed_count);
     }
     
     Ok(())

@@ -53,7 +53,7 @@ async fn create_trigger(name: &str, time: &str) -> Result<()> {
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ Trigger created: {name}");
+            println!("{} Trigger created: {name}", nerd_font::categories::Fa::Check);
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
@@ -75,7 +75,7 @@ async fn disable_trigger(name: &str) -> Result<()> {
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ Trigger disabled: {name}");
+            println!("{} Trigger disabled: {name}", nerd_font::categories::Fa::Check);
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
@@ -97,7 +97,7 @@ async fn delete_trigger(name: &str) -> Result<()> {
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ Trigger deleted: {name}");
+            println!("{} Trigger deleted: {name}", nerd_font::categories::Fa::Check);
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {

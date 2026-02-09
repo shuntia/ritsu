@@ -89,7 +89,7 @@ async fn create_task(
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ Task created");
+            println!("{} Task created", nerd_font::categories::Fa::Check);
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
@@ -113,7 +113,7 @@ async fn update_task(
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ Task updated");
+            println!("{} Task updated", nerd_font::categories::Fa::Check);
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {

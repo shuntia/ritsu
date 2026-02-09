@@ -140,10 +140,10 @@ impl Config {
                 .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-            info!("✓ Loaded configuration from: {}", path.display());
+            info!("{} Loaded configuration from: {}", nerd_font::categories::Fa::Check, path.display());
             Ok(config)
         } else {
-            warn!("⚠ Configuration file not found: {}", path.display());
+            warn!("{} Configuration file not found: {}", nerd_font::categories::Fa::ExclamationCircle, path.display());
             warn!("Using default configuration.");
             info!("To customize settings, create a config file:");
             info!("  mkdir -p ~/.config/ritsu");
@@ -235,7 +235,7 @@ llm_request_seconds = {llm_request}
         std::fs::write(path, example)
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
         
-        info!("✓ Created example config: {}", path.display());
+        info!("{} Created example config: {}", nerd_font::categories::Fa::Check, path.display());
         Ok(())
     }
 }

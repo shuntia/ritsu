@@ -697,7 +697,7 @@ impl MemoryManager {
                 0.0
             };
             
-            summary = format!("{summary}📊 {tool_name}: {total} calls, {success_rate:.1}% success, {avg_time:.0}ms avg\n");
+            summary = format!("{summary}{} {tool_name}: {total} calls, {success_rate:.1}% success, {avg_time:.0}ms avg\n", nerd_font::categories::Fa::ChartBar);
         }
         
         Ok(summary)

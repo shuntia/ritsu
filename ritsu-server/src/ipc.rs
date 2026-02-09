@@ -221,7 +221,7 @@ async fn handle_send_message_streaming(
     if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None, None).await {
         error!("Failed to store user turn: {}", e);
         let push = ServerPush::MessageChunk {
-            content: format!("❌ Failed to store user message: {}\n", e),
+            content: format!("{} Failed to store user message: {}\n", nerd_font::categories::Fa::Cross, e),
             is_final: true,
         };
         // Inform client and stop processing
@@ -231,7 +231,7 @@ async fn handle_send_message_streaming(
     if let Err(e) = memory.store_conversation("user", &content).await {
         error!("Failed to store in conversations: {}", e);
         let push = ServerPush::MessageChunk {
-            content: format!("❌ Failed to store message in memory: {}\n", e),
+            content: format!("{} Failed to store message in memory: {}\n", nerd_font::categories::Fa::Cross, e),
             is_final: true,
         };
         send_push(stream, push).await?;
@@ -317,7 +317,7 @@ async fn handle_send_message_streaming(
             Err(e) => {
                 error!("Non-streaming request failed: {}", e);
                 let push = ServerPush::MessageChunk {
-                    content: format!("\n\n❌ Error: {}\n\nPlease check if Ollama is running and the model is available.", e),
+                    content: format!("\n\n{} Error: {}\n\nPlease check if Ollama is running and the model is available.", nerd_font::categories::Fa::Cross, e),
                     is_final: true,
                 };
                 send_push(stream, push).await?;
@@ -336,7 +336,7 @@ async fn handle_send_message_streaming(
             error!("Failed to start streaming: {}", e);
             // Send error as a message chunk so GUI knows what happened
             let push = ServerPush::MessageChunk {
-                content: format!("❌ Failed to connect to LLM: {}\n\nPlease check that Ollama is running and the model is available.", e),
+                content: format!("{} Failed to connect to LLM: {}\n\nPlease check that Ollama is running and the model is available.", nerd_font::categories::Fa::Cross, e),
                 is_final: true,
             };
             send_push(stream, push).await?;
@@ -370,7 +370,7 @@ async fn handle_send_message_streaming(
             Err(e) => {
                 error!("Streaming error during LLM response: {}", e);
                 let push = ServerPush::MessageChunk {
-                    content: format!("\n\n❌ Error during streaming: {}\n\nThe connection to the LLM may have been interrupted.", e),
+                    content: format!("\n\n{} Error during streaming: {}\n\nThe connection to the LLM may have been interrupted.", nerd_font::categories::Fa::Cross, e),
                     is_final: true,
                 };
                 send_push(stream, push).await?;

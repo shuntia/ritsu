@@ -52,7 +52,7 @@ pub async fn query_notes(_tag: Option<&str>) -> Result<()> {
 
 pub async fn clear_memory(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("⚠️  WARNING: This will permanently delete ALL memory data:");
+        println!("{}  WARNING: This will permanently delete ALL memory data:", nerd_font::categories::Fa::ExclamationCircle);
         println!("   - All conversation sessions and turns");
         println!("   - All daily conversations");
         println!("   - All daily and monthly summaries");
@@ -83,11 +83,11 @@ pub async fn clear_memory(noconfirm: bool) -> Result<()> {
     
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("✓ All memory cleared successfully");
+            println!("{} All memory cleared successfully", nerd_font::categories::Fa::Check);
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            tracing::error!("✗ Error: {}", message);
+            tracing::error!("{} Error: {}", nerd_font::categories::Fa::Cross, message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),

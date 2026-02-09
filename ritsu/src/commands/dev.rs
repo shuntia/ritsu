@@ -38,7 +38,7 @@ pub async fn handle(cmd: crate::DevCommands) -> Result<()> {
 }
 
 async fn show_prompt() -> Result<()> {
-    println!("🔍 Fetching effective system prompt...\n");
+    println!("{} Fetching effective system prompt...\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -49,7 +49,7 @@ async fn show_prompt() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to fetch system prompt: {}", e);
+            tracing::error!("{} Failed to fetch system prompt: {}", nerd_font::categories::Fa::Cross, e);
             tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
@@ -58,7 +58,7 @@ async fn show_prompt() -> Result<()> {
 }
 
 async fn show_model() -> Result<()> {
-    println!("🔍 Fetching model information...\n");
+    println!("{} Fetching model information...\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -69,7 +69,7 @@ async fn show_model() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to fetch model info: {}", e);
+            tracing::error!("{} Failed to fetch model info: {}", nerd_font::categories::Fa::Cross, e);
             tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
@@ -78,7 +78,7 @@ async fn show_model() -> Result<()> {
 }
 
 async fn show_config() -> Result<()> {
-    println!("🔍 Server Configuration\n");
+    println!("{} Server Configuration\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     println!("Note: This shows client-side config. For server config, check:");
     println!("  ~/.config/ritsu/config.toml\n");
     
@@ -89,10 +89,10 @@ async fn show_config() -> Result<()> {
     
     if config_path.exists() {
         let contents = fs::read_to_string(&config_path)?;
-        println!("📄 Config file: {}\n", config_path.display());
+        println!("{} Config file: {}\n", nerd_font::categories::Fa::FileText, config_path.display());
         println!("{}", contents);
     } else {
-        println!("⚠️  No server config file found at: {}", config_path.display());
+        println!("{}  No server config file found at: {}", nerd_font::categories::Fa::ExclamationCircle, config_path.display());
         println!("    Using built-in defaults");
     }
     
@@ -100,43 +100,43 @@ async fn show_config() -> Result<()> {
 }
 
 async fn show_client_config() -> Result<()> {
-    println!("🔍 Client Configuration\n");
+    println!("{} Client Configuration\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     
     let config = crate::config::ClientConfig::load()?;
     
-    println!("📍 Sockets:");
+    println!("{} Sockets:", nerd_font::categories::Fa::MapMarker);
     println!("  Client socket: {}", config.client_socket_path());
     println!("  Server socket: {}", config.server_socket_path());
     println!();
     
-    println!("⏱️  Timeouts:");
+    println!("{}  Timeouts:", nerd_font::categories::Fa::ClockO);
     println!("  Connect: {}s", config.timeouts.connect_seconds);
     println!("  Request: {}s", config.timeouts.request_seconds);
     println!("  Streaming: {}s", config.timeouts.streaming_seconds);
     println!();
     
-    println!("🖥️  GUI:");
+    println!("{}  GUI:", nerd_font::categories::Fa::Desktop);
     println!("  Window: {}x{}", config.gui.window_width, config.gui.window_height);
     println!("  Font size: {}", config.gui.font_size);
     println!("  Notifications: {}", config.gui.notifications_enabled);
     println!("  Max messages: {}", config.gui.max_messages);
     println!();
     
-    println!("📁 Paths:");
+    println!("{} Paths:", nerd_font::categories::Fa::Folder);
     println!("  Session file: {}", config.paths.session_file.display());
     println!("  Cache dir: {}", config.paths.cache_dir.display());
     println!();
     
-    println!("🔄 Retry:");
+    println!("{} Retry:", nerd_font::categories::Fa::Circle);
     println!("  Max retries: {}", config.retry.max_retries);
     println!("  Retry delay: {}ms", config.retry.retry_delay_ms);
     println!("  Exponential backoff: {}", config.retry.exponential_backoff);
     
     let config_path = crate::config::ClientConfig::config_file_path();
     if config_path.exists() {
-        println!("\n📄 Config file: {}", config_path.display());
+        println!("\n{} Config file: {}", nerd_font::categories::Fa::FileText, config_path.display());
     } else {
-        println!("\n⚠️  No client config file (using defaults)");
+        println!("\n{}  No client config file (using defaults)", nerd_font::categories::Fa::ExclamationCircle);
         println!("    Create one at: {}", config_path.display());
     }
     
@@ -144,7 +144,7 @@ async fn show_client_config() -> Result<()> {
 }
 
 async fn show_db_stats() -> Result<()> {
-    println!("🔍 Fetching database statistics...\n");
+    println!("{} Fetching database statistics...\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -155,7 +155,7 @@ async fn show_db_stats() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to fetch database stats: {}", e);
+            tracing::error!("{} Failed to fetch database stats: {}", nerd_font::categories::Fa::Cross, e);
             tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
@@ -164,7 +164,7 @@ async fn show_db_stats() -> Result<()> {
 }
 
 async fn ping_server(count: u32) -> Result<()> {
-    println!("🏓 Pinging server {} time(s)...\n", count);
+    println!("Pinging server {} time(s)...\n", count);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -179,13 +179,13 @@ async fn ping_server(count: u32) -> Result<()> {
                 let elapsed = start.elapsed().as_millis();
                 total_ms += elapsed;
                 successes += 1;
-                println!("{}. ✓ Pong! ({}ms)", i, elapsed);
+                println!("{}. {} Pong! ({}ms)", i, nerd_font::categories::Fa::Check, elapsed);
             }
             Ok(false) => {
-                println!("{}. ❌ Server returned false", i);
+                println!("{}. {} Server returned false", i, nerd_font::categories::Fa::Cross);
             }
             Err(e) => {
-                println!("{}. ❌ Failed: {}", i, e);
+                println!("{}. {} Failed: {}", i, nerd_font::categories::Fa::Cross, e);
             }
         }
         
@@ -194,7 +194,7 @@ async fn ping_server(count: u32) -> Result<()> {
         }
     }
     
-    println!("\n📊 Results: {}/{} successful", successes, count);
+    println!("\n{} Results: {}/{} successful", nerd_font::categories::Fa::ChartBar, successes, count);
     if successes > 0 {
         println!("   Average latency: {}ms", total_ms / successes as u128);
     }
@@ -209,9 +209,9 @@ async fn clear_session() -> Result<()> {
     if session_file.exists() {
         fs::remove_file(session_file)
             .with_context(|| format!("Failed to remove session file: {}", session_file.display()))?;
-        println!("✓ Cleared session file: {}", session_file.display());
+        println!("{} Cleared session file: {}", nerd_font::categories::Fa::Check, session_file.display());
     } else {
-        println!("ℹ️  No session file to clear");
+        println!("{}  No session file to clear", nerd_font::categories::Fa::Info);
     }
     
     Ok(())
@@ -224,16 +224,16 @@ async fn clear_cache() -> Result<()> {
     if cache_dir.exists() {
         fs::remove_dir_all(cache_dir)
             .with_context(|| format!("Failed to remove cache directory: {}", cache_dir.display()))?;
-        println!("✓ Cleared cache directory: {}", cache_dir.display());
+        println!("{} Cleared cache directory: {}", nerd_font::categories::Fa::Check, cache_dir.display());
     } else {
-        println!("ℹ️  No cache directory to clear");
+        println!("{}  No cache directory to clear", nerd_font::categories::Fa::Info);
     }
     
     Ok(())
 }
 
 async fn export_db(output: &str) -> Result<()> {
-    println!("🔍 Exporting full database to {}...\n", output);
+    println!("{} Exporting full database to {}...\n", nerd_font::categories::Fa::MagnifyingGlassLocation, output);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -243,10 +243,10 @@ async fn export_db(output: &str) -> Result<()> {
             let content = extract_message(response)?;
             fs::write(output, content)
                 .with_context(|| format!("Failed to write to {}", output))?;
-            println!("✓ Database exported to: {}", output);
+            println!("{} Database exported to: {}", nerd_font::categories::Fa::Check, output);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to export database: {}", e);
+            tracing::error!("{} Failed to export database: {}", nerd_font::categories::Fa::Cross, e);
             tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
@@ -264,7 +264,7 @@ async fn inspect_session(session_id: Option<&str>) -> Result<()> {
     
     let session = session.context("No session ID provided and no current session")?;
     
-    println!("🔍 Inspecting session: {}\n", session);
+    println!("{} Inspecting session: {}\n", nerd_font::categories::Fa::MagnifyingGlassLocation, session);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -275,7 +275,7 @@ async fn inspect_session(session_id: Option<&str>) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to inspect session: {}", e);
+            tracing::error!("{} Failed to inspect session: {}", nerd_font::categories::Fa::Cross, e);
         }
     }
     
@@ -283,7 +283,7 @@ async fn inspect_session(session_id: Option<&str>) -> Result<()> {
 }
 
 async fn list_sessions(limit: u32) -> Result<()> {
-    println!("🔍 Listing recent sessions (limit: {})...\n", limit);
+    println!("{} Listing recent sessions (limit: {})...\n", nerd_font::categories::Fa::MagnifyingGlassLocation, limit);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -294,7 +294,7 @@ async fn list_sessions(limit: u32) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to list sessions: {}", e);
+            tracing::error!("{} Failed to list sessions: {}", nerd_font::categories::Fa::Cross, e);
         }
     }
     
@@ -302,7 +302,7 @@ async fn list_sessions(limit: u32) -> Result<()> {
 }
 
 async fn show_tool_stats() -> Result<()> {
-    println!("🔍 Fetching tool usage statistics...\n");
+    println!("{} Fetching tool usage statistics...\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -313,7 +313,7 @@ async fn show_tool_stats() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to fetch tool stats: {}", e);
+            tracing::error!("{} Failed to fetch tool stats: {}", nerd_font::categories::Fa::Cross, e);
         }
     }
     
@@ -321,7 +321,7 @@ async fn show_tool_stats() -> Result<()> {
 }
 
 async fn show_memory_status() -> Result<()> {
-    println!("🔍 Fetching memory compaction status...\n");
+    println!("{} Fetching memory compaction status...\n", nerd_font::categories::Fa::MagnifyingGlassLocation);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -332,7 +332,7 @@ async fn show_memory_status() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to fetch memory status: {}", e);
+            tracing::error!("{} Failed to fetch memory status: {}", nerd_font::categories::Fa::Cross, e);
         }
     }
     
@@ -341,7 +341,7 @@ async fn show_memory_status() -> Result<()> {
 
 async fn force_compact(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("⚠️  WARNING: Force compaction will compress recent conversations!");
+        println!("{}  WARNING: Force compaction will compress recent conversations!", nerd_font::categories::Fa::ExclamationCircle);
         println!("   This is normally done automatically at end of day.");
         println!();
         print!("   Continue? [y/N]: ");
@@ -357,7 +357,7 @@ async fn force_compact(noconfirm: bool) -> Result<()> {
         }
     }
     
-    println!("\n🔄 Forcing memory compaction...\n");
+    println!("\n{} Forcing memory compaction...\n", nerd_font::categories::Fa::Circle);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -368,7 +368,7 @@ async fn force_compact(noconfirm: bool) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to force compaction: {}", e);
+            tracing::error!("{} Failed to force compaction: {}", nerd_font::categories::Fa::Cross, e);
         }
     }
     
@@ -377,7 +377,7 @@ async fn force_compact(noconfirm: bool) -> Result<()> {
 
 async fn db_reset(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("⚠️  WARNING: This will RESET the entire database and delete ALL data!");
+        println!("{}  WARNING: This will RESET the entire database and delete ALL data!", nerd_font::categories::Fa::ExclamationCircle);
         println!("   This includes conversations, memory, tasks, triggers, preferences, and system prompts.");
         println!();
         print!("   Continue? [y/N]: ");
@@ -393,7 +393,7 @@ async fn db_reset(noconfirm: bool) -> Result<()> {
         }
     }
     
-    println!("\n🔄 Resetting database...\n");
+    println!("\n{} Resetting database...\n", nerd_font::categories::Fa::Circle);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -404,7 +404,7 @@ async fn db_reset(noconfirm: bool) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to reset database: {}", e);
+            tracing::error!("{} Failed to reset database: {}", nerd_font::categories::Fa::Cross, e);
             tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
@@ -414,7 +414,7 @@ async fn db_reset(noconfirm: bool) -> Result<()> {
 
 async fn reindex_db(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("⚠️  WARNING: Reindexing will rebuild all database indexes!");
+        println!("{}  WARNING: Reindexing will rebuild all database indexes!", nerd_font::categories::Fa::ExclamationCircle);
         println!("   This may take a while for large databases.");
         println!();
         print!("   Continue? [y/N]: ");
@@ -430,7 +430,7 @@ async fn reindex_db(noconfirm: bool) -> Result<()> {
         }
     }
     
-    println!("\n🔄 Reindexing database...\n");
+    println!("\n{} Reindexing database...\n", nerd_font::categories::Fa::Circle);
     
     let socket_path = super::get_server_socket()?;
     let client = crate::ipc::IpcClient::new(socket_path);
@@ -441,7 +441,7 @@ async fn reindex_db(noconfirm: bool) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            tracing::error!("❌ Failed to reindex database: {}", e);
+            tracing::error!("{} Failed to reindex database: {}", nerd_font::categories::Fa::Cross, e);
         }
     }
     

@@ -359,8 +359,8 @@ impl RitsuGui {
             }
             Message::ServerResponse(result) => {
                 match result {
-                    Ok(msg) => println!("✓ {msg}"),
-                    Err(e) => tracing::error!("✗ Error: {}", e),
+                    Ok(msg) => println!("{} {msg}", nerd_font::categories::Fa::Check),
+                    Err(e) => tracing::error!("{} Error: {}", nerd_font::categories::Fa::Cross, e),
                 }
                 self.is_loading = false;
                 Task::none()
@@ -781,7 +781,7 @@ impl RitsuGui {
                     
                     #[cfg(not(target_os = "linux"))]
                     {
-                        tracing::info!("✓ Connected to server");
+                        tracing::info!("{} Connected to server", nerd_font::categories::Fa::Check);
                     }
                 }
                 
@@ -887,7 +887,7 @@ impl RitsuGui {
         .align_y(iced::alignment::Vertical::Center);
         
         // Hamburger menu button
-        let menu_button = button(text("☰").size(24))
+        let menu_button = button(text(format!("{}", nerd_font::categories::Fa::Burger)).size(24))
             .on_press(Message::ToggleSidebar)
             .padding(10)
             .style(|theme: &iced::Theme, status| button::Style {
@@ -931,7 +931,7 @@ impl RitsuGui {
 
                 let sidebar = column![
                     if show_labels {
-                        button("💬 Chat")
+                        button(text(format!("{} Chat", nerd_font::categories::Fa::Comments)))
                             .on_press(Message::SwitchView(ViewState::Chat))
                             .width(iced::Length::Fill)
                             .padding(10)
@@ -957,13 +957,13 @@ impl RitsuGui {
                                 }
                             })
                     } else {
-                        button(text("💬"))
+                        button(text(format!("{}", nerd_font::categories::Fa::Comments)))
                             .on_press(Message::SwitchView(ViewState::Chat))
                             .width(iced::Length::Fixed(48.0))
                             .padding(8)
                     },
                     if show_labels {
-                        button("📜 Sessions")
+                        button(text(format!("{} Sessions", nerd_font::categories::Fa::FileText)))
                             .on_press(Message::SwitchView(ViewState::Sessions))
                             .width(iced::Length::Fill)
                             .padding(10)
@@ -989,13 +989,13 @@ impl RitsuGui {
                                 }
                             })
                     } else {
-                        button(text("📜"))
+                        button(text(format!("{}", nerd_font::categories::Fa::FileText)))
                             .on_press(Message::SwitchView(ViewState::Sessions))
                             .width(iced::Length::Fixed(48.0))
                             .padding(8)
                     },
                     if show_labels {
-                        button("✓ Tasks")
+                        button(text(format!("{} Tasks", nerd_font::categories::Fa::Check)))
                             .on_press(Message::SwitchView(ViewState::Tasks))
                             .width(iced::Length::Fill)
                             .padding(10)
@@ -1021,13 +1021,13 @@ impl RitsuGui {
                                 }
                             })
                     } else {
-                        button(text("✓"))
+                        button(text(format!("{}", nerd_font::categories::Fa::Check)))
                             .on_press(Message::SwitchView(ViewState::Tasks))
                             .width(iced::Length::Fixed(48.0))
                             .padding(8)
                     },
                     if show_labels {
-                        button("🧠 Memory")
+                        button(text(format!("{} Memory", nerd_font::categories::Fa::Brain)))
                             .on_press(Message::SwitchView(ViewState::Memory))
                             .width(iced::Length::Fill)
                             .padding(10)
@@ -1053,7 +1053,7 @@ impl RitsuGui {
                                 }
                             })
                     } else {
-                        button(text("🧠"))
+                        button(text(format!("{}", nerd_font::categories::Fa::Brain)))
                             .on_press(Message::SwitchView(ViewState::Memory))
                             .width(iced::Length::Fixed(48.0))
                             .padding(8)
@@ -1337,7 +1337,7 @@ impl RitsuGui {
                 // Add copy button for assistant messages
                 let message_with_copy: Element<'_, Message> = if !msg.is_user {
                     let button_text_color = text_color; // Copy for closure
-                    let copy_btn = button(text("📋").size(12))
+                    let copy_btn = button(text(format!("{}", nerd_font::categories::Fa::ClipboardAlt)).size(12))
                         .on_press(Message::CopyMessage(idx))
                         .padding(4)
                         .style(move |_theme: &iced::Theme, _status| {
@@ -1366,7 +1366,7 @@ impl RitsuGui {
                     // Add thinking section if present
                     if let Some(thinking_text) = &msg.thinking {
                         let thinking_button_color = text_color; // Copy for closure
-                        let thinking_toggle_btn = button(text(if msg.show_thinking { "🧠 Hide thinking" } else { "🧠 Show thinking" }).size(11))
+                        let thinking_toggle_btn = button(text(if msg.show_thinking { format!("{} Hide thinking", nerd_font::categories::Fa::Brain) } else { format!("{} Show thinking", nerd_font::categories::Fa::Brain) }).size(11))
                             .on_press(Message::ToggleThinking(idx))
                             .padding([2, 6])
                             .style(move |_theme: &iced::Theme, _status| {
@@ -1612,9 +1612,9 @@ impl RitsuGui {
                     };
                     
                     let status_icon = match task.status.as_str() {
-                        "completed" => "✓",
-                        "in_progress" => "⟳",
-                        _ => "○",
+                        "completed" => nerd_font::categories::Fa::Check.to_string(),
+                        "in_progress" => nerd_font::categories::Fa::Circle.to_string(),
+                        _ => nerd_font::categories::Fa::Circle.to_string(),
                     };
                     
                     // Status cycle buttons
@@ -1630,7 +1630,7 @@ impl RitsuGui {
                         .on_press(Message::TaskStatusChanged(task_id, next_status.1.to_string()))
                         .padding(5);
                     
-                    let delete_button = button(text("×").size(16))
+                    let delete_button = button(text(format!("{}", nerd_font::categories::Fa::Cross)).size(16))
                         .on_press(Message::TaskDeleted(task_id))
                         .padding(5)
                         .style(|_theme: &iced::Theme, _status| {

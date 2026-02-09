@@ -263,7 +263,7 @@ async fn test_send_message_and_receive_response() -> Result<()> {
     
     // Should get a response (not necessarily success if LLM not available)
     assert!(
-        success || output.contains("daemon") || output.contains("🤖"),
+        success || output.contains("daemon") || output.contains(&format!("{}", nerd_font::categories::Fa::Android)),
         "Should send message or get helpful error: {output}"
     );
     
