@@ -523,7 +523,7 @@ async fn handle_notification(
     #[cfg(not(target_os = "linux"))]
     {
         // Fallback for non-Linux platforms
-        eprintln!("[NOTIFICATION] {}: {}", title, message);
+        tracing::info!("[NOTIFICATION] {}: {}", title, message);
     }
 
     Ok(())

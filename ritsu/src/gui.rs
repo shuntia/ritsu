@@ -343,7 +343,7 @@ impl RitsuGui {
             Message::ServerResponse(result) => {
                 match result {
                     Ok(msg) => println!("✓ {msg}"),
-                    Err(e) => eprintln!("✗ Error: {e}"),
+                    Err(e) => tracing::error!("✗ Error: {}", e),
                 }
                 self.is_loading = false;
                 Task::none()
@@ -377,11 +377,11 @@ impl RitsuGui {
                                     )
                                 }
                                 Ok(ritsu_common::protocol::ServerResponse::Error { message }) => {
-                                    eprintln!("Error loading sessions: {}", message);
+                                    tracing::error!("Error loading sessions: {}", message);
                                     Message::SessionsLoaded(vec![])
                                 }
                                 Err(e) => {
-                                    eprintln!("IPC error loading sessions: {}", e);
+                                    tracing::error!("IPC error loading sessions: {}", e);
                                     Message::SessionsLoaded(vec![])
                                 }
                                 _ => Message::SessionsLoaded(vec![]),
@@ -695,7 +695,7 @@ impl RitsuGui {
                     
                     #[cfg(not(target_os = "linux"))]
                     {
-                        eprintln!("✓ Connected to server");
+                        tracing::info!("✓ Connected to server");
                     }
                 }
                 
