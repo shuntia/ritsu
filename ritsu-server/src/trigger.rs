@@ -252,6 +252,7 @@ impl TriggerRegistry {
         }).await?;
 
         self.load_from_database().await?;
+        self.trigger_changed.notify_one();
         Ok(())
     }
 
@@ -269,6 +270,7 @@ impl TriggerRegistry {
         }
 
         self.load_from_database().await?;
+        self.trigger_changed.notify_one();
         Ok(())
     }
 
@@ -289,6 +291,7 @@ impl TriggerRegistry {
         }
 
         self.load_from_database().await?;
+        self.trigger_changed.notify_one();
         Ok(())
     }
 }
