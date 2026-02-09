@@ -10,6 +10,7 @@ use iced::{
     futures,
     stream,
 };
+use lucide_icons::LUCIDE_FONT_BYTES;
 use std::time::Duration;
 
 #[allow(dead_code)]
@@ -194,7 +195,7 @@ impl RitsuGui {
                 let mut needs_animation = self.is_loading;
                 
                 if self.is_loading {
-                    self.animation_frame = (self.animation_frame + 1) % 4;
+                    self.animation_frame = self.animation_frame.wrapping_add(1);
                 }
                 
                 // Animate sidebar transition using eased interpolation for smoother motion
@@ -1320,9 +1321,9 @@ impl RitsuGui {
             input_field = input_field.on_submit(Message::SendMessage);
         }
 
-        let spinner_frames = ["⠋", "⠙", "⠹", "⠸"];
-        let spinner = spinner_frames[self.animation_frame % spinner_frames.len()];
-        
+        let spinner_char = char::from(lucide_icons::Icon::Loader);
+        let spinner_text = text(spinner_char.to_string()).size(18).color(iced::Color::WHITE);
+
         let send_button = if !self.is_loading {
             button("Send")
                 .on_press(Message::SendMessage)
@@ -1337,7 +1338,7 @@ impl RitsuGui {
                     ..button::primary(theme, status)
                 })
         } else {
-            button(text(spinner).size(16))
+            button(spinner_text)
                 .padding(12)
                 .style(|_theme: &iced::Theme, _status| {
                     button::Style {
@@ -1578,6 +1579,7 @@ pub fn run_blocking() -> anyhow::Result<()> {
     )
     .subscription(subscription)
     .theme(|_state: &RitsuGui| Theme::Dark)
+    .font(LUCIDE_FONT_BYTES)
     .run()
     .map_err(|e| anyhow::anyhow!("GUI error: {e}"))
 }

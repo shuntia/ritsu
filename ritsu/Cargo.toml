@@ -32,6 +32,7 @@ toml.workspace = true
 # GUI dependencies
 iced.workspace = true
 notify-rust.workspace = true
+"lucide-icons".workspace = true
 
 [features]
 default = []

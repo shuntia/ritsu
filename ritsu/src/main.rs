@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod config;
 mod gui;
+mod gui_icons;
 mod ipc;
 
 #[derive(Parser)]
