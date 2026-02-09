@@ -60,6 +60,9 @@ pub struct ServerConfig {
 pub struct MemoryConfig {
     #[serde(default = "default_rotation_days")]
     pub daily_rotation_days: u32,
+    /// Whether to include AI-generated prompt enhancements when building effective prompts
+    #[serde(default = "default_include_ai_generated")]
+    pub include_ai_generated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,8 +107,13 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             daily_rotation_days: default_rotation_days(),
+            include_ai_generated: default_include_ai_generated(),
         }
     }
+}
+
+fn default_include_ai_generated() -> bool {
+    true
 }
 
 impl Default for TimeoutConfig {
@@ -208,6 +216,7 @@ client_binary_path = "{client_binary_path}"
 
 [memory]
 daily_rotation_days = {rotation_days}
+include_ai_generated = true
 
 [timeouts]
 user_response_seconds = {user_response}

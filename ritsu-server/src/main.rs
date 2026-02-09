@@ -115,6 +115,7 @@ async fn main() -> Result<()> {
     let memory = std::sync::Arc::new(memory::MemoryManager::new(
         db.connection.clone(),
         config.server.database_path.clone(),
+        config.memory.include_ai_generated,
     ));
     info!("Memory manager initialized");
 

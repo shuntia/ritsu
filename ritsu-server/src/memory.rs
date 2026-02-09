@@ -18,13 +18,15 @@ pub struct MemoryManager {
     conn: Arc<tokio_rusqlite::Connection>,
     #[allow(dead_code)]
     db_path: String,
+    /// Whether to include AI-generated prompt enhancements
+    include_ai_generated: bool,
 }
 
 #[allow(dead_code)]
 impl MemoryManager {
     #[must_use]
-    pub fn new(conn: Arc<tokio_rusqlite::Connection>, db_path: String) -> Self {
-        Self { conn, db_path }
+    pub fn new(conn: Arc<tokio_rusqlite::Connection>, db_path: String, include_ai_generated: bool) -> Self {
+        Self { conn, db_path, include_ai_generated }
     }
 
     /// Store a conversation message
@@ -358,21 +360,23 @@ impl MemoryManager {
         }
 
         // 3. Add AI-generated enhancements (defer to DB, but cap size and avoid duplicates)
-        if let Ok(Some(ai_generated_full)) = self.get_system_prompt("ai_generated").await {
-            // Avoid duplicating identical content
-            let ai_generated = if parts.iter().any(|p| p.contains(&ai_generated_full)) {
-                None
-            } else {
-                // Cap length to avoid very large prompts
-                const AI_GENERATED_MAX: usize = 10_000;
-                if ai_generated_full.len() > AI_GENERATED_MAX {
-                    Some(format!("{}... [truncated]", &ai_generated_full[..AI_GENERATED_MAX]))
+        if self.include_ai_generated {
+            if let Ok(Some(ai_generated_full)) = self.get_system_prompt("ai_generated").await {
+                // Avoid duplicating identical content
+                let ai_generated = if parts.iter().any(|p| p.contains(&ai_generated_full)) {
+                    None
                 } else {
-                    Some(ai_generated_full)
+                    // Cap length to avoid very large prompts
+                    const AI_GENERATED_MAX: usize = 10_000;
+                    if ai_generated_full.len() > AI_GENERATED_MAX {
+                        Some(format!("{}... [truncated]", &ai_generated_full[..AI_GENERATED_MAX]))
+                    } else {
+                        Some(ai_generated_full)
+                    }
+                };
+                if let Some(a) = ai_generated {
+                    parts.push(a);
                 }
-            };
-            if let Some(a) = ai_generated {
-                parts.push(a);
             }
         }
 
