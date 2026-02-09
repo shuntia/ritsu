@@ -147,6 +147,7 @@ async fn handle_client(
                                 &trigger_registry,
                                 &llm_client,
                                 &config,
+                                state.clone(),
                             ).await;
                             send_response(&mut stream, response).await?;
                         }
@@ -438,6 +439,7 @@ async fn handle_request(
     trigger_registry: &TriggerRegistry,
     llm_client: &LlmClient,
     config: &crate::config::Config,
+    state: Arc<crate::state::ServerState>,
 ) -> ServerResponse {
     match request {
         ClientRequest::Ping => ServerResponse::Pong,
@@ -577,7 +579,15 @@ async fn handle_request(
             description,
         } => {
             match trigger_registry.create_trigger(&name, &trigger_type, &schedule, tag.as_deref(), description.as_deref()).await {
-                Ok(()) => ServerResponse::Ok,
+                Ok(()) => {
+                    // Notify connected clients about the new trigger
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Trigger Created".to_string(),
+                        message: format!("Trigger '{}' created", name),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Ok
+                }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to create trigger: {}", e),
                 },
@@ -586,7 +596,14 @@ async fn handle_request(
 
         ClientRequest::DeleteTrigger { name } => {
             match trigger_registry.delete_trigger(&name).await {
-                Ok(()) => ServerResponse::Ok,
+                Ok(()) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Trigger Deleted".to_string(),
+                        message: format!("Trigger '{}' deleted", name),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Ok
+                }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to delete trigger: {}", e),
                 },
@@ -595,7 +612,14 @@ async fn handle_request(
 
         ClientRequest::DisableTrigger { name } => {
             match trigger_registry.disable_trigger(&name).await {
-                Ok(()) => ServerResponse::Ok,
+                Ok(()) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Trigger Disabled".to_string(),
+                        message: format!("Trigger '{}' disabled", name),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Ok
+                }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to disable trigger: {}", e),
                 },
@@ -655,7 +679,14 @@ async fn handle_request(
                 .create_task(&title, description.as_deref(), &priority, &tags, due_date.as_deref())
                 .await
             {
-                Ok(_id) => ServerResponse::Ok,
+                Ok(id) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Task Created".to_string(),
+                        message: format!("Task '{}' created (id: {})", title, id),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Ok
+                }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to create task: {}", e),
                 },
@@ -685,12 +716,26 @@ async fn handle_request(
                 }
             }
             
+            // Notify clients about task update
+            let _ = state.broadcast_push(ServerPush::Notification {
+                title: "Task Updated".to_string(),
+                message: format!("Task #{} updated", id),
+                urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+            }).await;
+            
             ServerResponse::Ok
         }
         
         ClientRequest::DeleteTask { id } => {
             match task_manager.delete_task(id).await {
-                Ok(()) => ServerResponse::Ok,
+                Ok(()) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Task Deleted".to_string(),
+                        message: format!("Task #{} deleted", id),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Ok
+                }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to delete task: {}", e),
                 },
@@ -774,7 +819,14 @@ async fn handle_request(
         }
         ClientRequest::CreateNote { content, tags } => {
             match memory.create_note(&content, &tags).await {
-                Ok(id) => ServerResponse::Success { message: format!("Created note id: {}", id) },
+                Ok(id) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Note Created".to_string(),
+                        message: format!("Note #{} created", id),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Success { message: format!("Created note id: {}", id) }
+                }
                 Err(e) => ServerResponse::Error { message: format!("Failed to create note: {}", e) },
             }
         }
@@ -853,6 +905,11 @@ async fn handle_request(
             }
             
             info!("All memory cleared successfully");
+            let _ = state.broadcast_push(ServerPush::Notification {
+                title: "Memory Cleared".to_string(),
+                message: "All memory has been cleared by client request".to_string(),
+                urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+            }).await;
             ServerResponse::Ok
         }
         
@@ -874,8 +931,15 @@ async fn handle_request(
 
         ClientRequest::SetSystemPrompt { content } => {
             match memory.store_system_prompt("base", &content).await {
-                Ok(()) => ServerResponse::Success {
-                    message: "System prompt updated successfully".to_string(),
+                Ok(()) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "System Prompt Updated".to_string(),
+                        message: "Base system prompt updated".to_string(),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Success {
+                        message: "System prompt updated successfully".to_string(),
+                    }
                 },
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to set system prompt: {}", e),
@@ -959,8 +1023,15 @@ async fn handle_request(
 
         ClientRequest::ForceCompact => {
             match memory.force_compact().await {
-                Ok(()) => ServerResponse::Success {
-                    message: "Memory compaction completed successfully".to_string(),
+                Ok(()) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Memory Compaction".to_string(),
+                        message: "Memory compaction completed successfully".to_string(),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Success {
+                        message: "Memory compaction completed successfully".to_string(),
+                    }
                 },
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to force compact: {}", e),
@@ -970,8 +1041,15 @@ async fn handle_request(
 
         ClientRequest::ReindexDatabase => {
             match memory.reindex_database().await {
-                Ok(()) => ServerResponse::Success {
-                    message: "Database reindexed successfully".to_string(),
+                Ok(()) => {
+                    let _ = state.broadcast_push(ServerPush::Notification {
+                        title: "Database Reindexed".to_string(),
+                        message: "Database reindexed successfully".to_string(),
+                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                    }).await;
+                    ServerResponse::Success {
+                        message: "Database reindexed successfully".to_string(),
+                    }
                 },
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to reindex database: {}", e),
@@ -1031,6 +1109,12 @@ async fn handle_request(
             if let Err(e) = memory.reindex_database().await {
                 warn!("Failed to reindex database after reset: {}", e);
             }
+
+            let _ = state.broadcast_push(ServerPush::Notification {
+                title: "Database Reset".to_string(),
+                message: "Database was reset by client request".to_string(),
+                urgency: ritsu_common::protocol::NotificationUrgency::Critical,
+            }).await;
 
             ServerResponse::Success { message: "Database reset successfully".to_string() }
         }
