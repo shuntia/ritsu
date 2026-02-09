@@ -4,6 +4,7 @@
 
 pub mod daemon;
 pub mod client_daemon;
+pub mod attach;
 pub mod send;
 pub mod trigger;
 pub mod task;
