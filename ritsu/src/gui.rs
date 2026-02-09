@@ -12,8 +12,8 @@ use iced::{
 };
 use lucide_icons::LUCIDE_FONT_BYTES;
 use std::time::Duration;
-use iced::advanced::svg as svg;
 use iced::{Point, Rectangle};
+use iced_widget::svg as widget_svg;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +98,7 @@ pub struct RitsuGui {
     retry_countdown_frames: Option<u32>, // Frames until retry (20 FPS = 100 frames = 5 seconds)
     streaming_message_index: Option<usize>, // Index of message being streamed to
     spinner_angle: f32, // radians
+    spinner_handle: widget_svg::Handle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +144,7 @@ impl RitsuGui {
                 retry_countdown_frames: None,
                 streaming_message_index: None,
                 spinner_angle: 0.0,
+                spinner_handle: widget_svg::Handle::from_memory(include_bytes!("../assets/icons/loader.svg").to_vec()),
             },
 
             // Test connection on startup
@@ -185,6 +187,7 @@ impl Default for RitsuGui {
             retry_countdown_frames: None,
             streaming_message_index: None,
             spinner_angle: 0.0,
+            spinner_handle: widget_svg::Handle::from_memory(include_bytes!("../assets/icons/loader.svg").to_vec()),
         }
     }
 }
@@ -1329,12 +1332,10 @@ impl RitsuGui {
             input_field = input_field.on_submit(Message::SendMessage);
         }
 
-        // Use SVG frame-based spinner (rotated loader SVG frames)
+        // Use rotated SVG via renderer rotation for smooth GPU-transform rotation
         let spinner_svg = {
-            let frames = crate::gui_icons::make_spinner_frames();
-            let idx = if frames.is_empty() { 0 } else { self.animation_frame % frames.len() };
-            let handle = iced_widget::svg::Handle::from_memory(frames[idx].clone());
-            let svg_widget = iced_widget::svg::Svg::new(handle);
+            let handle = self.spinner_handle.clone();
+            let svg_widget = iced_widget::svg::Svg::new(handle).rotation(self.spinner_angle);
             container(svg_widget).width(iced::Length::Fixed(18.0)).height(iced::Length::Fixed(18.0))
         };
 
