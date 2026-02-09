@@ -20,7 +20,7 @@ pub async fn query_memory(days: Option<u32>) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {}", message);
+            tracing::error!("Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -43,7 +43,7 @@ pub async fn query_notes(_tag: Option<&str>) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {}", message);
+            tracing::error!("Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -87,7 +87,7 @@ pub async fn clear_memory(noconfirm: bool) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("✗ Error: {}", message);
+            tracing::error!("✗ Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),

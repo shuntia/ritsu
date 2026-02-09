@@ -61,7 +61,7 @@ async fn list_tasks(status: Option<ritsu_common::TaskStatus>) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {}", message);
+            tracing::error!("Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -93,7 +93,7 @@ async fn create_task(
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {}", message);
+            tracing::error!("Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -117,7 +117,7 @@ async fn update_task(
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {}", message);
+            tracing::error!("Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),

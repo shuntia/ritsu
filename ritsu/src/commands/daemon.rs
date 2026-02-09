@@ -53,7 +53,7 @@ pub async fn stop() -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            eprintln!("Failed to send shutdown: {}", e);
+            tracing::error!("Failed to send shutdown: {}", e);
             Err(e)
         }
     }

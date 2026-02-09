@@ -31,7 +31,7 @@ async fn list_triggers() -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {}", message);
+            tracing::error!("Error: {}", message);
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -57,7 +57,7 @@ async fn create_trigger(name: &str, time: &str) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {message}");
+            tracing::error!("Error: {message}");
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -79,7 +79,7 @@ async fn disable_trigger(name: &str) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {message}");
+            tracing::error!("Error: {message}");
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),
@@ -101,7 +101,7 @@ async fn delete_trigger(name: &str) -> Result<()> {
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
-            eprintln!("Error: {message}");
+            tracing::error!("Error: {message}");
             anyhow::bail!(message)
         }
         _ => anyhow::bail!("Unexpected response"),

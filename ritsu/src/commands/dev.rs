@@ -49,8 +49,8 @@ async fn show_prompt() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to fetch system prompt: {}", e);
-            eprintln!("\nMake sure the server is running: ritsu server start");
+            tracing::error!("❌ Failed to fetch system prompt: {}", e);
+            tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
     
@@ -69,8 +69,8 @@ async fn show_model() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to fetch model info: {}", e);
-            eprintln!("\nMake sure the server is running: ritsu server start");
+            tracing::error!("❌ Failed to fetch model info: {}", e);
+            tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
     
@@ -155,8 +155,8 @@ async fn show_db_stats() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to fetch database stats: {}", e);
-            eprintln!("\nMake sure the server is running: ritsu server start");
+            tracing::error!("❌ Failed to fetch database stats: {}", e);
+            tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
     
@@ -246,8 +246,8 @@ async fn export_db(output: &str) -> Result<()> {
             println!("✓ Database exported to: {}", output);
         }
         Err(e) => {
-            eprintln!("❌ Failed to export database: {}", e);
-            eprintln!("\nMake sure the server is running: ritsu server start");
+            tracing::error!("❌ Failed to export database: {}", e);
+            tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
     
@@ -275,7 +275,7 @@ async fn inspect_session(session_id: Option<&str>) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to inspect session: {}", e);
+            tracing::error!("❌ Failed to inspect session: {}", e);
         }
     }
     
@@ -294,7 +294,7 @@ async fn list_sessions(limit: u32) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to list sessions: {}", e);
+            tracing::error!("❌ Failed to list sessions: {}", e);
         }
     }
     
@@ -313,7 +313,7 @@ async fn show_tool_stats() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to fetch tool stats: {}", e);
+            tracing::error!("❌ Failed to fetch tool stats: {}", e);
         }
     }
     
@@ -332,7 +332,7 @@ async fn show_memory_status() -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to fetch memory status: {}", e);
+            tracing::error!("❌ Failed to fetch memory status: {}", e);
         }
     }
     
@@ -368,7 +368,7 @@ async fn force_compact(noconfirm: bool) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to force compaction: {}", e);
+            tracing::error!("❌ Failed to force compaction: {}", e);
         }
     }
     
@@ -404,8 +404,8 @@ async fn db_reset(noconfirm: bool) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to reset database: {}", e);
-            eprintln!("\nMake sure the server is running: ritsu server start");
+            tracing::error!("❌ Failed to reset database: {}", e);
+            tracing::info!("Make sure the server is running: ritsu server start");
         }
     }
     
@@ -441,7 +441,7 @@ async fn reindex_db(noconfirm: bool) -> Result<()> {
             println!("{}", msg);
         }
         Err(e) => {
-            eprintln!("❌ Failed to reindex database: {}", e);
+            tracing::error!("❌ Failed to reindex database: {}", e);
         }
     }
     

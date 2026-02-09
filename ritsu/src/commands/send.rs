@@ -52,9 +52,10 @@ pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
     let mut stream = tokio::net::UnixStream::connect(&socket_path).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound || 
            e.kind() == std::io::ErrorKind::ConnectionRefused {
-            eprintln!("✗ Client daemon not running. Start it with: ritsu start");
+            tracing::error!("✗ Client daemon not running. Start it with: ritsu start");
             anyhow::anyhow!("Client daemon not running")
         } else {
+            tracing::error!("Failed to connect: {}", e);
             anyhow::anyhow!("Failed to connect: {}", e)
         }
     })?;
@@ -109,7 +110,7 @@ pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
                 }
                 ritsu_common::protocol::ServerResponse::Error { message } => {
                     if full_response.is_empty() {
-                        eprintln!("✗ Error: {}", message);
+                        tracing::error!("✗ Error: {}", message);
                     }
                     anyhow::bail!(message)
                 }
@@ -118,12 +119,12 @@ pub async fn send_message(message: &str, new_session: bool) -> Result<()> {
                     return Ok(());
                 }
                 _ => {
-                    eprintln!("✗ Unexpected response");
+                    tracing::error!("✗ Unexpected response");
                     anyhow::bail!("Unexpected response")
                 }
             }
         } else {
-            eprintln!("✗ Failed to parse response");
+            tracing::error!("✗ Failed to parse response");
             anyhow::bail!("Failed to parse response")
         }
     }
