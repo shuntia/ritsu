@@ -974,6 +974,38 @@ mod tool_impls {
             }),
         }
     }
+
+    pub fn wait() -> Tool {
+        Tool {
+            name: "wait".to_string(),
+            description: "Pause for the specified duration in seconds.".to_string(),
+            tags: vec!["utility".to_string(), "time".to_string()],
+            parameters: vec![
+                ToolParameter {
+                    name: "seconds".to_string(),
+                    description: "Number of seconds to wait (integer or float)".to_string(),
+                    required: true,
+                    param_type: "string".to_string(),
+                },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                Box::pin(async move {
+                    let secs_str = match args.get("seconds") {
+                        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+                        _ => return ToolResult::error("Missing required parameter: seconds".to_string()),
+                    };
+                    let secs = match secs_str.parse::<f64>() {
+                        Ok(v) if v >= 0.0 => v,
+                        _ => return ToolResult::error(format!("Invalid seconds value: {}", secs_str)),
+                    };
+                    let dur = std::time::Duration::from_secs_f64(secs);
+                    info!("Tool 'wait' sleeping for {}s", secs);
+                    tokio::time::sleep(dur).await;
+                    ToolResult::success(format!("Waited {} seconds", secs))
+                })
+            }),
+        }
+    }
 }
 
 use crate::memory::MemoryManager;
@@ -1000,8 +1032,9 @@ pub async fn register_all_tools(
     registry.register(tool_impls::update_task(task_manager.clone())).await;
     registry.register(tool_impls::list_tasks(task_manager.clone())).await;
     registry.register(tool_impls::set_preference(preferences.clone())).await;
+    registry.register(tool_impls::wait()).await;
     
-    info!("Registered {} tools", 10);
+    info!("Registered {} tools", 11);
 }
 
 #[cfg(test)]
