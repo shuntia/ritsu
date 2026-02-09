@@ -488,8 +488,8 @@ mod tool_impls {
                     param_type: "string".to_string(),
                 },
                 ToolParameter {
-                    name: "message".to_string(),
-                    description: "Message to send when trigger fires (for custom triggers)".to_string(),
+                    name: "note".to_string(),
+                    description: "Note content to store when trigger fires (for custom triggers)".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
@@ -533,8 +533,8 @@ mod tool_impls {
                     let tag = args.get("tag").cloned();
                     let description = args.get("description").cloned();
                     
-                    // Check if this is a custom trigger (has message)
-                    let is_custom = args.contains_key("message");
+                    // Check if this is a custom trigger (has note)
+                    let is_custom = args.contains_key("note");
                     
                     // Build metadata for custom triggers
                     let mut metadata = std::collections::HashMap::new();
@@ -548,8 +548,8 @@ mod tool_impls {
                     if is_custom {
                         // Custom trigger metadata
                         metadata.insert("analysis_type".to_string(), "custom".to_string());
-                        if let Some(msg) = args.get("message") {
-                            metadata.insert("message".to_string(), msg.clone());
+                        if let Some(note) = args.get("note") {
+                            metadata.insert("note".to_string(), note.clone());
                         }
                         if let Some(open_chat) = args.get("open_chat") {
                             metadata.insert("open_chat".to_string(), open_chat.clone());

@@ -526,10 +526,10 @@ pub async fn execute_idle_analysis(
             info!("Daily briefing generated and stored as note");
         }
         "custom" | "reminder" => {
-            // Custom AI-created trigger - send notification/message
+            // Custom AI-created trigger - send notification/note
             info!("Executing custom trigger: {}", trigger.name);
             
-            let message = trigger.metadata.get("message")
+            let note = trigger.metadata.get("note")
                 .map_or_else(|| format!("Reminder: {}", trigger.name), String::clone);
             
             let _urgency = trigger.metadata.get("urgency")
@@ -540,10 +540,10 @@ pub async fn execute_idle_analysis(
             
             // TODO: Send notification to client daemon via tool system
             // For now, just log the action
-            info!("Custom trigger would notify: {} (open_chat: {})", message, open_chat);
+            info!("Custom trigger would notify: {} (open_chat: {})", note, open_chat);
             
             // Store as note so user can see it later
-            memory.create_note(&format!("Trigger '{}': {}", trigger.name, message), &["trigger".to_string(), "reminder".to_string()]).await?;
+            memory.create_note(&format!("Trigger '{}': {}", trigger.name, note), &["trigger".to_string(), "reminder".to_string()]).await?;
         }
         _ => {
             warn!("Unknown analysis type: {}", analysis_type);
