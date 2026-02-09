@@ -891,7 +891,14 @@ async fn handle_request(
         }
 
         ClientRequest::GetModelInfo => {
-            let backend = config.llm.backends.first();
+            // Pick the configured default backend if present, otherwise show the first configured backend
+            let backend = config
+                .llm
+                .backends
+                .iter()
+                .find(|b| b.name == config.llm.default_backend)
+                .or_else(|| config.llm.backends.first());
+
             let model_info = backend.map_or_else(
                 || "No LLM backend configured".to_string(),
                 |b| format!(

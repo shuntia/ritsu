@@ -96,11 +96,15 @@ async fn main() -> Result<()> {
     }
 
     // Auto-start Ollama if installed but not running (with model name from config)
+    // Choose model name from the configured default backend, falling back to the first configured backend or a hardcoded default
     let model_name = config
         .llm
         .backends
-        .first()
-        .map_or("llama3.2:3b", |b| b.model.as_str()); // Fallback only if no backends configured
+        .iter()
+        .find(|b| b.name == config.llm.default_backend)
+        .or_else(|| config.llm.backends.first())
+        .map(|b| b.model.as_str())
+        .unwrap_or("llama3.2:3b");
     start_ollama_if_needed(model_name).await;
 
     // Initialize database

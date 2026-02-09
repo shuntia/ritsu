@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClientConfig {
@@ -237,16 +238,11 @@ impl ClientConfig {
                 .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-            eprintln!("✓ Loaded client configuration from: {}", path.display());
+            info!("Loaded client configuration from: {}", path.display());
             Ok(config)
         } else {
-            eprintln!("⚠ Client configuration file not found: {}", path.display());
-            eprintln!("  Using default configuration.");
-            eprintln!();
-            eprintln!("  To customize client settings, create a config file:");
-            eprintln!("    mkdir -p ~/.config/ritsu");
-            eprintln!("    ritsu --write-example-config");
-            eprintln!();
+            warn!("Client configuration file not found: {}", path.display());
+            info!("Using default client configuration. To customize, create '{}' or run 'ritsu --write-example-config'", path.display());
             Ok(Self::default())
         }
     }
@@ -275,7 +271,7 @@ impl ClientConfig {
         std::fs::write(path, toml_string)
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
         
-        eprintln!("✓ Created example client config: {}", path.display());
+        info!("Created example client config: {}", path.display());
         Ok(())
     }
     

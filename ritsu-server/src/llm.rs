@@ -48,10 +48,12 @@ impl LlmClient {
         timeout_config: &TimeoutConfig,
         tool_registry: Arc<ToolRegistry>,
     ) -> Result<Self> {
-        // Use the first backend for now (can be extended to support multiple)
+        // Select backend by name (default_backend), falling back to the first configured backend
         let backend = config
             .backends
-            .first()
+            .iter()
+            .find(|b| b.name == config.default_backend)
+            .or_else(|| config.backends.first())
             .context("No LLM backends configured")?;
 
         let provider = Self::create_provider(backend, timeout_config, &tool_registry).await?;
