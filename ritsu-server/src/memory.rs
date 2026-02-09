@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use std::sync::Arc;
 use tokio_rusqlite::rusqlite;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::llm::LlmClient;
 
@@ -357,9 +357,23 @@ impl MemoryManager {
             }
         }
 
-        // 3. Add AI-generated enhancements
-        if let Ok(Some(ai_generated)) = self.get_system_prompt("ai_generated").await {
-            parts.push(ai_generated);
+        // 3. Add AI-generated enhancements (defer to DB, but cap size and avoid duplicates)
+        if let Ok(Some(ai_generated_full)) = self.get_system_prompt("ai_generated").await {
+            // Avoid duplicating identical content
+            let ai_generated = if parts.iter().any(|p| p.contains(&ai_generated_full)) {
+                None
+            } else {
+                // Cap length to avoid very large prompts
+                const AI_GENERATED_MAX: usize = 10_000;
+                if ai_generated_full.len() > AI_GENERATED_MAX {
+                    Some(format!("{}... [truncated]", &ai_generated_full[..AI_GENERATED_MAX]))
+                } else {
+                    Some(ai_generated_full)
+                }
+            };
+            if let Some(a) = ai_generated {
+                parts.push(a);
+            }
         }
 
         Ok(parts.join("\n\n---\n\n"))
@@ -367,43 +381,37 @@ impl MemoryManager {
 
     /// Load base system prompt from various sources
     async fn load_base_prompt(&self) -> Result<String> {
-        // Try .config/ritsu/prompts/system_base.md first
-        if let Ok(content) = crate::database::read_file_async(".config/ritsu/prompts/system_base.md").await {
-            return Ok(content);
-        }
-
-        // Try home directory
+        // Prefer user's home config first (~/.config/ritsu/prompts/system_base.md)
         if let Some(home) = dirs::home_dir() {
-            if let Ok(content) = crate::database::read_file_async(home.join(".config/ritsu/prompts/system_base.md")).await {
+            let home_prompt = home.join(".config/ritsu/prompts/system_base.md");
+            if let Ok(content) = crate::database::read_file_async(home_prompt).await {
+                return Ok(content);
+            }
+            // legacy location in home
+            let home_legacy = home.join(".config/ritsu/system_prompt.md");
+            if let Ok(content) = crate::database::read_file_async(home_legacy).await {
                 return Ok(content);
             }
         }
 
-        // Fall back to legacy .config/system_prompt.md
+        // Next check local repository-relative config for development setups
+        if let Ok(content) = crate::database::read_file_async(".config/ritsu/prompts/system_base.md").await {
+            return Ok(content);
+        }
+        // local legacy fallback
         if let Ok(content) = crate::database::read_file_async(".config/system_prompt.md").await {
             return Ok(content);
         }
 
-        // Try home directory legacy location
-        if let Some(home) = dirs::home_dir() {
-            if let Ok(content) = crate::database::read_file_async(home.join(".config/ritsu/system_prompt.md")).await {
-                return Ok(content);
-            }
-        }
-
-        // Try database
+        // Try database-stored base prompt
         if let Ok(Some(base)) = self.get_system_prompt("base").await {
             return Ok(base);
         }
 
-        // No custom prompt found - warn user
-        eprintln!("⚠ System prompt file not found: ~/.config/ritsu/prompts/system_base.md");
-        eprintln!("  Using default system prompt.");
-        eprintln!();
-        eprintln!("  To customize the system prompt:");
-        eprintln!("    mkdir -p ~/.config/ritsu/prompts");
-        eprintln!("    echo 'Your custom system prompt' > ~/.config/ritsu/prompts/system_base.md");
-        eprintln!();
+        // No custom prompt found - warn user and provide guidance via logs
+        warn!("System prompt file not found: ~/.config/ritsu/prompts/system_base.md");
+        warn!("Using default system prompt.");
+        warn!("To customize the system prompt create ~/.config/ritsu/prompts/system_base.md and add your content.");
 
         // Ultimate fallback
         Ok("You are Ritsu, a helpful AI assistant.".to_string())
