@@ -34,7 +34,7 @@ iced.workspace = true
 iced_widget.workspace = true
 notify-rust.workspace = true
 "lucide-icons".workspace = true
-nerd_font.workspace = true
+nerd_font = { workspace = true, features = ["iced"] }
 
 [features]
 default = []

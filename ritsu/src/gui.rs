@@ -1764,6 +1764,7 @@ pub fn run_blocking() -> anyhow::Result<()> {
     .subscription(subscription)
     .theme(|_state: &RitsuGui| Theme::Dark)
     .font(LUCIDE_FONT_BYTES)
+    .font(nerd_font::NerdFont::FONT_BYTES)
     .run()
     .map_err(|e| anyhow::anyhow!("GUI error: {e}"))
 }
