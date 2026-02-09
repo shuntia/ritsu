@@ -42,6 +42,14 @@ pub struct LlmClient {
     timeout_seconds: u64,
 }
 
+fn select_backend<'a>(config: &'a LlmConfig) -> Option<&'a LlmBackend> {
+    config
+        .backends
+        .iter()
+        .find(|b| b.name == config.default_backend)
+        .or_else(|| config.backends.first())
+}
+
 impl LlmClient {
     pub async fn new(
         config: &LlmConfig,
@@ -632,21 +640,21 @@ impl LlmClient {
                                 info!(tool=%call_name, duration_ms = %duration.as_millis(), success = res.success, "Tool execution completed");
                                 debug!(tool=%call_name, result_len = %result_text.len(), "Tool result length");
 
-                                let msg = format!("\n\n🔧 Tool '{}' result:\n{}\n", call_name, result_text);
+                                let msg = format!("\n\n[lucide:wrench] Tool '{}' result:\n{}\n", call_name, result_text);
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Ok(Err(e)) => {
                                 let duration = start.elapsed();
                                 warn!(tool=%call_name, duration_ms = %duration.as_millis(), error=%e, "Tool execution failed");
 
-                                let msg = format!("\n\n🔧 Tool '{}' execution failed: {}\n", call_name, e);
+                                let msg = format!("\n\n[lucide:wrench] Tool '{}' execution failed: {}\n", call_name, e);
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Err(_) => {
                                 let duration = start.elapsed();
                                 warn!(tool=%call_name, duration_ms = %duration.as_millis(), "Tool execution timed out after {}s", tool_timeout.as_secs());
 
-                                let msg = format!("\n\n🔧 Tool '{}' execution timed out after {}s\n", call_name, tool_timeout.as_secs());
+                                let msg = format!("\n\n[lucide:wrench] Tool '{}' execution timed out after {}s\n", call_name, tool_timeout.as_secs());
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                         }
@@ -666,5 +674,58 @@ impl LlmClient {
         });
 
         Ok(rx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{LlmConfig, LlmBackend};
+
+    #[test]
+    fn default_backend_honored() {
+        let cfg = LlmConfig {
+            default_backend: "openai".to_string(),
+            backends: vec![
+                LlmBackend {
+                    name: "openai".to_string(),
+                    endpoint: "https://api.openai.com/v1".to_string(),
+                    model: "gpt-4".to_string(),
+                    api_key: None,
+                    api_key_env: None,
+                },
+                LlmBackend {
+                    name: "ollama".to_string(),
+                    endpoint: "http://localhost:11434".to_string(),
+                    model: "llama3.2".to_string(),
+                    api_key: None,
+                    api_key_env: None,
+                },
+            ],
+            disable_streaming: false,
+            disable_tools: false,
+        };
+        let b = select_backend(&cfg).expect("backend");
+        assert_eq!(b.name, "openai");
+    }
+
+    #[test]
+    fn fallback_to_first() {
+        let cfg = LlmConfig {
+            default_backend: "nonexistent".to_string(),
+            backends: vec![
+                LlmBackend {
+                    name: "ollama".to_string(),
+                    endpoint: "http://localhost:11434".to_string(),
+                    model: "llama3.2".to_string(),
+                    api_key: None,
+                    api_key_env: None,
+                },
+            ],
+            disable_streaming: false,
+            disable_tools: false,
+        };
+        let b = select_backend(&cfg).expect("backend");
+        assert_eq!(b.name, "ollama");
     }
 }
