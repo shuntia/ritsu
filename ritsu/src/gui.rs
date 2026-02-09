@@ -12,6 +12,8 @@ use iced::{
 };
 use lucide_icons::LUCIDE_FONT_BYTES;
 use std::time::Duration;
+use iced::advanced::svg as svg;
+use iced::{Point, Rectangle};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +97,7 @@ pub struct RitsuGui {
     connection_status: ConnectionStatus,
     retry_countdown_frames: Option<u32>, // Frames until retry (20 FPS = 100 frames = 5 seconds)
     streaming_message_index: Option<usize>, // Index of message being streamed to
+    spinner_angle: f32, // radians
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,7 +142,9 @@ impl RitsuGui {
                 connection_status: ConnectionStatus::Disconnected,
                 retry_countdown_frames: None,
                 streaming_message_index: None,
+                spinner_angle: 0.0,
             },
+
             // Test connection on startup
             Task::perform(
                 async {
@@ -179,6 +184,7 @@ impl Default for RitsuGui {
             connection_status: ConnectionStatus::Disconnected,
             retry_countdown_frames: None,
             streaming_message_index: None,
+            spinner_angle: 0.0,
         }
     }
 }
@@ -196,6 +202,8 @@ impl RitsuGui {
                 
                 if self.is_loading {
                     self.animation_frame = self.animation_frame.wrapping_add(1);
+                    // advance spinner angle smoothly (radians per frame)
+                    self.spinner_angle = (self.spinner_angle + 0.25) % (std::f32::consts::TAU);
                 }
                 
                 // Animate sidebar transition using eased interpolation for smoother motion
@@ -1321,8 +1329,14 @@ impl RitsuGui {
             input_field = input_field.on_submit(Message::SendMessage);
         }
 
-        let spinner_char = char::from(lucide_icons::Icon::Loader);
-        let spinner_text = text(spinner_char.to_string()).size(18).color(iced::Color::WHITE);
+        // Use SVG frame-based spinner (rotated loader SVG frames)
+        let spinner_svg = {
+            let frames = crate::gui_icons::make_spinner_frames();
+            let idx = if frames.is_empty() { 0 } else { self.animation_frame % frames.len() };
+            let handle = iced_widget::svg::Handle::from_memory(frames[idx].clone());
+            let svg_widget = iced_widget::svg::Svg::new(handle);
+            container(svg_widget).width(iced::Length::Fixed(18.0)).height(iced::Length::Fixed(18.0))
+        };
 
         let send_button = if !self.is_loading {
             button("Send")
@@ -1338,7 +1352,7 @@ impl RitsuGui {
                     ..button::primary(theme, status)
                 })
         } else {
-            button(spinner_text)
+            button(spinner_svg)
                 .padding(12)
                 .style(|_theme: &iced::Theme, _status| {
                     button::Style {
