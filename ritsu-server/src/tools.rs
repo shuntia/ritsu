@@ -489,10 +489,11 @@ mod tool_impls {
                 },
                 ToolParameter {
                     name: "note".to_string(),
-                    description: "Note content to store when trigger fires (for custom triggers)".to_string(),
+                    description: "Instructional note describing what the AI should do when the trigger fires (e.g. 'Send a desktop notification; if no user response within 60s, open chat and tell them to get it together')".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
+
                 ToolParameter {
                     name: "open_chat".to_string(),
                     description: "'true' to open chat window when triggered, 'false' for notification only".to_string(),

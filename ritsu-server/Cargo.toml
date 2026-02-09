@@ -35,5 +35,6 @@ dirs = "6.0"
 reqwest.workspace = true
 llm = { path = "../llm", features = ["openai", "anthropic", "ollama", "groq"], default-features = false }
 
+
 [lints]
 workspace = true

@@ -53,6 +53,11 @@ pub enum ClientRequest {
         query_type: MemoryQueryType,
         date_range: Option<DateRange>,
     },
+    /// Create a new note
+    CreateNote {
+        content: String,
+        tags: Vec<String>,
+    },
     /// List conversation sessions
     ListSessions {
         limit: Option<usize>,

@@ -50,6 +50,13 @@ pub enum Message {
     TaskPrioritySelected(String),
     CreateTaskSubmit,
     CancelTaskCreate,
+    // Note creation dialog
+    ShowNoteCreateDialog,
+    NoteContentChanged(String),
+    NoteTagsChanged(String),
+    CreateNoteSubmit,
+    CancelNoteCreate,
+    NoteOperationComplete(Result<String, String>),
     CopyMessage(usize),
     ToggleThinking(usize),
     ToggleSidebar,
@@ -92,6 +99,10 @@ pub struct RitsuGui {
     task_title_input: String,
     task_description_input: String,
     task_priority_input: String,
+    // Note creation dialog state
+    show_note_dialog: bool,
+    note_content_input: String,
+    note_tags_input: String,
     sidebar_visible: bool,
     sidebar_animation: f32, // 0.0 = hidden, 1.0 = visible
     connection_status: ConnectionStatus,
@@ -138,6 +149,9 @@ impl RitsuGui {
                 task_title_input: String::new(),
                 task_description_input: String::new(),
                 task_priority_input: "medium".to_string(),
+                show_note_dialog: false,
+                note_content_input: String::new(),
+                note_tags_input: String::new(),
                 sidebar_visible: false,
                 sidebar_animation: 0.0,
                 connection_status: ConnectionStatus::Disconnected,
@@ -181,6 +195,9 @@ impl Default for RitsuGui {
             task_title_input: String::new(),
             task_description_input: String::new(),
             task_priority_input: "medium".to_string(),
+            show_note_dialog: false,
+            note_content_input: String::new(),
+            note_tags_input: String::new(),
             sidebar_visible: false,
             sidebar_animation: 0.0,
             connection_status: ConnectionStatus::Disconnected,
@@ -610,6 +627,75 @@ impl RitsuGui {
                 self.task_priority_input = "medium".to_string();
                 Task::none()
             }
+            Message::ShowNoteCreateDialog => {
+                self.show_note_dialog = true;
+                // Reset note fields
+                self.note_content_input.clear();
+                self.note_tags_input.clear();
+                Task::none()
+            }
+            Message::NoteContentChanged(content) => {
+                self.note_content_input = content;
+                Task::none()
+            }
+            Message::NoteTagsChanged(tags) => {
+                self.note_tags_input = tags;
+                Task::none()
+            }
+            Message::CreateNoteSubmit => {
+                if self.note_content_input.trim().is_empty() {
+                    return Task::none();
+                }
+                // Close dialog
+                self.show_note_dialog = false;
+                let content = self.note_content_input.clone();
+                let tags_input = self.note_tags_input.clone();
+                let tags_vec: Vec<String> = tags_input
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                Task::perform(
+                    async move {
+                        let client = {let socket = crate::commands::get_client_socket().unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string()); crate::ipc::IpcClient::new(socket)};
+                        let request = ritsu_common::protocol::ClientRequest::CreateNote { content, tags: tags_vec };
+                        match client.send_request(request).await {
+                            Ok(ritsu_common::protocol::ServerResponse::Success { message }) => Ok(message),
+                            Ok(ritsu_common::protocol::ServerResponse::Error { message }) => Err(message),
+                            Err(e) => Err(e.to_string()),
+                            _ => Err("Unexpected response".to_string()),
+                        }
+                    },
+                    Message::NoteOperationComplete,
+                )
+            }
+            Message::CancelNoteCreate => {
+                self.show_note_dialog = false;
+                Task::none()
+            }
+            Message::NoteOperationComplete(result) => {
+                match result {
+                    Ok(msg) => tracing::info!("Note created: {}", msg),
+                    Err(e) => tracing::error!("Note creation failed: {}", e),
+                }
+                // Refresh memory view content
+                Task::perform(
+                    async {
+                        let client = {let socket = crate::commands::get_client_socket().unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string()); crate::ipc::IpcClient::new(socket)};
+                        let request = ritsu_common::protocol::ClientRequest::QueryMemory {
+                            query_type: ritsu_common::protocol::MemoryQueryType::Notes,
+                            date_range: None,
+                        };
+                        client.send_request(request).await
+                    },
+                    |result| match result {
+                        Ok(ritsu_common::protocol::ServerResponse::Memory { content }) => Message::MemoryLoaded(Ok(content)),
+                        Ok(ritsu_common::protocol::ServerResponse::Error { message }) => Message::MemoryLoaded(Err(message)),
+                        _ => Message::MemoryLoaded(Err("Unexpected response".to_string())),
+                    },
+                )
+            }
             Message::TaskTitleChanged(title) => {
                 self.task_title_input = title;
                 Task::none()
@@ -1013,21 +1099,27 @@ impl RitsuGui {
         let main_layout = column![top_bar, layout]
             .spacing(0);
 
-        // Add task creation dialog overlay if visible
+        // Add task or note creation dialog overlay if visible
+        let base_container = container(main_layout)
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill);
+
         if self.show_task_dialog {
             let dialog = self.view_task_create_dialog();
             iced::widget::stack![
-                container(main_layout)
-                    .width(iced::Length::Fill)
-                    .height(iced::Length::Fill),
+                base_container,
+                dialog,
+            ]
+            .into()
+        } else if self.show_note_dialog {
+            let dialog = self.view_note_create_dialog();
+            iced::widget::stack![
+                base_container,
                 dialog,
             ]
             .into()
         } else {
-            container(main_layout)
-                .width(iced::Length::Fill)
-                .height(iced::Length::Fill)
-                .into()
+            base_container.into()
         }
     }
     
@@ -1127,6 +1219,65 @@ impl RitsuGui {
                         text_color: iced::Color::WHITE,
                         ..button::Style::default()
                     }),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(15)
+        .padding(30);
+        
+        let dialog_box = container(dialog_content)
+            .width(500)
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgb(0.15, 0.15, 0.2))),
+                border: iced::Border {
+                    color: iced::Color::from_rgb(0.3, 0.3, 0.4),
+                    width: 2.0,
+                    radius: 12.0.into(),
+                },
+                ..container::Style::default()
+            });
+        
+        // Center the dialog with a semi-transparent backdrop
+        container(dialog_box)
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .center(iced::Length::Fill)
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn view_note_create_dialog(&self) -> Element<'_, Message> {
+        let dialog_content = column![
+            text("Create New Note").size(20),
+            text("Content:").size(14),
+            text_input("Note content...", &self.note_content_input)
+                .on_input(Message::NoteContentChanged)
+                .padding(10),
+            text("Tags (comma separated):").size(14),
+            text_input("tag1, tag2", &self.note_tags_input)
+                .on_input(Message::NoteTagsChanged)
+                .padding(10),
+            row![
+                button(text("Cancel"))
+                    .on_press(Message::CancelNoteCreate)
+                    .padding(10)
+                    .style(|_theme: &iced::Theme, _status| button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.4, 0.4, 0.45))),
+                        text_color: iced::Color::WHITE,
+                        ..button::Style::default()
+                    }),
+                button(text("Create"))
+                    .on_press(Message::CreateNoteSubmit)
+                    .padding(10)
+                    .style(|_theme: &iced::Theme, _status| button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.7, 0.3))),
+                        text_color: iced::Color::WHITE,
+                        ..button::Style::default()
+                    })
             ]
             .spacing(10)
             .align_y(iced::Alignment::Center),
@@ -1534,7 +1685,25 @@ impl RitsuGui {
     }
 
     fn view_memory(&self) -> Element<'_, Message> {
-        let header = text("Memory & Notes").size(24);
+        let header = row![
+            text("Memory & Notes").size(24),
+            button(text("+ New Note").size(14))
+                .on_press(Message::ShowNoteCreateDialog)
+                .padding(8)
+                .style(|_theme: &iced::Theme, _status| {
+                    button::Style {
+                        background: Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.6, 0.9))),
+                        text_color: iced::Color::WHITE,
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            ..Default::default()
+                        },
+                        ..button::Style::default()
+                    }
+                }),
+        ]
+        .spacing(20)
+        .align_y(iced::Alignment::Center);
         
         let memory_content = if self.memory_content.is_empty() {
             column![

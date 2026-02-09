@@ -418,7 +418,7 @@ pub async fn execute_idle_analysis(
             );
             
             if !task_summary.is_empty() {
-                prompt = format!("{}\n\n📋 Current Tasks:\n{}\n\nInclude task progress and workflow patterns in analysis.", prompt, task_summary);
+                prompt = format!("{}\n\n[lucide:clipboard] Current Tasks:\n{}\n\nInclude task progress and workflow patterns in analysis.", prompt, task_summary);
             }
             
             let messages = vec![
@@ -495,7 +495,7 @@ pub async fn execute_idle_analysis(
                 prompt.push_str(&summary);
             }
             if !task_summary.is_empty() {
-                prompt.push_str("\n\n📋 Today's Tasks:\n");
+                prompt.push_str("\n\n[lucide:clipboard] Today's Tasks:\n");
                 prompt.push_str(&task_summary);
             }
             prompt.push_str("\n\nProvide a brief morning briefing and motivation for the day ahead.");
@@ -526,24 +526,63 @@ pub async fn execute_idle_analysis(
             info!("Daily briefing generated and stored as note");
         }
         "custom" | "reminder" => {
-            // Custom AI-created trigger - send notification/note
+            // Custom AI-created trigger - send notification/note and start LLM with the note as instructions
             info!("Executing custom trigger: {}", trigger.name);
-            
+
             let note = trigger.metadata.get("note")
                 .map_or_else(|| format!("Reminder: {}", trigger.name), String::clone);
-            
+
             let _urgency = trigger.metadata.get("urgency")
                 .map_or("normal", String::as_str);
-            
+
             let open_chat = trigger.metadata.get("open_chat")
                 .is_some_and(|v| v == "true");
-            
-            // TODO: Send notification to client daemon via tool system
-            // For now, just log the action
+
+            // Log the intended action
             info!("Custom trigger would notify: {} (open_chat: {})", note, open_chat);
-            
+
             // Store as note so user can see it later
-            memory.create_note(&format!("Trigger '{}': {}", trigger.name, note), &["trigger".to_string(), "reminder".to_string()]).await?;
+            let note_id = memory.create_note(
+                &format!("Trigger '{}': {}", trigger.name, note),
+                &["trigger".to_string(), "reminder".to_string()],
+            ).await?;
+            info!("Stored trigger note id: {}", note_id);
+
+            // Build a background system prompt for the LLM and invoke it with the note as instructions.
+            let system_prompt = match memory.build_background_prompt(Some("background")).await {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Failed to build background prompt for trigger {}: {}", trigger.name, e);
+                    String::new()
+                }
+            };
+
+            let messages = vec![
+                crate::llm::Message {
+                    role: "user".to_string(),
+                    content: note.clone(),
+                }
+            ];
+
+            info!("Invoking LLM for trigger '{}' with note instructions (may execute tools)", trigger.name);
+
+            let system_prompt_opt = if system_prompt.is_empty() { None } else { Some(system_prompt.as_str()) };
+
+            match llm_client.generate_with_tool_execution(&messages, system_prompt_opt, 3).await {
+                Ok(resp) => {
+                    info!("LLM responded for trigger '{}', content length {}", trigger.name, resp.content.len());
+                    if !resp.content.is_empty() {
+                        // Store LLM response for user visibility
+                        let _ = memory.create_note(
+                            &format!("Trigger '{}' LLM response: {}", trigger.name, resp.content),
+                            &["trigger_response".to_string()],
+                        ).await;
+                    }
+                }
+                Err(e) => {
+                    warn!("LLM execution for trigger '{}' failed: {}", trigger.name, e);
+                }
+            }
         }
         _ => {
             warn!("Unknown analysis type: {}", analysis_type);

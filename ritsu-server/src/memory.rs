@@ -123,7 +123,7 @@ impl MemoryManager {
         }
         
         if let Some(tasks) = task_context {
-            prompt = format!("{prompt}\n\n📋 Active Tasks:\n{tasks}\n\nInclude relevant task updates in your summary.");
+            prompt = format!("{prompt}\n\n[lucide:clipboard] Active Tasks:\n{tasks}\n\nInclude relevant task updates in your summary.");
         }
         
         let messages = vec![
@@ -224,7 +224,7 @@ impl MemoryManager {
         }
         
         if let Some(tasks) = task_context {
-            prompt = format!("{prompt}\n\n📋 Task Summary:\n{tasks}\n\nInclude task completion patterns and productivity insights.");
+            prompt = format!("{prompt}\n\n[lucide:clipboard] Task Summary:\n{tasks}\n\nInclude task completion patterns and productivity insights.");
         }
         
         let messages = vec![

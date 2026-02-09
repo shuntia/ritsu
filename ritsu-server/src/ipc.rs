@@ -772,6 +772,12 @@ async fn handle_request(
             
             ServerResponse::Memory { content: result }
         }
+        ClientRequest::CreateNote { content, tags } => {
+            match memory.create_note(&content, &tags).await {
+                Ok(id) => ServerResponse::Success { message: format!("Created note id: {}", id) },
+                Err(e) => ServerResponse::Error { message: format!("Failed to create note: {}", e) },
+            }
+        }
         
         ClientRequest::ListSessions { limit } => {
             match conversation_manager.get_active_sessions().await {
@@ -992,6 +998,13 @@ async fn handle_request(
                 conn.execute_batch(
                     "BEGIN IMMEDIATE;\nDELETE FROM conversation_turns;\nDELETE FROM conversations;\nDELETE FROM notes;\nDELETE FROM daily_conversations;\nDELETE FROM daily_summaries;\nDELETE FROM monthly_summaries;\nDELETE FROM idle_analyses;\nDELETE FROM tool_usage;\nDELETE FROM tasks;\nDELETE FROM triggers;\nDELETE FROM system_prompts;\nDELETE FROM preferences;\nCOMMIT;",
                 ).map_err(|e| anyhow::anyhow!(e))?;
+
+                // Reset AUTOINCREMENT counters stored in sqlite_sequence
+                conn.execute("DELETE FROM sqlite_sequence", []).map_err(|e| anyhow::anyhow!(e))?;
+
+                // VACUUM must be run outside of an active transaction; this will rebuild the database file
+                conn.execute("VACUUM", []).map_err(|e| anyhow::anyhow!(e))?;
+
                 Ok(())
             }).await;
 
