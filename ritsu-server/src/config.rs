@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -131,16 +132,14 @@ impl Config {
                 .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-            eprintln!("✓ Loaded configuration from: {}", path.display());
+            info!("✓ Loaded configuration from: {}", path.display());
             Ok(config)
         } else {
-            eprintln!("⚠ Configuration file not found: {}", path.display());
-            eprintln!("  Using default configuration.");
-            eprintln!();
-            eprintln!("  To customize settings, create a config file:");
-            eprintln!("    mkdir -p ~/.config/ritsu");
-            eprintln!("    ritsu-server --write-example-config");
-            eprintln!();
+            warn!("⚠ Configuration file not found: {}", path.display());
+            warn!("Using default configuration.");
+            info!("To customize settings, create a config file:");
+            info!("  mkdir -p ~/.config/ritsu");
+            info!("  ritsu-server --write-example-config");
             Ok(Self::default())
         }
     }
@@ -227,7 +226,7 @@ llm_request_seconds = {llm_request}
         std::fs::write(path, example)
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
         
-        eprintln!("✓ Created example config: {}", path.display());
+        info!("✓ Created example config: {}", path.display());
         Ok(())
     }
 }
