@@ -8,22 +8,22 @@ use thiserror::Error;
 pub enum RitsuError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Serialization error: {0}")]
     Serialization(String),
-    
+
     #[error("Database error: {0}")]
     Database(String),
-    
+
     #[error("Configuration error: {0}")]
     Config(String),
-    
+
     #[error("IPC error: {0}")]
     Ipc(String),
-    
+
     #[error("Server not running")]
     ServerNotRunning,
-    
+
     #[error("Timeout: {0}")]
     Timeout(String),
 }
@@ -47,7 +47,7 @@ impl ToolResult {
             error: None,
         }
     }
-    
+
     #[must_use]
     pub const fn error(message: String) -> Self {
         Self {

@@ -1,7 +1,9 @@
 //! Client daemon for handling notifications, GUI launches, and request proxying
 
 use anyhow::{Context, Result};
-use ritsu_common::protocol::{ClientToServerResponse, NotificationUrgency, ServerPush, ServerToClientRequest};
+use ritsu_common::protocol::{
+    ClientToServerResponse, NotificationUrgency, ServerPush, ServerToClientRequest,
+};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -12,7 +14,7 @@ use tracing::{debug, error, info, warn};
 
 pub async fn run() -> Result<()> {
     info!("Starting Ritsu client daemon...");
-    
+
     // Load config
     let config = crate::config::ClientConfig::load()?;
     let client_socket = config.client_socket_path();
@@ -25,8 +27,8 @@ pub async fn run() -> Result<()> {
     }
 
     // Bind to client daemon socket for GUI connections
-    let listener = UnixListener::bind(&client_socket)
-        .context("Failed to bind client daemon socket")?;
+    let listener =
+        UnixListener::bind(&client_socket).context("Failed to bind client daemon socket")?;
     info!("Client daemon listening on {}", client_socket);
 
     // Also maintain connection to server for tool requests
@@ -50,12 +52,17 @@ pub async fn run() -> Result<()> {
                     // Reset attempt counter on successful connection
                     attempt = 0;
                     *server_conn_clone.lock().await = Some(stream);
-                    
+
                     // Wait for tool requests from server
-                    if let Err(e) = handle_server_tool_requests(&server_conn_clone, gui_pushers_for_reconnector.clone()).await {
+                    if let Err(e) = handle_server_tool_requests(
+                        &server_conn_clone,
+                        gui_pushers_for_reconnector.clone(),
+                    )
+                    .await
+                    {
                         error!("Error handling server tool requests: {}", e);
                     }
-                    
+
                     *server_conn_clone.lock().await = None;
                 }
                 Err(e) => {
@@ -63,14 +70,18 @@ pub async fn run() -> Result<()> {
                     // Quadratic backoff in milliseconds
                     let base_delay_ms = retry_cfg.retry_delay_ms;
                     let max_delay_ms: u64 = 5 * 60 * 1000; // 5 minutes
-                    let mut delay_ms = base_delay_ms.saturating_mul(attempt.saturating_mul(attempt));
+                    let mut delay_ms =
+                        base_delay_ms.saturating_mul(attempt.saturating_mul(attempt));
                     if delay_ms == 0 {
                         delay_ms = base_delay_ms.max(1);
                     }
                     if delay_ms > max_delay_ms {
                         delay_ms = max_delay_ms;
                     }
-                    warn!("Could not connect to server: {}, retrying in {}ms (attempt {})", e, delay_ms, attempt);
+                    warn!(
+                        "Could not connect to server: {}, retrying in {}ms (attempt {})",
+                        e, delay_ms, attempt
+                    );
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                 }
             }
@@ -99,9 +110,15 @@ pub async fn run() -> Result<()> {
                     }
                     let mut body = vec![0u8; len];
                     // Give some time to read the body
-                    let _ = tokio::time::timeout(Duration::from_millis(200), stream.read_exact(&mut body)).await;
+                    let _ = tokio::time::timeout(
+                        Duration::from_millis(200),
+                        stream.read_exact(&mut body),
+                    )
+                    .await;
                     Some(body)
-                }).await {
+                })
+                .await
+                {
                     Ok(opt) => opt,
                     Err(_) => None,
                 };
@@ -115,7 +132,13 @@ pub async fn run() -> Result<()> {
                     if postcard::from_bytes::<ServerToClientRequest>(&body).is_ok() {
                         info!("Accepted connection identified as server->client connection");
                         tokio::spawn(async move {
-                            if let Err(e) = handle_incoming_server_connection(stream, Some(body), gui_pushers_clone).await {
+                            if let Err(e) = handle_incoming_server_connection(
+                                stream,
+                                Some(body),
+                                gui_pushers_clone,
+                            )
+                            .await
+                            {
                                 error!("Error handling incoming server connection: {}", e);
                             }
                         });
@@ -123,10 +146,18 @@ pub async fn run() -> Result<()> {
                     }
 
                     // Try parsing as ClientRequest (GUI)
-                    if postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&body).is_ok() {
+                    if postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&body).is_ok()
+                    {
                         info!("Accepted connection identified as GUI client (initial request present)");
                         tokio::spawn(async move {
-                            if let Err(e) = handle_gui_connection_with_initial(stream, &server_socket_clone, gui_pushers_clone, Some(body)).await {
+                            if let Err(e) = handle_gui_connection_with_initial(
+                                stream,
+                                &server_socket_clone,
+                                gui_pushers_clone,
+                                Some(body),
+                            )
+                            .await
+                            {
                                 error!("Error handling GUI connection: {}", e);
                             }
                         });
@@ -136,7 +167,14 @@ pub async fn run() -> Result<()> {
                     // Unknown initial payload - default to GUI handler
                     info!("Accepted connection with unknown initial payload; treating as GUI");
                     tokio::spawn(async move {
-                        if let Err(e) = handle_gui_connection_with_initial(stream, &server_socket_clone, gui_pushers_clone, Some(body)).await {
+                        if let Err(e) = handle_gui_connection_with_initial(
+                            stream,
+                            &server_socket_clone,
+                            gui_pushers_clone,
+                            Some(body),
+                        )
+                        .await
+                        {
                             error!("Error handling GUI connection: {}", e);
                         }
                     });
@@ -144,7 +182,9 @@ pub async fn run() -> Result<()> {
                     // No initial data: likely the server connecting (idle). Treat as incoming server connection.
                     info!("No immediate data on accepted connection; treating as server->client connection");
                     tokio::spawn(async move {
-                        if let Err(e) = handle_incoming_server_connection(stream, None, gui_pushers_clone).await {
+                        if let Err(e) =
+                            handle_incoming_server_connection(stream, None, gui_pushers_clone).await
+                        {
                             error!("Error handling incoming server connection: {}", e);
                         }
                     });
@@ -211,22 +251,30 @@ async fn handle_server_tool_requests(
     }
 }
 
-async fn handle_tool_request(request: ServerToClientRequest, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
+async fn handle_tool_request(
+    request: ServerToClientRequest,
+    gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>,
+) -> Result<()> {
     match request {
         ServerToClientRequest::NotifyUser {
             title,
             message,
             urgency,
         } => handle_notification(&title, &message, urgency).await,
-        ServerToClientRequest::OpenChat { message, session_id } => {
-            handle_open_chat(message.as_deref(), session_id.as_deref()).await
-        }
+        ServerToClientRequest::OpenChat {
+            message,
+            session_id,
+        } => handle_open_chat(message.as_deref(), session_id.as_deref()).await,
         ServerToClientRequest::FocusChat => handle_focus_chat(gui_pushers).await,
     }
 }
 
-
-async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socket: &str, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>, initial_req: Option<Vec<u8>>) -> Result<()> {
+async fn handle_gui_connection_with_initial(
+    mut stream: UnixStream,
+    server_socket: &str,
+    gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>,
+    initial_req: Option<Vec<u8>>,
+) -> Result<()> {
     info!("Handling new GUI connection, connecting to server...");
     let mut server_stream = connect_to_server(server_socket).await?;
     info!("Connected to server, starting proxy loop");
@@ -262,8 +310,15 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
     // If an initial request was already read from socket, process it first
     if let Some(initial) = initial_req {
         info!("Processing initial GUI request read during accept");
-        let is_send_message = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&initial)
-            .is_ok_and(|req| matches!(req, ritsu_common::protocol::ClientRequest::SendMessage { .. }));
+        let is_send_message = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(
+            &initial,
+        )
+        .is_ok_and(|req| {
+            matches!(
+                req,
+                ritsu_common::protocol::ClientRequest::SendMessage { .. }
+            )
+        });
 
         // Proxy initial request to server
         let len_bytes = (initial.len() as u32).to_be_bytes();
@@ -289,20 +344,35 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
                     break;
                 }
 
-                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) =
-                    postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
+                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk {
+                    is_final: true, ..
+                }) = postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
                 {
                     info!("Final chunk received for initial request, streaming complete");
                     // Try to forward final ServerResponse if any
                     use std::time::Duration;
                     let mut resp_len_buf = [0u8; 4];
-                    if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_len_buf)).await.is_ok() {
+                    if tokio::time::timeout(
+                        Duration::from_secs(2),
+                        server_stream.read_exact(&mut resp_len_buf),
+                    )
+                    .await
+                    .is_ok()
+                    {
                         let resp_len = u32::from_be_bytes(resp_len_buf) as usize;
                         if resp_len <= 10_000_000 {
                             let mut resp_data = vec![0u8; resp_len];
-                            if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_data)).await.is_ok() {
+                            if tokio::time::timeout(
+                                Duration::from_secs(2),
+                                server_stream.read_exact(&mut resp_data),
+                            )
+                            .await
+                            .is_ok()
+                            {
                                 if push_tx.send(resp_data).await.is_ok() {
-                                    info!("Forwarded final ServerResponse to GUI for initial request");
+                                    info!(
+                                        "Forwarded final ServerResponse to GUI for initial request"
+                                    );
                                 }
                             }
                         }
@@ -343,7 +413,12 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
 
         // Check if this is a SendMessage request (needs streaming support)
         let is_send_message = postcard::from_bytes::<ritsu_common::protocol::ClientRequest>(&buf)
-            .is_ok_and(|req| matches!(req, ritsu_common::protocol::ClientRequest::SendMessage { .. }));
+            .is_ok_and(|req| {
+                matches!(
+                    req,
+                    ritsu_common::protocol::ClientRequest::SendMessage { .. }
+                )
+            });
 
         // Proxy to server (keep big-endian)
         let len_bytes = (buf.len() as u32).to_be_bytes();
@@ -373,8 +448,9 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
                 }
 
                 // Check if this is the final chunk
-                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk { is_final: true, .. }) =
-                    postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
+                if let Ok(ritsu_common::protocol::ServerPush::MessageChunk {
+                    is_final: true, ..
+                }) = postcard::from_bytes::<ritsu_common::protocol::ServerPush>(&buf)
                 {
                     info!("Final chunk received, streaming complete");
 
@@ -382,11 +458,23 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
                     {
                         use std::time::Duration;
                         let mut resp_len_buf = [0u8; 4];
-                        if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_len_buf)).await.is_ok() {
+                        if tokio::time::timeout(
+                            Duration::from_secs(2),
+                            server_stream.read_exact(&mut resp_len_buf),
+                        )
+                        .await
+                        .is_ok()
+                        {
                             let resp_len = u32::from_be_bytes(resp_len_buf) as usize;
                             if resp_len <= 10_000_000 {
                                 let mut resp_data = vec![0u8; resp_len];
-                                if tokio::time::timeout(Duration::from_secs(2), server_stream.read_exact(&mut resp_data)).await.is_ok() {
+                                if tokio::time::timeout(
+                                    Duration::from_secs(2),
+                                    server_stream.read_exact(&mut resp_data),
+                                )
+                                .await
+                                .is_ok()
+                                {
                                     // Forward to GUI via push channel
                                     if push_tx.send(resp_data).await.is_ok() {
                                         info!("Forwarded final ServerResponse to GUI");
@@ -429,7 +517,11 @@ async fn handle_gui_connection_with_initial(mut stream: UnixStream, server_socke
     Ok(())
 }
 
-async fn handle_incoming_server_connection(mut stream: UnixStream, initial_body: Option<Vec<u8>>, gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) -> Result<()> {
+async fn handle_incoming_server_connection(
+    mut stream: UnixStream,
+    initial_body: Option<Vec<u8>>,
+    gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>,
+) -> Result<()> {
     info!("Handling incoming server->client connection");
 
     // If there's an initial body, handle it first
@@ -438,7 +530,9 @@ async fn handle_incoming_server_connection(mut stream: UnixStream, initial_body:
             Ok(req) => {
                 let res = match handle_tool_request(req, gui_pushers.clone()).await {
                     Ok(_) => ClientToServerResponse::Success,
-                    Err(e) => ClientToServerResponse::Error { message: e.to_string() },
+                    Err(e) => ClientToServerResponse::Error {
+                        message: e.to_string(),
+                    },
                 };
                 let res_bytes = postcard::to_allocvec(&res)?;
                 let len_bytes = (res_bytes.len() as u32).to_be_bytes();
@@ -473,19 +567,27 @@ async fn handle_incoming_server_connection(mut stream: UnixStream, initial_body:
         let request = match postcard::from_bytes::<ServerToClientRequest>(&buf) {
             Ok(r) => r,
             Err(e) => {
-                warn!("Failed to parse ServerToClientRequest on accepted connection: {}", e);
+                warn!(
+                    "Failed to parse ServerToClientRequest on accepted connection: {}",
+                    e
+                );
                 continue;
             }
         };
 
         let response = match handle_tool_request(request, gui_pushers.clone()).await {
             Ok(_) => ClientToServerResponse::Success,
-            Err(e) => ClientToServerResponse::Error { message: e.to_string() },
+            Err(e) => ClientToServerResponse::Error {
+                message: e.to_string(),
+            },
         };
 
         let response_bytes = postcard::to_allocvec(&response)?;
         let response_len_bytes = (response_bytes.len() as u32).to_be_bytes();
-        if stream.write_all(&response_len_bytes).await.is_err() || stream.write_all(&response_bytes).await.is_err() || stream.flush().await.is_err() {
+        if stream.write_all(&response_len_bytes).await.is_err()
+            || stream.write_all(&response_bytes).await.is_err()
+            || stream.flush().await.is_err()
+        {
             warn!("Failed writing response to incoming server connection");
             return Ok(());
         }
@@ -555,7 +657,10 @@ async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) 
     info!("Attempting to focus chat GUI via GUI push channel");
 
     // Prepare ServerPush::OpenChat payload
-    let push = ServerPush::OpenChat { message: None, urgency: NotificationUrgency::Normal };
+    let push = ServerPush::OpenChat {
+        message: None,
+        urgency: NotificationUrgency::Normal,
+    };
     let body = postcard::to_allocvec(&push)?;
 
     // Snapshot current pushers without holding lock during send
@@ -565,7 +670,9 @@ async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) 
     };
 
     if senders.is_empty() {
-        info!("No GUI clients connected via client daemon, falling back to launching GUI or xdotool");
+        info!(
+            "No GUI clients connected via client daemon, falling back to launching GUI or xdotool"
+        );
 
         // Fallback: try to open chat if no GUI connected
         #[cfg(target_os = "linux")]
@@ -623,48 +730,45 @@ async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) 
     Ok(())
 }
 
-
 pub async fn stop() -> Result<()> {
     tracing::info!("Stopping client daemon...");
-    
+
     let config = crate::config::ClientConfig::load()?;
     let client_socket = config.client_socket_path();
-    
+
     // Check if daemon is running by checking socket
     if !Path::new(&client_socket).exists() {
         tracing::info!("Client daemon is not running");
         return Ok(());
     }
-    
+
     // Find and kill the process
     let output = Command::new("pgrep")
         .args(["-f", "ritsu.*start"])
         .output()?;
-    
+
     if output.status.success() {
         let pids = String::from_utf8_lossy(&output.stdout);
         for pid in pids.lines() {
             if let Ok(pid_num) = pid.parse::<i32>() {
-                let _ = Command::new("kill")
-                    .arg(pid_num.to_string())
-                    .status();
+                let _ = Command::new("kill").arg(pid_num.to_string()).status();
                 tracing::info!("Stopped client daemon (PID: {})", pid_num);
             }
         }
     } else {
         tracing::info!("Client daemon process not found");
     }
-    
+
     // Clean up socket in both cases
     let _ = std::fs::remove_file(&client_socket);
-    
+
     Ok(())
 }
 
 pub async fn status() -> Result<()> {
     let config = crate::config::ClientConfig::load()?;
     let client_socket = config.client_socket_path();
-    
+
     if Path::new(&client_socket).exists() {
         // Try to connect to verify it's actually running
         match UnixStream::connect(&client_socket).await {
@@ -679,7 +783,7 @@ pub async fn status() -> Result<()> {
     } else {
         tracing::info!("Client daemon: Not running");
     }
-    
+
     Ok(())
 }
 
@@ -687,13 +791,13 @@ pub async fn restart() -> Result<()> {
     tracing::info!("Restarting client daemon...");
     stop().await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    
+
     // Spawn as background process
     Command::new("ritsu")
         .arg("start")
         .spawn()
         .context("Failed to spawn client daemon")?;
-    
+
     tracing::info!("Client daemon restarting in background");
     Ok(())
 }

@@ -5,7 +5,7 @@ use ritsu_common::protocol::{ClientRequest, MemoryQueryType};
 
 pub async fn query_memory(days: Option<u32>) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let _days = days.unwrap_or(7);
     let response = client
         .send_request(ClientRequest::QueryMemory {
@@ -29,7 +29,7 @@ pub async fn query_memory(days: Option<u32>) -> Result<()> {
 
 pub async fn query_notes(_tag: Option<&str>) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ClientRequest::QueryMemory {
             query_type: MemoryQueryType::Notes,
@@ -52,7 +52,10 @@ pub async fn query_notes(_tag: Option<&str>) -> Result<()> {
 
 pub async fn clear_memory(noconfirm: bool) -> Result<()> {
     if !noconfirm {
-        println!("{}  WARNING: This will permanently delete ALL memory data:", nerd_font::categories::Fa::ExclamationCircle);
+        println!(
+            "{}  WARNING: This will permanently delete ALL memory data:",
+            nerd_font::categories::Fa::ExclamationCircle
+        );
         println!("   - All conversation sessions and turns");
         println!("   - All daily conversations");
         println!("   - All daily and monthly summaries");
@@ -61,29 +64,32 @@ pub async fn clear_memory(noconfirm: bool) -> Result<()> {
         println!("   - All idle analyses");
         println!();
         print!("Type 'yes' to confirm: ");
-        
+
         use std::io::{self, Write};
         io::stdout().flush()?;
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        
+
         if input.trim() != "yes" {
             println!("Cancelled.");
             return Ok(());
         }
     }
-    
+
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     println!("Clearing all memory...");
     let response = client
         .send_request(ClientRequest::ClearMemory { confirm: true })
         .await?;
-    
+
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("{} All memory cleared successfully", nerd_font::categories::Fa::Check);
+            println!(
+                "{} All memory cleared successfully",
+                nerd_font::categories::Fa::Check
+            );
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {

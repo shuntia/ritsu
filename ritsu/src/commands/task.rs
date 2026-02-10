@@ -1,8 +1,8 @@
 //! Task management commands
 
+use crate::TaskCommands;
 use anyhow::Result;
 use ritsu_common::protocol::{ClientRequest, TaskFilter};
-use crate::TaskCommands;
 
 pub async fn handle(cmd: TaskCommands) -> Result<()> {
     match cmd {
@@ -16,7 +16,11 @@ pub async fn handle(cmd: TaskCommands) -> Result<()> {
             });
             list_tasks(status_enum).await
         }
-        TaskCommands::Add { title, priority, due } => {
+        TaskCommands::Add {
+            title,
+            priority,
+            due,
+        } => {
             let priority_enum = match priority.as_str() {
                 "low" => ritsu_common::TaskPriority::Low,
                 "high" => ritsu_common::TaskPriority::High,
@@ -39,10 +43,14 @@ pub async fn handle(cmd: TaskCommands) -> Result<()> {
 
 async fn list_tasks(status: Option<ritsu_common::TaskStatus>) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ClientRequest::ListTasks {
-            filter: Some(TaskFilter { status, priority: None, tags: None }),
+            filter: Some(TaskFilter {
+                status,
+                priority: None,
+                tags: None,
+            }),
         })
         .await?;
 
@@ -52,7 +60,10 @@ async fn list_tasks(status: Option<ritsu_common::TaskStatus>) -> Result<()> {
                 println!("No tasks found");
             } else {
                 for task in tasks {
-                    println!("#{}: {} [{:?}] ({:?})", task.id, task.title, task.status, task.priority);
+                    println!(
+                        "#{}: {} [{:?}] ({:?})",
+                        task.id, task.title, task.status, task.priority
+                    );
                     if let Some(desc) = &task.description {
                         println!("  {}", desc);
                     }
@@ -76,7 +87,7 @@ async fn create_task(
     due_date: Option<String>,
 ) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ClientRequest::CreateTask {
             title: title.to_string(),
@@ -106,9 +117,13 @@ async fn update_task(
     priority: Option<ritsu_common::TaskPriority>,
 ) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
-        .send_request(ClientRequest::UpdateTask { id, status, priority })
+        .send_request(ClientRequest::UpdateTask {
+            id,
+            status,
+            priority,
+        })
         .await?;
 
     match response {

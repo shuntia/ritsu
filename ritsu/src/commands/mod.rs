@@ -2,16 +2,16 @@
 
 #![allow(clippy::unnecessary_wraps)]
 
-pub mod daemon;
-pub mod client_daemon;
 pub mod attach;
-pub mod send;
-pub mod trigger;
-pub mod task;
-pub mod prompt;
+pub mod client_daemon;
+pub mod daemon;
+pub mod dev;
 pub mod export;
 pub mod memory;
-pub mod dev;
+pub mod prompt;
+pub mod send;
+pub mod task;
+pub mod trigger;
 
 use anyhow::Result;
 

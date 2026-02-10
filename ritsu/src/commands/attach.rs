@@ -10,7 +10,10 @@ pub async fn attach() -> Result<()> {
     let server_log = "/tmp/ritsu-server.log";
     let client_log = "/tmp/ritsu.log";
 
-    println!("Attaching to {} and {} (press Ctrl-C to exit)", server_log, client_log);
+    println!(
+        "Attaching to {} and {} (press Ctrl-C to exit)",
+        server_log, client_log
+    );
 
     let mut tail_server = Command::new("tail")
         .arg("-F")
@@ -54,7 +57,9 @@ pub async fn attach() -> Result<()> {
     });
 
     // Wait for Ctrl-C
-    tokio::signal::ctrl_c().await.context("Failed to listen for Ctrl-C")?;
+    tokio::signal::ctrl_c()
+        .await
+        .context("Failed to listen for Ctrl-C")?;
     println!("Received Ctrl-C, shutting down tail processes...");
 
     // Try to kill child processes; ignore errors

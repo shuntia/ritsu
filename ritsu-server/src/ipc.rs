@@ -6,7 +6,7 @@
 #![allow(clippy::format_push_string)]
 
 use anyhow::{Context, Result};
-use ritsu_common::protocol::{ClientRequest, ServerResponse, ServerPush};
+use ritsu_common::protocol::{ClientRequest, ServerPush, ServerResponse};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -76,9 +76,20 @@ impl IpcServer {
                     let llm_client = self.llm_client.clone();
                     let state = self.state.clone();
                     let config = self.config.clone();
-                    
+
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, memory, conversation_manager, task_manager, trigger_registry, llm_client, state, config).await {
+                        if let Err(e) = handle_client(
+                            stream,
+                            memory,
+                            conversation_manager,
+                            task_manager,
+                            trigger_registry,
+                            llm_client,
+                            state,
+                            config,
+                        )
+                        .await
+                        {
                             error!("Client handler error: {}", e);
                         }
                     });
@@ -105,7 +116,7 @@ async fn handle_client(
     // Register this client for push notifications (bounded channel with backpressure)
     let (push_tx, mut push_rx) = mpsc::channel(crate::state::PUSH_CHANNEL_CAPACITY);
     state.register_client(push_tx).await;
-    
+
     loop {
         tokio::select! {
             // Handle incoming requests from client
@@ -113,7 +124,7 @@ async fn handle_client(
                 match result {
                     Ok(Some(request)) => {
                         state.mark_activity().await;
-                        
+
                         // Special handling for SendMessage to support streaming
                         if let ClientRequest::SendMessage { content, session_id } = request {
                             match handle_send_message_streaming(
@@ -183,7 +194,7 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
 
     let len = u32::from_be_bytes(len_buf) as usize;
     debug!("Reading request of {} bytes", len);
-    
+
     if len > 10_000_000 {
         anyhow::bail!("Message too large: {} bytes", len);
     }
@@ -192,11 +203,15 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).await?;
 
-    debug!("Deserializing {} bytes: {:?}", buf.len(), &buf[..buf.len().min(100)]);
-    
+    debug!(
+        "Deserializing {} bytes: {:?}",
+        buf.len(),
+        &buf[..buf.len().min(100)]
+    );
+
     let request: ClientRequest = postcard::from_bytes(&buf)
         .with_context(|| format!("Failed to deserialize {} bytes", buf.len()))?;
-    
+
     debug!("Successfully deserialized request: {:?}", request);
     Ok(Some(request))
 }
@@ -214,14 +229,24 @@ async fn handle_send_message_streaming(
     disable_tools: bool,
 ) -> Result<()> {
     // Get or create conversation session
-    let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
-    let session = conversation_manager.get_or_create_session(&session_id).await?;
+    let session_id =
+        session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
+    let session = conversation_manager
+        .get_or_create_session(&session_id)
+        .await?;
 
     // Store user message (fatal on failure)
-    if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None, None).await {
+    if let Err(e) = conversation_manager
+        .add_turn(&session_id, "user", &content, None, None, None)
+        .await
+    {
         error!("Failed to store user turn: {}", e);
         let push = ServerPush::MessageChunk {
-            content: format!("{} Failed to store user message: {}\n", nerd_font::categories::Fa::Cross, e),
+            content: format!(
+                "{} Failed to store user message: {}\n",
+                nerd_font::categories::Fa::Cross,
+                e
+            ),
             is_final: true,
         };
         // Inform client and stop processing
@@ -231,7 +256,11 @@ async fn handle_send_message_streaming(
     if let Err(e) = memory.store_conversation("user", &content).await {
         error!("Failed to store in conversations: {}", e);
         let push = ServerPush::MessageChunk {
-            content: format!("{} Failed to store message in memory: {}\n", nerd_font::categories::Fa::Cross, e),
+            content: format!(
+                "{} Failed to store message in memory: {}\n",
+                nerd_font::categories::Fa::Cross,
+                e
+            ),
             is_final: true,
         };
         send_push(stream, push).await?;
@@ -239,7 +268,9 @@ async fn handle_send_message_streaming(
     }
 
     // Build system prompt and messages via PromptBuilder
-    let history = conversation_manager.get_history(&session_id, 20).await
+    let history = conversation_manager
+        .get_history(&session_id, 20)
+        .await
         .unwrap_or_default()
         .into_iter()
         .filter(|turn| turn.turn_number < session.turn_count)
@@ -249,7 +280,14 @@ async fn handle_send_message_streaming(
         })
         .collect::<Vec<_>>();
 
-    let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(memory, task_manager, history, &content).await {
+    let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(
+        memory,
+        task_manager,
+        history,
+        &content,
+    )
+    .await
+    {
         Ok((sp, msgs)) => (sp, msgs),
         Err(e) => {
             warn!("Failed to build chat prompt: {}", e);
@@ -259,20 +297,30 @@ async fn handle_send_message_streaming(
 
     // Check if streaming is disabled in config
     if disable_streaming {
-        info!("Streaming disabled in config, using non-streaming mode (tools: {})", !disable_tools);
+        info!(
+            "Streaming disabled in config, using non-streaming mode (tools: {})",
+            !disable_tools
+        );
 
         // For non-streaming mode, if tools are enabled, run the tool execution loop which will
         // call tools and synthesize a follow-up response. Otherwise, just do a simple request.
         let response_result = if !disable_tools {
             // Run up to 3 iterations of tool execution
-            llm_client.generate_with_tool_execution(&messages, system_prompt.as_deref(), 3).await
+            llm_client
+                .generate_with_tool_execution(&messages, system_prompt.as_deref(), 3)
+                .await
         } else {
-            llm_client.generate_with_tools(&messages, system_prompt.as_deref(), false).await
+            llm_client
+                .generate_with_tools(&messages, system_prompt.as_deref(), false)
+                .await
         };
 
         match response_result {
             Ok(response) => {
-                debug!("Non-streaming response ready (tool_calls: {})", response.tool_calls.len());
+                debug!(
+                    "Non-streaming response ready (tool_calls: {})",
+                    response.tool_calls.len()
+                );
                 if !response.tool_calls.is_empty() {
                     debug!(tool_calls = ?response.tool_calls.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "Tool calls executed in non-streaming flow");
                 }
@@ -285,10 +333,23 @@ async fn handle_send_message_streaming(
                 send_push(stream, push).await?;
 
                 // Store assistant response
-                if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &response.content, None, None, None).await {
+                if let Err(e) = conversation_manager
+                    .add_turn(
+                        &session_id,
+                        "assistant",
+                        &response.content,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                {
                     warn!("Failed to store assistant turn: {}", e);
                 }
-                if let Err(e) = memory.store_conversation("assistant", &response.content).await {
+                if let Err(e) = memory
+                    .store_conversation("assistant", &response.content)
+                    .await
+                {
                     warn!("Failed to store in conversations: {}", e);
                 }
 
@@ -308,8 +369,10 @@ async fn handle_send_message_streaming(
 
     // Start streaming
     info!("Starting streaming response");
-    let stream_rx_result = LlmClient::generate_streaming(Arc::clone(&llm_client), &messages, system_prompt.as_deref()).await;
-    
+    let stream_rx_result =
+        LlmClient::generate_streaming(Arc::clone(&llm_client), &messages, system_prompt.as_deref())
+            .await;
+
     let mut stream_rx = match stream_rx_result {
         Ok(rx) => rx,
         Err(e) => {
@@ -333,12 +396,12 @@ async fn handle_send_message_streaming(
             Ok(chunk) => {
                 chunk_count += 1;
                 debug!("Received chunk #{}: {} bytes", chunk_count, chunk.len());
-                
+
                 if chunk.is_empty() {
                     debug!("Skipping empty chunk");
                 } else {
                     full_response.push_str(&chunk);
-                    
+
                     // Send chunk as push notification
                     let push = ServerPush::MessageChunk {
                         content: chunk,
@@ -360,7 +423,11 @@ async fn handle_send_message_streaming(
         }
     }
 
-    info!("Streaming complete: {} chunks received, {} bytes total", chunk_count, full_response.len());
+    info!(
+        "Streaming complete: {} chunks received, {} bytes total",
+        chunk_count,
+        full_response.len()
+    );
 
     // Send final marker
     let push = ServerPush::MessageChunk {
@@ -369,10 +436,17 @@ async fn handle_send_message_streaming(
     };
     send_push(stream, push).await?;
 
-    info!("Streaming complete: {} chunks received, {} bytes total", chunk_count, full_response.len());
+    info!(
+        "Streaming complete: {} chunks received, {} bytes total",
+        chunk_count,
+        full_response.len()
+    );
 
     // Store assistant response
-    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &full_response, None, None, None).await {
+    if let Err(e) = conversation_manager
+        .add_turn(&session_id, "assistant", &full_response, None, None, None)
+        .await
+    {
         warn!("Failed to store assistant turn: {}", e);
     }
     if let Err(e) = memory.store_conversation("assistant", &full_response).await {
@@ -380,10 +454,16 @@ async fn handle_send_message_streaming(
     }
 
     // Check if we need to generate a title for this session
-    if let Ok(needs_title) = conversation_manager.needs_title_generation(&session_id).await {
+    if let Ok(needs_title) = conversation_manager
+        .needs_title_generation(&session_id)
+        .await
+    {
         if needs_title {
             info!("Generating title for session {}", session_id);
-            if let Err(e) = conversation_manager.generate_title(&session_id, &llm_client).await {
+            if let Err(e) = conversation_manager
+                .generate_title(&session_id, &llm_client)
+                .await
+            {
                 warn!("Failed to generate session title: {}", e);
             }
         }
@@ -424,10 +504,17 @@ async fn handle_request(
     match request {
         ClientRequest::Ping => ServerResponse::Pong,
 
-        ClientRequest::SendMessage { content, session_id } => {
+        ClientRequest::SendMessage {
+            content,
+            session_id,
+        } => {
             // Get or create conversation session
-            let session_id = session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
-            let session = match conversation_manager.get_or_create_session(&session_id).await {
+            let session_id =
+                session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
+            let session = match conversation_manager
+                .get_or_create_session(&session_id)
+                .await
+            {
                 Ok(s) => s,
                 Err(e) => {
                     return ServerResponse::Error {
@@ -437,7 +524,10 @@ async fn handle_request(
             };
 
             // Store user message in session
-            if let Err(e) = conversation_manager.add_turn(&session_id, "user", &content, None, None, None).await {
+            if let Err(e) = conversation_manager
+                .add_turn(&session_id, "user", &content, None, None, None)
+                .await
+            {
                 warn!("Failed to store user turn: {}", e);
             }
 
@@ -448,7 +538,8 @@ async fn handle_request(
 
             // Build system prompt and messages via PromptBuilder
             let history = match conversation_manager.get_history(&session_id, 20).await {
-                Ok(turns) => turns.into_iter()
+                Ok(turns) => turns
+                    .into_iter()
                     .filter(|turn| turn.turn_number < session.turn_count) // Exclude current turn
                     .map(|turn| crate::llm::Message {
                         role: turn.role,
@@ -461,7 +552,14 @@ async fn handle_request(
                 }
             };
 
-            let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(memory, task_manager, history, &content).await {
+            let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(
+                memory,
+                task_manager,
+                history,
+                &content,
+            )
+            .await
+            {
                 Ok((sp, msgs)) => (sp, msgs),
                 Err(e) => {
                     warn!("Failed to build chat prompt: {}", e);
@@ -470,19 +568,35 @@ async fn handle_request(
             };
 
             // Generate response with tool execution
-            match llm_client.generate_with_tool_execution(
-                &messages,
-                system_prompt.as_deref(),
-                5, // max 5 iterations
-            ).await {
+            match llm_client
+                .generate_with_tool_execution(
+                    &messages,
+                    system_prompt.as_deref(),
+                    5, // max 5 iterations
+                )
+                .await
+            {
                 Ok(response) => {
                     // Store assistant response in session
-                    if let Err(e) = conversation_manager.add_turn(&session_id, "assistant", &response.content, None, None, None).await {
+                    if let Err(e) = conversation_manager
+                        .add_turn(
+                            &session_id,
+                            "assistant",
+                            &response.content,
+                            None,
+                            None,
+                            None,
+                        )
+                        .await
+                    {
                         warn!("Failed to store assistant turn: {}", e);
                     }
 
                     // Also store in legacy conversations table
-                    if let Err(e) = memory.store_conversation("assistant", &response.content).await {
+                    if let Err(e) = memory
+                        .store_conversation("assistant", &response.content)
+                        .await
+                    {
                         warn!("Failed to store assistant response: {}", e);
                     }
 
@@ -508,7 +622,9 @@ async fn handle_request(
                 .into_iter()
                 .map(|t| {
                     let (trigger_type_str, schedule_str) = match &t.trigger_type {
-                        crate::trigger::TriggerType::Cron(expr) => ("cron".to_string(), expr.clone()),
+                        crate::trigger::TriggerType::Cron(expr) => {
+                            ("cron".to_string(), expr.clone())
+                        }
                     };
                     ritsu_common::protocol::TriggerInfo {
                         id: t.id,
@@ -531,14 +647,25 @@ async fn handle_request(
             tag,
             description,
         } => {
-            match trigger_registry.create_trigger(&name, &trigger_type, &schedule, tag.as_deref(), description.as_deref()).await {
+            match trigger_registry
+                .create_trigger(
+                    &name,
+                    &trigger_type,
+                    &schedule,
+                    tag.as_deref(),
+                    description.as_deref(),
+                )
+                .await
+            {
                 Ok(()) => {
                     // Notify connected clients about the new trigger
-                    let _ = state.broadcast_push(ServerPush::Notification {
-                        title: "Trigger Created".to_string(),
-                        message: format!("Trigger '{}' created", name),
-                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
+                    let _ = state
+                        .broadcast_push(ServerPush::Notification {
+                            title: "Trigger Created".to_string(),
+                            message: format!("Trigger '{}' created", name),
+                            urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                        })
+                        .await;
                     ServerResponse::Ok
                 }
                 Err(e) => ServerResponse::Error {
@@ -550,11 +677,13 @@ async fn handle_request(
         ClientRequest::DeleteTrigger { name } => {
             match trigger_registry.delete_trigger(&name).await {
                 Ok(()) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
-                        title: "Trigger Deleted".to_string(),
-                        message: format!("Trigger '{}' deleted", name),
-                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
+                    let _ = state
+                        .broadcast_push(ServerPush::Notification {
+                            title: "Trigger Deleted".to_string(),
+                            message: format!("Trigger '{}' deleted", name),
+                            urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                        })
+                        .await;
                     ServerResponse::Ok
                 }
                 Err(e) => ServerResponse::Error {
@@ -566,11 +695,13 @@ async fn handle_request(
         ClientRequest::DisableTrigger { name } => {
             match trigger_registry.disable_trigger(&name).await {
                 Ok(()) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
-                        title: "Trigger Disabled".to_string(),
-                        message: format!("Trigger '{}' disabled", name),
-                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
+                    let _ = state
+                        .broadcast_push(ServerPush::Notification {
+                            title: "Trigger Disabled".to_string(),
+                            message: format!("Trigger '{}' disabled", name),
+                            urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                        })
+                        .await;
                     ServerResponse::Ok
                 }
                 Err(e) => ServerResponse::Error {
@@ -629,15 +760,23 @@ async fn handle_request(
             due_date,
         } => {
             match task_manager
-                .create_task(&title, description.as_deref(), &priority, &tags, due_date.as_deref())
+                .create_task(
+                    &title,
+                    description.as_deref(),
+                    &priority,
+                    &tags,
+                    due_date.as_deref(),
+                )
                 .await
             {
                 Ok(id) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
-                        title: "Task Created".to_string(),
-                        message: format!("Task '{}' created (id: {})", title, id),
-                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
+                    let _ = state
+                        .broadcast_push(ServerPush::Notification {
+                            title: "Task Created".to_string(),
+                            message: format!("Task '{}' created (id: {})", title, id),
+                            urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                        })
+                        .await;
                     ServerResponse::Ok
                 }
                 Err(e) => ServerResponse::Error {
@@ -646,7 +785,11 @@ async fn handle_request(
             }
         }
 
-        ClientRequest::UpdateTask { id, status, priority } => {
+        ClientRequest::UpdateTask {
+            id,
+            status,
+            priority,
+        } => {
             if let Some(s) = status {
                 match task_manager.update_task_status(id, &s).await {
                     Ok(()) => {}
@@ -657,7 +800,7 @@ async fn handle_request(
                     }
                 }
             }
-            
+
             if let Some(p) = priority {
                 match task_manager.update_task_priority(id, &p).await {
                     Ok(()) => {}
@@ -668,122 +811,128 @@ async fn handle_request(
                     }
                 }
             }
-            
+
             // Notify clients about task update
-            let _ = state.broadcast_push(ServerPush::Notification {
-                title: "Task Updated".to_string(),
-                message: format!("Task #{} updated", id),
-                urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-            }).await;
-            
+            let _ = state
+                .broadcast_push(ServerPush::Notification {
+                    title: "Task Updated".to_string(),
+                    message: format!("Task #{} updated", id),
+                    urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                })
+                .await;
+
             ServerResponse::Ok
         }
-        
-        ClientRequest::DeleteTask { id } => {
-            match task_manager.delete_task(id).await {
-                Ok(()) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
+
+        ClientRequest::DeleteTask { id } => match task_manager.delete_task(id).await {
+            Ok(()) => {
+                let _ = state
+                    .broadcast_push(ServerPush::Notification {
                         title: "Task Deleted".to_string(),
                         message: format!("Task #{} deleted", id),
                         urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
-                    ServerResponse::Ok
-                }
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to delete task: {}", e),
-                },
+                    })
+                    .await;
+                ServerResponse::Ok
             }
-        }
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to delete task: {}", e),
+            },
+        },
 
-        ClientRequest::QueryMemory { query_type, date_range: _ } => {
+        ClientRequest::QueryMemory {
+            query_type,
+            date_range: _,
+        } => {
             use ritsu_common::protocol::MemoryQueryType;
-            
+
             // Default to 7 days for queries (date_range could be used for more specific filtering in future)
             let days = 7;
-            
+
             let result = match query_type {
-                MemoryQueryType::Recent => {
-                    match memory.query_recent_conversations(days).await {
-                        Ok(conversations) => {
-                            if conversations.is_empty() {
-                                "No recent conversations found.".to_string()
-                            } else {
-                                let mut output = format!("Recent conversations (last {days} days):\n\n");
-                                for (date, role, content) in conversations {
-                                    output.push_str(&format!("[{date}] {role}: {content}\n"));
-                                }
-                                output
+                MemoryQueryType::Recent => match memory.query_recent_conversations(days).await {
+                    Ok(conversations) => {
+                        if conversations.is_empty() {
+                            "No recent conversations found.".to_string()
+                        } else {
+                            let mut output =
+                                format!("Recent conversations (last {days} days):\n\n");
+                            for (date, role, content) in conversations {
+                                output.push_str(&format!("[{date}] {role}: {content}\n"));
                             }
+                            output
                         }
-                        Err(e) => format!("Error querying conversations: {e}"),
                     }
-                }
-                MemoryQueryType::Daily => {
-                    match memory.query_daily_summaries(days).await {
-                        Ok(summaries) => {
-                            if summaries.is_empty() {
-                                "No daily summaries found.".to_string()
-                            } else {
-                                let mut output = format!("Daily summaries (last {days} days):\n\n");
-                                for (date, summary) in summaries {
-                                    output.push_str(&format!("[{date}]\n{summary}\n\n"));
-                                }
-                                output
+                    Err(e) => format!("Error querying conversations: {e}"),
+                },
+                MemoryQueryType::Daily => match memory.query_daily_summaries(days).await {
+                    Ok(summaries) => {
+                        if summaries.is_empty() {
+                            "No daily summaries found.".to_string()
+                        } else {
+                            let mut output = format!("Daily summaries (last {days} days):\n\n");
+                            for (date, summary) in summaries {
+                                output.push_str(&format!("[{date}]\n{summary}\n\n"));
                             }
+                            output
                         }
-                        Err(e) => format!("Error querying daily summaries: {e}"),
                     }
-                }
-                MemoryQueryType::Monthly => {
-                    match memory.query_monthly_summaries(12).await {
-                        Ok(summaries) => {
-                            if summaries.is_empty() {
-                                "No monthly summaries found.".to_string()
-                            } else {
-                                let mut output = "Monthly summaries:\n\n".to_string();
-                                for (year_month, summary, days_count) in summaries {
-                                    output.push_str(&format!("[{year_month}] ({days_count} days)\n{summary}\n\n"));
-                                }
-                                output
+                    Err(e) => format!("Error querying daily summaries: {e}"),
+                },
+                MemoryQueryType::Monthly => match memory.query_monthly_summaries(12).await {
+                    Ok(summaries) => {
+                        if summaries.is_empty() {
+                            "No monthly summaries found.".to_string()
+                        } else {
+                            let mut output = "Monthly summaries:\n\n".to_string();
+                            for (year_month, summary, days_count) in summaries {
+                                output.push_str(&format!(
+                                    "[{year_month}] ({days_count} days)\n{summary}\n\n"
+                                ));
                             }
+                            output
                         }
-                        Err(e) => format!("Error querying monthly summaries: {e}"),
                     }
-                }
-                MemoryQueryType::Notes => {
-                    match memory.query_notes(50).await {
-                        Ok(notes) => {
-                            if notes.is_empty() {
-                                "No notes found.".to_string()
-                            } else {
-                                let mut output = "Notes:\n\n".to_string();
-                                for (id, content, _tags) in notes {
-                                    output.push_str(&format!("#{id}: {content}\n\n"));
-                                }
-                                output
+                    Err(e) => format!("Error querying monthly summaries: {e}"),
+                },
+                MemoryQueryType::Notes => match memory.query_notes(50).await {
+                    Ok(notes) => {
+                        if notes.is_empty() {
+                            "No notes found.".to_string()
+                        } else {
+                            let mut output = "Notes:\n\n".to_string();
+                            for (id, content, _tags) in notes {
+                                output.push_str(&format!("#{id}: {content}\n\n"));
                             }
+                            output
                         }
-                        Err(e) => format!("Error querying notes: {e}"),
                     }
-                }
+                    Err(e) => format!("Error querying notes: {e}"),
+                },
             };
-            
+
             ServerResponse::Memory { content: result }
         }
         ClientRequest::CreateNote { content, tags } => {
             match memory.create_note(&content, &tags).await {
                 Ok(id) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
-                        title: "Note Created".to_string(),
-                        message: format!("Note #{} created", id),
-                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
-                    ServerResponse::Success { message: format!("Created note id: {}", id) }
+                    let _ = state
+                        .broadcast_push(ServerPush::Notification {
+                            title: "Note Created".to_string(),
+                            message: format!("Note #{} created", id),
+                            urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                        })
+                        .await;
+                    ServerResponse::Success {
+                        message: format!("Created note id: {}", id),
+                    }
                 }
-                Err(e) => ServerResponse::Error { message: format!("Failed to create note: {}", e) },
+                Err(e) => ServerResponse::Error {
+                    message: format!("Failed to create note: {}", e),
+                },
             }
         }
-        
+
         ClientRequest::ListSessions { limit } => {
             match conversation_manager.get_active_sessions().await {
                 Ok(sessions) => {
@@ -791,7 +940,7 @@ async fn handle_request(
                     if let Some(limit) = limit {
                         sessions.truncate(limit);
                     }
-                    
+
                     let session_infos = sessions
                         .into_iter()
                         .map(|s| ritsu_common::protocol::SessionInfo {
@@ -802,15 +951,17 @@ async fn handle_request(
                             title: s.title,
                         })
                         .collect();
-                    
-                    ServerResponse::Sessions { sessions: session_infos }
+
+                    ServerResponse::Sessions {
+                        sessions: session_infos,
+                    }
                 }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to list sessions: {}", e),
                 },
             }
         }
-        
+
         ClientRequest::GetConversationHistory { session_id, limit } => {
             match conversation_manager.get_history(&session_id, limit).await {
                 Ok(turns) => {
@@ -825,7 +976,7 @@ async fn handle_request(
                             thinking: t.thinking,
                         })
                         .collect();
-                    
+
                     ServerResponse::ConversationHistory { turns: turn_infos }
                 }
                 Err(e) => ServerResponse::Error {
@@ -833,39 +984,42 @@ async fn handle_request(
                 },
             }
         }
-        
+
         ClientRequest::ClearMemory { confirm } => {
             if !confirm {
                 return ServerResponse::Error {
-                    message: "ClearMemory requires confirm=true to prevent accidental deletion".to_string(),
+                    message: "ClearMemory requires confirm=true to prevent accidental deletion"
+                        .to_string(),
                 };
             }
-            
+
             info!("Clearing all memory (requested by client)");
-            
+
             // Clear conversations
             if let Err(e) = conversation_manager.clear_all().await {
                 return ServerResponse::Error {
                     message: format!("Failed to clear conversations: {}", e),
                 };
             }
-            
+
             // Clear memory tables
             if let Err(e) = memory.clear_all().await {
                 return ServerResponse::Error {
                     message: format!("Failed to clear memory: {}", e),
                 };
             }
-            
+
             info!("All memory cleared successfully");
-            let _ = state.broadcast_push(ServerPush::Notification {
-                title: "Memory Cleared".to_string(),
-                message: "All memory has been cleared by client request".to_string(),
-                urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-            }).await;
+            let _ = state
+                .broadcast_push(ServerPush::Notification {
+                    title: "Memory Cleared".to_string(),
+                    message: "All memory has been cleared by client request".to_string(),
+                    urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                })
+                .await;
             ServerResponse::Ok
         }
-        
+
         ClientRequest::Subscribe => {
             // Client is subscribing for push notifications only
             // Just acknowledge the subscription - pushes are handled via the channel
@@ -873,27 +1027,27 @@ async fn handle_request(
             ServerResponse::Ok
         }
 
-        ClientRequest::GetSystemPrompt => {
-            match memory.build_effective_prompt().await {
-                Ok(prompt) => ServerResponse::SystemPrompt { content: prompt },
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to get system prompt: {}", e),
-                },
-            }
-        }
+        ClientRequest::GetSystemPrompt => match memory.build_effective_prompt().await {
+            Ok(prompt) => ServerResponse::SystemPrompt { content: prompt },
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to get system prompt: {}", e),
+            },
+        },
 
         ClientRequest::SetSystemPrompt { content } => {
             match memory.store_system_prompt("base", &content).await {
                 Ok(()) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
-                        title: "System Prompt Updated".to_string(),
-                        message: "Base system prompt updated".to_string(),
-                        urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
+                    let _ = state
+                        .broadcast_push(ServerPush::Notification {
+                            title: "System Prompt Updated".to_string(),
+                            message: "Base system prompt updated".to_string(),
+                            urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                        })
+                        .await;
                     ServerResponse::Success {
                         message: "System prompt updated successfully".to_string(),
                     }
-                },
+                }
                 Err(e) => ServerResponse::Error {
                     message: format!("Failed to set system prompt: {}", e),
                 },
@@ -911,42 +1065,40 @@ async fn handle_request(
 
             let model_info = backend.map_or_else(
                 || "No LLM backend configured".to_string(),
-                |b| format!(
-                    "Model Information:\n\
+                |b| {
+                    format!(
+                        "Model Information:\n\
                      Backend: {}\n\
                      Endpoint: {}\n\
                      Model: {}\n\
                      Streaming: {}\n\
                      Tools: {}",
-                    b.name,
-                    b.endpoint,
-                    b.model,
-                    !config.llm.disable_streaming,
-                    !config.llm.disable_tools,
-                )
+                        b.name,
+                        b.endpoint,
+                        b.model,
+                        !config.llm.disable_streaming,
+                        !config.llm.disable_tools,
+                    )
+                },
             );
             ServerResponse::Success {
                 message: model_info,
             }
         }
 
-        ClientRequest::GetDatabaseStats => {
-            match memory.get_database_stats().await {
-                Ok(stats) => ServerResponse::Success { message: stats },
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to get database stats: {}", e),
-                },
-            }
-        }
+        ClientRequest::GetDatabaseStats => match memory.get_database_stats().await {
+            Ok(stats) => ServerResponse::Success { message: stats },
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to get database stats: {}", e),
+            },
+        },
 
-        ClientRequest::ExportDatabase => {
-            match memory.export_database().await {
-                Ok(json) => ServerResponse::Success { message: json },
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to export database: {}", e),
-                },
-            }
-        }
+        ClientRequest::ExportDatabase => match memory.export_database().await {
+            Ok(json) => ServerResponse::Success { message: json },
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to export database: {}", e),
+            },
+        },
 
         ClientRequest::InspectSession { session_id } => {
             match conversation_manager.inspect_session(&session_id).await {
@@ -965,54 +1117,53 @@ async fn handle_request(
             }
         }
 
-        ClientRequest::GetMemoryStatus => {
-            match memory.get_compaction_status().await {
-                Ok(status) => ServerResponse::Success { message: status },
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to get memory status: {}", e),
-                },
-            }
-        }
+        ClientRequest::GetMemoryStatus => match memory.get_compaction_status().await {
+            Ok(status) => ServerResponse::Success { message: status },
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to get memory status: {}", e),
+            },
+        },
 
-        ClientRequest::ForceCompact => {
-            match memory.force_compact().await {
-                Ok(()) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
+        ClientRequest::ForceCompact => match memory.force_compact().await {
+            Ok(()) => {
+                let _ = state
+                    .broadcast_push(ServerPush::Notification {
                         title: "Memory Compaction".to_string(),
                         message: "Memory compaction completed successfully".to_string(),
                         urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
-                    ServerResponse::Success {
-                        message: "Memory compaction completed successfully".to_string(),
-                    }
-                },
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to force compact: {}", e),
-                },
+                    })
+                    .await;
+                ServerResponse::Success {
+                    message: "Memory compaction completed successfully".to_string(),
+                }
             }
-        }
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to force compact: {}", e),
+            },
+        },
 
-        ClientRequest::ReindexDatabase => {
-            match memory.reindex_database().await {
-                Ok(()) => {
-                    let _ = state.broadcast_push(ServerPush::Notification {
+        ClientRequest::ReindexDatabase => match memory.reindex_database().await {
+            Ok(()) => {
+                let _ = state
+                    .broadcast_push(ServerPush::Notification {
                         title: "Database Reindexed".to_string(),
                         message: "Database reindexed successfully".to_string(),
                         urgency: ritsu_common::protocol::NotificationUrgency::Normal,
-                    }).await;
-                    ServerResponse::Success {
-                        message: "Database reindexed successfully".to_string(),
-                    }
-                },
-                Err(e) => ServerResponse::Error {
-                    message: format!("Failed to reindex database: {}", e),
-                },
+                    })
+                    .await;
+                ServerResponse::Success {
+                    message: "Database reindexed successfully".to_string(),
+                }
             }
-        }
+            Err(e) => ServerResponse::Error {
+                message: format!("Failed to reindex database: {}", e),
+            },
+        },
         ClientRequest::ResetDatabase { confirm } => {
             if !confirm {
                 return ServerResponse::Error {
-                    message: "ResetDatabase requires confirm=true to prevent accidental deletion".to_string(),
+                    message: "ResetDatabase requires confirm=true to prevent accidental deletion"
+                        .to_string(),
                 };
             }
 
@@ -1063,13 +1214,17 @@ async fn handle_request(
                 warn!("Failed to reindex database after reset: {}", e);
             }
 
-            let _ = state.broadcast_push(ServerPush::Notification {
-                title: "Database Reset".to_string(),
-                message: "Database was reset by client request".to_string(),
-                urgency: ritsu_common::protocol::NotificationUrgency::Critical,
-            }).await;
+            let _ = state
+                .broadcast_push(ServerPush::Notification {
+                    title: "Database Reset".to_string(),
+                    message: "Database was reset by client request".to_string(),
+                    urgency: ritsu_common::protocol::NotificationUrgency::Critical,
+                })
+                .await;
 
-            ServerResponse::Success { message: "Database reset successfully".to_string() }
+            ServerResponse::Success {
+                message: "Database reset successfully".to_string(),
+            }
         }
     }
 }

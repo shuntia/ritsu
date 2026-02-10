@@ -1,12 +1,12 @@
 //! Server state management
 
-use std::sync::Arc;
-use tokio::sync::{RwLock, Mutex, mpsc};
-use tokio::net::UnixStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use chrono::{DateTime, Utc};
-use ritsu_common::protocol::{ServerPush, ServerToClientRequest, ClientToServerResponse};
-use tracing::{warn, error};
+use ritsu_common::protocol::{ClientToServerResponse, ServerPush, ServerToClientRequest};
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tracing::{error, warn};
 
 /// Push notification channel capacity
 pub const PUSH_CHANNEL_CAPACITY: usize = 100;
@@ -99,9 +99,15 @@ impl ServerState {
                             delay_ms = 5 * 60 * 1000;
                         }
                         // Small pseudo-random jitter based on current time
-                        let jitter = ((chrono::Utc::now().timestamp() as u64).wrapping_mul(997)) % 1000;
+                        let jitter =
+                            ((chrono::Utc::now().timestamp() as u64).wrapping_mul(997)) % 1000;
                         let delay = std::time::Duration::from_millis(delay_ms + jitter);
-                        tracing::warn!("Failed to connect to client daemon (attempt {}): {}. Retrying in {:?}", attempt, e, delay);
+                        tracing::warn!(
+                            "Failed to connect to client daemon (attempt {}): {}. Retrying in {:?}",
+                            attempt,
+                            e,
+                            delay
+                        );
                         tokio::time::sleep(delay).await;
                     }
                 }
@@ -115,7 +121,10 @@ impl ServerState {
     /// `start_client_daemon_reconnector()`. If no persistent connection
     /// is available, falls back to a short per-request connect with a
     /// short timeout.
-    pub async fn send_to_client_daemon(&self, request: ServerToClientRequest) -> anyhow::Result<()> {
+    pub async fn send_to_client_daemon(
+        &self,
+        request: ServerToClientRequest,
+    ) -> anyhow::Result<()> {
         // Attempt to use an existing persistent connection if present. Take the stream out of the mutex
         // temporarily to avoid holding the lock across I/O; reinsert it after I/O completes.
         {
@@ -130,7 +139,9 @@ impl ServerState {
 
                 let write_timeout = std::time::Duration::from_secs(5);
                 // Write with timeout to avoid blocking forever
-                if let Err(_) = tokio::time::timeout(write_timeout, stream.write_all(&len_bytes)).await {
+                if let Err(_) =
+                    tokio::time::timeout(write_timeout, stream.write_all(&len_bytes)).await
+                {
                     warn!("Timeout writing to client daemon (persistent)");
                     // Do not reinsert the stream; let the reconnector re-establish
                     return Err(anyhow::anyhow!("Failed to send to client daemon (timeout)"));
@@ -147,13 +158,17 @@ impl ServerState {
                 // Read response with timeout
                 let read_timeout = std::time::Duration::from_secs(5);
                 let mut len_buf = [0u8; 4];
-                if let Err(_) = tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await {
+                if let Err(_) =
+                    tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await
+                {
                     warn!("Timeout reading response from client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to read response"));
                 }
                 let len = u32::from_be_bytes(len_buf) as usize;
                 let mut buf = vec![0u8; len];
-                if let Err(_) = tokio::time::timeout(read_timeout, stream.read_exact(&mut buf)).await {
+                if let Err(_) =
+                    tokio::time::timeout(read_timeout, stream.read_exact(&mut buf)).await
+                {
                     warn!("Timeout reading response from client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to read response"));
                 }
@@ -174,20 +189,22 @@ impl ServerState {
         }
 
         // Fallback: connect per-request to avoid blocking if persistent connection missing
-        let socket_path = std::env::var("RITSU_CLIENT_SOCKET").unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string());
+        let socket_path = std::env::var("RITSU_CLIENT_SOCKET")
+            .unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string());
         // Use a short connect timeout to avoid hanging the server
         let connect_timeout = std::time::Duration::from_secs(5);
-        let stream = match tokio::time::timeout(connect_timeout, UnixStream::connect(&socket_path)).await {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => {
-                warn!("Client daemon not available: {}", e);
-                return Err(anyhow::anyhow!("Client daemon not running"));
-            }
-            Err(_) => {
-                warn!("Timeout connecting to client daemon at {}", socket_path);
-                return Err(anyhow::anyhow!("Client daemon connection timed out"));
-            }
-        };
+        let stream =
+            match tokio::time::timeout(connect_timeout, UnixStream::connect(&socket_path)).await {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
+                    warn!("Client daemon not available: {}", e);
+                    return Err(anyhow::anyhow!("Client daemon not running"));
+                }
+                Err(_) => {
+                    warn!("Timeout connecting to client daemon at {}", socket_path);
+                    return Err(anyhow::anyhow!("Client daemon connection timed out"));
+                }
+            };
 
         // Serialize and send request
         let request_bytes = postcard::to_allocvec(&request)?;
@@ -249,21 +266,21 @@ mod tests {
     #[tokio::test]
     async fn test_activity_tracking() {
         let state = ServerState::new();
-        
+
         // Initial state should have 0 seconds of inactivity
         let initial = state.seconds_since_activity().await;
         assert!(initial < 1);
-        
+
         // Wait a bit
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        
+
         // Should have some inactivity now
         let after_wait = state.seconds_since_activity().await;
         assert!(after_wait >= 0);
-        
+
         // Mark activity
         state.mark_activity().await;
-        
+
         // Should be fresh again
         let after_mark = state.seconds_since_activity().await;
         assert!(after_mark < 1);
@@ -272,13 +289,13 @@ mod tests {
     #[tokio::test]
     async fn test_inactivity_detection() {
         let state = ServerState::new();
-        
+
         // Should not be inactive for 10 seconds yet
         assert!(!state.is_inactive_for(10).await);
-        
+
         // Mark activity
         state.mark_activity().await;
-        
+
         // Should still not be inactive for any meaningful duration
         assert!(!state.is_inactive_for(1).await);
     }

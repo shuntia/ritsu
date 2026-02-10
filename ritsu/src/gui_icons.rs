@@ -13,9 +13,9 @@ pub fn make_spinner_frames() -> Vec<Vec<u8>> {
             let mut s = String::new();
             s.push_str(&BASE[..=open_end]);
             s.push_str(&format!("<g transform=\"rotate({:.2} 12 12)\">", angle));
-            s.push_str(&BASE[open_end+1..]);
+            s.push_str(&BASE[open_end + 1..]);
             if let Some(pos) = s.rfind("</svg>") {
-                s.replace_range(pos..pos+6, "</g></svg>");
+                s.replace_range(pos..pos + 6, "</g></svg>");
             }
             out.push(s.into_bytes());
         } else {

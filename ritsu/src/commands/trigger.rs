@@ -1,7 +1,7 @@
 //! Trigger management commands
 
-use anyhow::Result;
 use crate::TriggerCommands;
+use anyhow::Result;
 
 pub async fn handle(cmd: TriggerCommands) -> Result<()> {
     match cmd {
@@ -14,7 +14,7 @@ pub async fn handle(cmd: TriggerCommands) -> Result<()> {
 
 async fn list_triggers() -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::ListTriggers)
         .await?;
@@ -25,7 +25,10 @@ async fn list_triggers() -> Result<()> {
                 println!("No triggers found");
             } else {
                 for trigger in triggers {
-                    println!("#{}: {} (enabled: {})", trigger.id, trigger.name, trigger.enabled);
+                    println!(
+                        "#{}: {} (enabled: {})",
+                        trigger.id, trigger.name, trigger.enabled
+                    );
                 }
             }
             Ok(())
@@ -40,7 +43,7 @@ async fn list_triggers() -> Result<()> {
 
 async fn create_trigger(name: &str, time: &str) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::CreateTrigger {
             name: name.to_string(),
@@ -53,7 +56,10 @@ async fn create_trigger(name: &str, time: &str) -> Result<()> {
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("{} Trigger created: {name}", nerd_font::categories::Fa::Check);
+            println!(
+                "{} Trigger created: {name}",
+                nerd_font::categories::Fa::Check
+            );
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
@@ -66,7 +72,7 @@ async fn create_trigger(name: &str, time: &str) -> Result<()> {
 
 async fn disable_trigger(name: &str) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::DisableTrigger {
             name: name.to_string(),
@@ -75,7 +81,10 @@ async fn disable_trigger(name: &str) -> Result<()> {
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("{} Trigger disabled: {name}", nerd_font::categories::Fa::Check);
+            println!(
+                "{} Trigger disabled: {name}",
+                nerd_font::categories::Fa::Check
+            );
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {
@@ -88,7 +97,7 @@ async fn disable_trigger(name: &str) -> Result<()> {
 
 async fn delete_trigger(name: &str) -> Result<()> {
     let client = crate::ipc::IpcClient::new(super::get_client_socket()?);
-    
+
     let response = client
         .send_request(ritsu_common::protocol::ClientRequest::DeleteTrigger {
             name: name.to_string(),
@@ -97,7 +106,10 @@ async fn delete_trigger(name: &str) -> Result<()> {
 
     match response {
         ritsu_common::protocol::ServerResponse::Ok => {
-            println!("{} Trigger deleted: {name}", nerd_font::categories::Fa::Check);
+            println!(
+                "{} Trigger deleted: {name}",
+                nerd_font::categories::Fa::Check
+            );
             Ok(())
         }
         ritsu_common::protocol::ServerResponse::Error { message } => {

@@ -142,10 +142,18 @@ impl Config {
                 .with_context(|| format!("Failed to read config file: {}", path.display()))?;
             let config: Self = toml::from_str(&contents)
                 .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-            info!("{} Loaded configuration from: {}", nerd_font::categories::Fa::Check, path.display());
+            info!(
+                "{} Loaded configuration from: {}",
+                nerd_font::categories::Fa::Check,
+                path.display()
+            );
             Ok(config)
         } else {
-            warn!("{} Configuration file not found: {}", nerd_font::categories::Fa::ExclamationCircle, path.display());
+            warn!(
+                "{} Configuration file not found: {}",
+                nerd_font::categories::Fa::ExclamationCircle,
+                path.display()
+            );
             warn!("Using default configuration.");
             info!("To customize settings, create a config file:");
             info!("  mkdir -p ~/.config/ritsu");
@@ -167,11 +175,13 @@ impl Config {
     pub fn write_example(path: &PathBuf) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
-        let example = format!(r#"[llm]
+        let example = format!(
+            r#"[llm]
 default_backend = "ollama"
 disable_streaming = false
 disable_tools = false
@@ -237,11 +247,15 @@ llm_request_seconds = {llm_request}
             http_request = default_http_request(),
             llm_request = default_llm_request(),
         );
-        
+
         std::fs::write(path, example)
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
-        
-        info!("{} Created example config: {}", nerd_font::categories::Fa::Check, path.display());
+
+        info!(
+            "{} Created example config: {}",
+            nerd_font::categories::Fa::Check,
+            path.display()
+        );
         Ok(())
     }
 }

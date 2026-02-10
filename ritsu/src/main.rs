@@ -372,7 +372,7 @@ fn main() -> Result<()> {
                 }
                 Commands::Dev(cmd) => commands::dev::handle(cmd).await?,
                 Commands::Attach => commands::attach::attach().await?,
-                Commands::Chat | Commands::WriteExampleConfig => {},
+                Commands::Chat | Commands::WriteExampleConfig => {}
             }
             Ok(())
         }),

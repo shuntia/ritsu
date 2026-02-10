@@ -4,8 +4,8 @@
 use anyhow::Result;
 use chrono::Local;
 use std::pin::Pin;
-use std::sync::OnceLock;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use tracing::warn;
 
@@ -14,7 +14,11 @@ use crate::memory::MemoryManager;
 use crate::tasks::TaskManager;
 
 /// Pre-prompt hook type: async function that returns optional injected text
-pub type PrePromptHook = Arc<dyn Fn() -> Pin<Box<dyn std::future::Future<Output = Result<Option<String>>> + Send>> + Send + Sync>;
+pub type PrePromptHook = Arc<
+    dyn Fn() -> Pin<Box<dyn std::future::Future<Output = Result<Option<String>>> + Send>>
+        + Send
+        + Sync,
+>;
 
 static PRE_PROMPT_HOOKS: OnceLock<Arc<RwLock<Vec<PrePromptHook>>>> = OnceLock::new();
 
@@ -89,7 +93,10 @@ impl PromptBuilder {
         let now = Local::now();
         let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
 
-        let enhanced_content = format!("[Current Time: {}]\n[{}]\n\n{}", time_str, context_block, user_content);
+        let enhanced_content = format!(
+            "[Current Time: {}]\n[{}]\n\n{}",
+            time_str, context_block, user_content
+        );
 
         history.push(LlmMessage {
             role: "user".to_string(),
@@ -151,7 +158,10 @@ mod tests {
         clear_pre_hooks().await;
 
         // Register a simple hook that returns a fixed string
-        register_pre_hook(Arc::new(|| Box::pin(async move { Ok(Some("TESTHOOK".to_string())) }))).await;
+        register_pre_hook(Arc::new(|| {
+            Box::pin(async move { Ok(Some("TESTHOOK".to_string())) })
+        }))
+        .await;
 
         let outputs = run_pre_hooks().await.unwrap();
         assert_eq!(outputs, vec!["TESTHOOK".to_string()]);

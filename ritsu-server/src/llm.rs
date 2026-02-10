@@ -106,8 +106,10 @@ impl LlmClient {
             backend.api_key_env.as_ref().and_then(|env_var| {
                 std::env::var(env_var).ok().or_else(|| {
                     if provider_type != LLMBackend::Ollama {
-                        warn!("API key environment variable '{}' not set for {} backend", 
-                            env_var, backend.name);
+                        warn!(
+                            "API key environment variable '{}' not set for {} backend",
+                            env_var, backend.name
+                        );
                     }
                     None
                 })
@@ -116,7 +118,10 @@ impl LlmClient {
 
         // Warn if no API key for non-Ollama backends
         if api_key.is_none() && provider_type != LLMBackend::Ollama {
-            warn!("No API key configured for {} backend ({})", backend.name, backend.endpoint);
+            warn!(
+                "No API key configured for {} backend ({})",
+                backend.name, backend.endpoint
+            );
         }
 
         // Build LLM with all tools registered
@@ -459,7 +464,8 @@ impl LlmClient {
     /// stream completes, and synthesizes a follow-up assistant message using a
     /// non-streaming LLM request. The synthesized follow-up is sent as an
     /// additional chunk on the same channel.
-    pub async fn generate_streaming(self: Arc<Self>,
+    pub async fn generate_streaming(
+        self: Arc<Self>,
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<mpsc::Receiver<Result<String>>> {
@@ -499,7 +505,10 @@ impl LlmClient {
         // slow down or break streaming in some LLM servers (e.g., Ollama).
         const STREAM_TOOL_LIMIT: usize = 10;
         if tool_count > STREAM_TOOL_LIMIT {
-            debug!("Tool count {} exceeds streaming threshold; limiting to first {} tools", tool_count, STREAM_TOOL_LIMIT);
+            debug!(
+                "Tool count {} exceeds streaming threshold; limiting to first {} tools",
+                tool_count, STREAM_TOOL_LIMIT
+            );
             tools.truncate(STREAM_TOOL_LIMIT);
         }
 
@@ -542,7 +551,10 @@ impl LlmClient {
                                 }
                             }
 
-                            StreamChunk::ToolUseComplete { index: _, tool_call } => {
+                            StreamChunk::ToolUseComplete {
+                                index: _,
+                                tool_call,
+                            } => {
                                 // Collect raw tool call data for post-stream parsing/execution
                                 tracing::debug!(
                                     "Collected raw tool call in stream: {} (args_len={})",
@@ -552,14 +564,24 @@ impl LlmClient {
                                 debug!(tool = %tool_call.function.name, args_len = %tool_call.function.arguments.len(), "Collected raw tool call details");
 
                                 // Store raw arguments; parse only once the stream completes
-                                collected_raw_calls.push((tool_call.function.name.clone(), tool_call.function.arguments.clone()));
+                                collected_raw_calls.push((
+                                    tool_call.function.name.clone(),
+                                    tool_call.function.arguments.clone(),
+                                ));
                             }
 
-                            StreamChunk::ToolUseStart { index: _, id: _, name } => {
+                            StreamChunk::ToolUseStart {
+                                index: _,
+                                id: _,
+                                name,
+                            } => {
                                 tracing::debug!("Tool use started in stream: {}", name);
                             }
 
-                            StreamChunk::ToolUseInputDelta { index: _, partial_json } => {
+                            StreamChunk::ToolUseInputDelta {
+                                index: _,
+                                partial_json,
+                            } => {
                                 tracing::debug!("Tool input delta in stream: {}", partial_json);
                             }
 
@@ -584,7 +606,9 @@ impl LlmClient {
             let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
             if !collected_raw_calls.is_empty() {
                 for (name, raw_args) in collected_raw_calls.into_iter() {
-                    let args_map: HashMap<String, serde_json::Value> = match serde_json::from_str(&raw_args) {
+                    let args_map: HashMap<String, serde_json::Value> = match serde_json::from_str(
+                        &raw_args,
+                    ) {
                         Ok(m) => m,
                         Err(e) => {
                             warn!(tool=%name, "Failed to parse tool call arguments JSON at stream end: {}", e);
@@ -601,18 +625,25 @@ impl LlmClient {
                         args.insert(k, val_str);
                     }
 
-                    collected_calls.push(ToolCallInfo { name, arguments: args });
+                    collected_calls.push(ToolCallInfo {
+                        name,
+                        arguments: args,
+                    });
                 }
             }
 
             // If tool calls were collected, execute them now using a bounded worker pool with per-tool timeouts
             if !collected_calls.is_empty() {
-                tracing::info!("Executing {} collected tool call(s) after stream completion", collected_calls.len());
+                tracing::info!(
+                    "Executing {} collected tool call(s) after stream completion",
+                    collected_calls.len()
+                );
 
                 // Bounded concurrency for tool execution to avoid resource exhaustion
                 let max_concurrent_tools = 4usize;
                 let tool_timeout = std::time::Duration::from_secs(30);
-                let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent_tools));
+                let semaphore =
+                    std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent_tools));
 
                 // Spawn each tool execution into its own task, limited by the semaphore
                 let mut handles = Vec::new();
@@ -641,28 +672,47 @@ impl LlmClient {
                         info!(tool=%call_name, args=?call_args, "Starting tool execution");
 
                         // Execute with timeout to prevent a single tool from blocking forever
-                        match tokio::time::timeout(tool_timeout, tool_registry.execute(&call_name, call_args.clone())).await {
+                        match tokio::time::timeout(
+                            tool_timeout,
+                            tool_registry.execute(&call_name, call_args.clone()),
+                        )
+                        .await
+                        {
                             Ok(Ok(res)) => {
                                 let duration = start.elapsed();
-                                let result_text = if res.success { res.output.clone() } else { res.error.clone().unwrap_or_else(|| res.output.clone()) };
+                                let result_text = if res.success {
+                                    res.output.clone()
+                                } else {
+                                    res.error.clone().unwrap_or_else(|| res.output.clone())
+                                };
                                 info!(tool=%call_name, duration_ms = %duration.as_millis(), success = res.success, "Tool execution completed");
                                 debug!(tool=%call_name, result_len = %result_text.len(), "Tool result length");
 
-                                let msg = format!("\n\n[lucide:wrench] Tool '{}' result:\n{}\n", call_name, result_text);
+                                let msg = format!(
+                                    "\n\n[lucide:wrench] Tool '{}' result:\n{}\n",
+                                    call_name, result_text
+                                );
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Ok(Err(e)) => {
                                 let duration = start.elapsed();
                                 warn!(tool=%call_name, duration_ms = %duration.as_millis(), error=%e, "Tool execution failed");
 
-                                let msg = format!("\n\n[lucide:wrench] Tool '{}' execution failed: {}\n", call_name, e);
+                                let msg = format!(
+                                    "\n\n[lucide:wrench] Tool '{}' execution failed: {}\n",
+                                    call_name, e
+                                );
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Err(_) => {
                                 let duration = start.elapsed();
                                 warn!(tool=%call_name, duration_ms = %duration.as_millis(), "Tool execution timed out after {}s", tool_timeout.as_secs());
 
-                                let msg = format!("\n\n[lucide:wrench] Tool '{}' execution timed out after {}s\n", call_name, tool_timeout.as_secs());
+                                let msg = format!(
+                                    "\n\n[lucide:wrench] Tool '{}' execution timed out after {}s\n",
+                                    call_name,
+                                    tool_timeout.as_secs()
+                                );
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                         }
@@ -688,7 +738,7 @@ impl LlmClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LlmConfig, LlmBackend};
+    use crate::config::{LlmBackend, LlmConfig};
 
     #[test]
     fn default_backend_honored() {
@@ -721,15 +771,13 @@ mod tests {
     fn fallback_to_first() {
         let cfg = LlmConfig {
             default_backend: "nonexistent".to_string(),
-            backends: vec![
-                LlmBackend {
-                    name: "ollama".to_string(),
-                    endpoint: "http://localhost:11434".to_string(),
-                    model: "llama3.2".to_string(),
-                    api_key: None,
-                    api_key_env: None,
-                },
-            ],
+            backends: vec![LlmBackend {
+                name: "ollama".to_string(),
+                endpoint: "http://localhost:11434".to_string(),
+                model: "llama3.2".to_string(),
+                api_key: None,
+                api_key_env: None,
+            }],
             disable_streaming: false,
             disable_tools: false,
         };

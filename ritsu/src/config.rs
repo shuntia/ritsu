@@ -9,16 +9,16 @@ use tracing::{info, warn};
 pub struct ClientConfig {
     #[serde(default)]
     pub sockets: SocketConfig,
-    
+
     #[serde(default)]
     pub timeouts: TimeoutConfig,
-    
+
     #[serde(default)]
     pub gui: GuiConfig,
-    
+
     #[serde(default)]
     pub paths: PathConfig,
-    
+
     #[serde(default)]
     pub retry: RetryConfig,
 }
@@ -27,7 +27,7 @@ pub struct ClientConfig {
 pub struct SocketConfig {
     #[serde(default = "default_client_socket")]
     pub client_socket: String,
-    
+
     #[serde(default = "default_server_socket")]
     pub server_socket: String,
 }
@@ -38,11 +38,11 @@ pub struct TimeoutConfig {
     /// Connection timeout in seconds
     #[serde(default = "default_connect_timeout")]
     pub connect_seconds: u64,
-    
+
     /// Request timeout in seconds (for non-streaming requests)
     #[serde(default = "default_request_timeout")]
     pub request_seconds: u64,
-    
+
     /// Streaming timeout in seconds (for initial response)
     #[serde(default = "default_streaming_timeout")]
     pub streaming_seconds: u64,
@@ -53,19 +53,19 @@ pub struct GuiConfig {
     /// Window width in pixels
     #[serde(default = "default_window_width")]
     pub window_width: u32,
-    
+
     /// Window height in pixels
     #[serde(default = "default_window_height")]
     pub window_height: u32,
-    
+
     /// Font size
     #[serde(default = "default_font_size")]
     pub font_size: f32,
-    
+
     /// Enable desktop notifications
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
-    
+
     /// Max messages to display in chat
     #[serde(default = "default_max_messages")]
     pub max_messages: usize,
@@ -76,7 +76,7 @@ pub struct PathConfig {
     /// Session file path (stores last session ID)
     #[serde(default = "default_session_file")]
     pub session_file: PathBuf,
-    
+
     /// Chat history cache directory
     #[serde(default = "default_cache_dir")]
     pub cache_dir: PathBuf,
@@ -87,11 +87,11 @@ pub struct RetryConfig {
     /// Number of connection retry attempts
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
-    
+
     /// Retry delay in milliseconds
     #[serde(default = "default_retry_delay_ms")]
     pub retry_delay_ms: u64,
-    
+
     /// Enable exponential backoff for retries
     #[serde(default = "default_exponential_backoff")]
     pub exponential_backoff: bool,
@@ -149,13 +149,11 @@ impl Default for RetryConfig {
 
 // Default value functions
 fn default_client_socket() -> String {
-    std::env::var("RITSU_CLIENT_SOCKET")
-        .unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string())
+    std::env::var("RITSU_CLIENT_SOCKET").unwrap_or_else(|_| "/tmp/ritsu-client.sock".to_string())
 }
 
 fn default_server_socket() -> String {
-    std::env::var("RITSU_SERVER_SOCKET")
-        .unwrap_or_else(|_| "/tmp/ritsu.sock".to_string())
+    std::env::var("RITSU_SERVER_SOCKET").unwrap_or_else(|_| "/tmp/ritsu.sock".to_string())
 }
 
 fn default_connect_timeout() -> u64 {
@@ -230,7 +228,7 @@ impl ClientConfig {
         let config_path = Self::config_file_path();
         Self::load_from_path(&config_path)
     }
-    
+
     /// Load configuration from specific path
     pub fn load_from_path(path: &PathBuf) -> Result<Self> {
         if path.exists() {
@@ -246,7 +244,7 @@ impl ClientConfig {
             Ok(Self::default())
         }
     }
-    
+
     /// Get default configuration file path
     #[must_use]
     pub fn config_file_path() -> PathBuf {
@@ -255,45 +253,44 @@ impl ClientConfig {
             .join("ritsu")
             .join("client.toml")
     }
-    
+
     /// Write an example configuration file
     pub fn write_example(path: &PathBuf) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
         let example_config = Self::default();
         let toml_string = toml::to_string_pretty(&example_config)
             .context("Failed to serialize example config")?;
-        
+
         std::fs::write(path, toml_string)
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
-        
+
         info!("Created example client config: {}", path.display());
         Ok(())
     }
-    
+
     /// Get client socket path (respects environment variable)
     #[must_use]
     pub fn client_socket_path(&self) -> String {
-        std::env::var("RITSU_CLIENT_SOCKET")
-            .unwrap_or_else(|_| self.sockets.client_socket.clone())
+        std::env::var("RITSU_CLIENT_SOCKET").unwrap_or_else(|_| self.sockets.client_socket.clone())
     }
-    
+
     /// Get server socket path (respects environment variable)
     #[must_use]
     pub fn server_socket_path(&self) -> String {
-        std::env::var("RITSU_SERVER_SOCKET")
-            .unwrap_or_else(|_| self.sockets.server_socket.clone())
+        std::env::var("RITSU_SERVER_SOCKET").unwrap_or_else(|_| self.sockets.server_socket.clone())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = ClientConfig::default();
@@ -304,18 +301,18 @@ mod tests {
         assert_eq!(config.gui.window_width, 800);
         assert_eq!(config.retry.max_retries, 3);
     }
-    
+
     #[test]
     fn test_env_override() {
         std::env::set_var("RITSU_CLIENT_SOCKET", "/custom/client.sock");
         std::env::set_var("RITSU_SERVER_SOCKET", "/custom/server.sock");
         std::env::set_var("RITSU_CONNECT_TIMEOUT", "10");
-        
+
         let config = ClientConfig::default();
         assert_eq!(config.client_socket_path(), "/custom/client.sock");
         assert_eq!(config.server_socket_path(), "/custom/server.sock");
         assert_eq!(config.timeouts.connect_seconds, 10);
-        
+
         std::env::remove_var("RITSU_CLIENT_SOCKET");
         std::env::remove_var("RITSU_SERVER_SOCKET");
         std::env::remove_var("RITSU_CONNECT_TIMEOUT");

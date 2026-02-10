@@ -8,7 +8,7 @@ pub enum ClientRequest {
     /// Ping to check server status
     Ping,
     /// Send a message to the AI
-    SendMessage { 
+    SendMessage {
         content: String,
         session_id: Option<String>,
     },
@@ -45,23 +45,16 @@ pub enum ClientRequest {
         priority: Option<TaskPriority>,
     },
     /// Delete a task
-    DeleteTask {
-        id: i64,
-    },
+    DeleteTask { id: i64 },
     /// Query memory
     QueryMemory {
         query_type: MemoryQueryType,
         date_range: Option<DateRange>,
     },
     /// Create a new note
-    CreateNote {
-        content: String,
-        tags: Vec<String>,
-    },
+    CreateNote { content: String, tags: Vec<String> },
     /// List conversation sessions
-    ListSessions {
-        limit: Option<usize>,
-    },
+    ListSessions { limit: Option<usize> },
     /// Clear all memory (for testing)
     ClearMemory {
         /// Confirm flag to prevent accidental deletion
@@ -70,16 +63,11 @@ pub enum ClientRequest {
     /// Subscribe to server push notifications
     Subscribe,
     /// Get conversation history for a session
-    GetConversationHistory {
-        session_id: String,
-        limit: i64,
-    },
+    GetConversationHistory { session_id: String, limit: i64 },
     /// Get current system prompt
     GetSystemPrompt,
     /// Set system prompt
-    SetSystemPrompt {
-        content: String,
-    },
+    SetSystemPrompt { content: String },
     /// Get model information
     GetModelInfo,
     /// Get database statistics
@@ -93,9 +81,7 @@ pub enum ClientRequest {
     },
 
     /// Inspect a conversation session
-    InspectSession {
-        session_id: String,
-    },
+    InspectSession { session_id: String },
     /// Get tool usage statistics
     GetToolStats,
     /// Get memory compaction status
@@ -150,10 +136,7 @@ pub enum ServerPush {
     /// User response timeout
     ResponseTimeout { context: String },
     /// Streaming message chunk
-    MessageChunk { 
-        content: String,
-        is_final: bool,
-    },
+    MessageChunk { content: String, is_final: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

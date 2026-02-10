@@ -12,8 +12,8 @@ mod database;
 mod ipc;
 mod llm;
 mod memory;
-mod prompt;
 mod preferences;
+mod prompt;
 mod state;
 mod tasks;
 mod tools;
@@ -172,11 +172,9 @@ async fn main() -> Result<()> {
     info!("Tool registry initialized with usage tracking");
 
     // Initialize LLM client (needs tool registry for tool calling)
-    let llm_client = std::sync::Arc::new(llm::LlmClient::new(
-        &config.llm,
-        &config.timeouts,
-        tool_registry.clone(),
-    ).await?);
+    let llm_client = std::sync::Arc::new(
+        llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone()).await?,
+    );
     info!(
         "LLM client initialized with {} backend(s)",
         config.llm.backends.len()
@@ -189,11 +187,16 @@ async fn main() -> Result<()> {
             let task_manager = task_manager_for_hook.clone();
             let fut = async move {
                 match task_manager.get_task_summary().await {
-                    Ok(s) if !s.is_empty() => Ok(Some(format!("[lucide:clipboard] Current Tasks:\n{}", s))),
+                    Ok(s) if !s.is_empty() => {
+                        Ok(Some(format!("[lucide:clipboard] Current Tasks:\n{}", s)))
+                    }
                     _ => Ok(None),
                 }
             };
-            Box::pin(fut) as std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<String>>> + Send>>
+            Box::pin(fut)
+                as std::pin::Pin<
+                    Box<dyn std::future::Future<Output = anyhow::Result<Option<String>>> + Send>,
+                >
         });
         // Register hook
         crate::prompt::register_pre_hook(hook).await;
@@ -501,7 +504,11 @@ You have access to various tools for:
 Use these tools proactively to assist the user effectively.
 ";
     fs::write(&base_path, base_content)?;
-    println!("{} Created: {}", nerd_font::categories::Fa::Check, base_path.display());
+    println!(
+        "{} Created: {}",
+        nerd_font::categories::Fa::Check,
+        base_path.display()
+    );
 
     // Chat context prompt
     let chat_path = prompts_dir.join("chat.md");
@@ -521,7 +528,11 @@ You are in an interactive chat session with the user.
 - Provide actionable suggestions
 ";
     fs::write(&chat_path, chat_content)?;
-    println!("{} Created: {}", nerd_font::categories::Fa::Check, chat_path.display());
+    println!(
+        "{} Created: {}",
+        nerd_font::categories::Fa::Check,
+        chat_path.display()
+    );
 
     // Background task prompt
     let background_path = prompts_dir.join("background.md");
@@ -541,7 +552,11 @@ You are executing a scheduled background task.
 - Suggest new triggers if patterns emerge
 ";
     fs::write(&background_path, background_content)?;
-    println!("{} Created: {}", nerd_font::categories::Fa::Check, background_path.display());
+    println!(
+        "{} Created: {}",
+        nerd_font::categories::Fa::Check,
+        background_path.display()
+    );
 
     // Create subdirectory for specialized prompts
     let background_dir = prompts_dir.join("background");
@@ -567,7 +582,11 @@ Generate a well-structured summary with:
 - User preferences learned
 ";
     fs::write(&compact_path, compact_content)?;
-    println!("{} Created: {}", nerd_font::categories::Fa::Check, compact_path.display());
+    println!(
+        "{} Created: {}",
+        nerd_font::categories::Fa::Check,
+        compact_path.display()
+    );
 
     // Pattern analysis prompt
     let pattern_path = background_dir.join("pattern.md");
@@ -589,7 +608,11 @@ Produce insights about:
 - Suggested optimizations
 ";
     fs::write(&pattern_path, pattern_content)?;
-    println!("{} Created: {}", nerd_font::categories::Fa::Check, pattern_path.display());
+    println!(
+        "{} Created: {}",
+        nerd_font::categories::Fa::Check,
+        pattern_path.display()
+    );
 
     // Morning briefing prompt
     let briefing_path = background_dir.join("briefing.md");
@@ -610,7 +633,11 @@ You are preparing a daily briefing for the user.
 - Be encouraging and positive
 ";
     fs::write(&briefing_path, briefing_content)?;
-    println!("{} Created: {}", nerd_font::categories::Fa::Check, briefing_path.display());
+    println!(
+        "{} Created: {}",
+        nerd_font::categories::Fa::Check,
+        briefing_path.display()
+    );
 
     println!();
     println!("All example prompts created successfully!");

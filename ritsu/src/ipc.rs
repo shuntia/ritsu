@@ -51,7 +51,9 @@ impl IpcClient {
         // Ensure a connection exists
         let mut guard = self.get_connection().await?;
         // Take ownership of the stream so we don't hold the mutex across awaits
-        let mut stream = guard.take().ok_or_else(|| anyhow::anyhow!("Failed to establish connection"))?;
+        let mut stream = guard
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to establish connection"))?;
         drop(guard);
 
         use std::time::Duration;
@@ -81,7 +83,11 @@ impl IpcClient {
         match tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => return Err(e.into()),
-            Err(_) => return Err(anyhow::anyhow!("Timeout reading response length from IPC socket")),
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "Timeout reading response length from IPC socket"
+                ))
+            }
         }
         let len = u32::from_be_bytes(len_buf) as usize;
 
@@ -109,7 +115,7 @@ impl IpcClient {
             _ => Ok(false),
         }
     }
-    
+
     /// Get conversation history for a session
     pub async fn get_conversation_history(
         &self,
@@ -123,7 +129,7 @@ impl IpcClient {
             _ => anyhow::bail!("Unexpected response type"),
         }
     }
-    
+
     /// Send a message and subscribe to streaming responses
     /// Returns a channel receiver that yields message chunks
     /// Note: This creates a dedicated connection for streaming since it's long-lived
@@ -135,19 +141,22 @@ impl IpcClient {
         // For streaming, create a dedicated connection since it's long-lived
         // and we can't hold the main connection lock for the duration
         let mut stream = UnixStream::connect(&self.socket_path).await?;
-        
+
         // Send message request
-        let request = ClientRequest::SendMessage { content, session_id };
+        let request = ClientRequest::SendMessage {
+            content,
+            session_id,
+        };
         let request_data = postcard::to_allocvec(&request)?;
         let request_len = (request_data.len() as u32).to_be_bytes();
-        
+
         stream.write_all(&request_len).await?;
         stream.write_all(&request_data).await?;
         stream.flush().await?;
-        
+
         // Create channel for streaming chunks
         let (tx, rx) = mpsc::channel(32);
-        
+
         // Spawn a task to read push notifications from the stream
         tokio::spawn(async move {
             loop {
@@ -157,32 +166,42 @@ impl IpcClient {
                     break;
                 }
                 let len = u32::from_be_bytes(len_buf) as usize;
-                
+
                 // Read push data
                 let mut data = vec![0u8; len];
                 if stream.read_exact(&mut data).await.is_err() {
                     break;
                 }
-                
+
                 // Deserialize push
                 if let Ok(push) = postcard::from_bytes::<ServerPush>(&data) {
                     // Check if this is the final chunk
                     let is_final = matches!(push, ServerPush::MessageChunk { is_final: true, .. });
-                    
+
                     if tx.send(push).await.is_err() {
                         break;
                     }
-                    
+
                     if is_final {
                         // After the final push, attempt to read the server's final ServerResponse (if any)
                         // Use a short timeout to avoid blocking indefinitely if the server doesn't send one.
                         use std::time::Duration;
                         let mut resp_len_buf = [0u8; 4];
-                        if tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut resp_len_buf)).await.is_ok() {
+                        if tokio::time::timeout(
+                            Duration::from_secs(2),
+                            stream.read_exact(&mut resp_len_buf),
+                        )
+                        .await
+                        .is_ok()
+                        {
                             let resp_len = u32::from_be_bytes(resp_len_buf) as usize;
                             let mut resp_data = vec![0u8; resp_len];
                             // Try to read and parse the ServerResponse; ignore errors/timeouts
-                            let _ = tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut resp_data)).await;
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(2),
+                                stream.read_exact(&mut resp_data),
+                            )
+                            .await;
                             let _ = postcard::from_bytes::<ServerResponse>(&resp_data);
                         }
                         break;
@@ -192,43 +211,43 @@ impl IpcClient {
                 }
             }
         });
-        
+
         Ok(rx)
     }
-    
+
     /// Subscribe to server pushes and wait for next push notification
     #[allow(dead_code)]
     pub async fn subscribe_and_wait(&self) -> Result<ritsu_common::protocol::ServerPush> {
         let mut stream = UnixStream::connect(&self.socket_path).await?;
-        
+
         // Send subscribe request
         let request = ClientRequest::Subscribe;
         let request_data = postcard::to_allocvec(&request)?;
         let request_len = (request_data.len() as u32).to_be_bytes();
-        
+
         stream.write_all(&request_len).await?;
         stream.write_all(&request_data).await?;
         stream.flush().await?;
-        
+
         // Read subscription acknowledgment
         let mut len_buf = [0u8; 4];
         stream.read_exact(&mut len_buf).await?;
         let len = u32::from_be_bytes(len_buf) as usize;
-        
+
         let mut data = vec![0u8; len];
         stream.read_exact(&mut data).await?;
         let _response: ServerResponse = postcard::from_bytes(&data)?;
-        
+
         // Now wait for push notifications on this connection
         // Read push length
         let mut len_buf = [0u8; 4];
         stream.read_exact(&mut len_buf).await?;
         let len = u32::from_be_bytes(len_buf) as usize;
-        
+
         // Read push data
         let mut data = vec![0u8; len];
         stream.read_exact(&mut data).await?;
-        
+
         // Deserialize push
         let push: ritsu_common::protocol::ServerPush = postcard::from_bytes(&data)?;
         Ok(push)
@@ -252,7 +271,7 @@ mod tests {
         let request = ClientRequest::Ping;
         let serialized = postcard::to_allocvec(&request).unwrap();
         let deserialized: ClientRequest = postcard::from_bytes(&serialized).unwrap();
-        
+
         match deserialized {
             ClientRequest::Ping => (),
             _ => unreachable!("Unexpected request type"),
@@ -265,12 +284,15 @@ mod tests {
             content: "test message".to_string(),
             session_id: Some("session123".to_string()),
         };
-        
+
         let serialized = postcard::to_allocvec(&request).unwrap();
         let deserialized: ClientRequest = postcard::from_bytes(&serialized).unwrap();
-        
+
         match deserialized {
-            ClientRequest::SendMessage { content, session_id } => {
+            ClientRequest::SendMessage {
+                content,
+                session_id,
+            } => {
                 assert_eq!(content, "test message");
                 assert_eq!(session_id, Some("session123".to_string()));
             }
