@@ -157,25 +157,42 @@ impl TaskManager {
         self.conn.call(move |conn| -> rusqlite::Result<Vec<Task>> {
             let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
 
+            // Use parameterized queries to avoid SQL injection and to let the DB engine optimize.
+            let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
+            let mut params: Vec<rusqlite::types::ToSqlOutput> = Vec::new();
+
             if let Some(status) = &status_filter {
-                query.push_str(" AND status = '");
-                query.push_str(status);
-                query.push('\'');
+                query.push_str(" AND status = ?");
+                params.push(rusqlite::types::ToSqlOutput::from(status.as_str()));
             }
 
             if let Some(priority) = &priority_filter {
-                query.push_str(" AND priority = '");
-                query.push_str(priority);
-                query.push('\'');
+                query.push_str(" AND priority = ?");
+                params.push(rusqlite::types::ToSqlOutput::from(priority.as_str()));
             }
 
             query.push_str(" ORDER BY created_at DESC");
 
             let mut stmt = conn.prepare(&query)?;
+            // Build parameters slice for query execution
+            let mut to_sql_params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+            if let Some(status) = &status_filter {
+                to_sql_params.push(status);
+            }
+            if let Some(priority) = &priority_filter {
+                to_sql_params.push(priority);
+            }
+
             let tasks = stmt
-                .query_map([], |row| {
+                .query_map(to_sql_params.as_slice(), |row| {
                     let tags_json: String = row.get(5)?;
-                    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+                    let tags: Vec<String> = match serde_json::from_str(&tags_json) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!("Failed to parse tags JSON for task id {}: {}", row.get::<_, i64>(0)?, e);
+                            Vec::new()
+                        }
+                    };
 
                     let status_str: String = row.get(3)?;
                     let status = match status_str.as_str() {

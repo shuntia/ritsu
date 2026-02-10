@@ -12,6 +12,7 @@ mod database;
 mod ipc;
 mod llm;
 mod memory;
+mod prompt;
 mod preferences;
 mod state;
 mod tasks;
@@ -160,10 +161,12 @@ async fn main() -> Result<()> {
     tools::register_all_tools(
         &tool_registry,
         memory.clone(),
+        conversation_manager.clone(),
         task_manager.clone(),
         trigger_registry.clone(),
         server_state.clone(),
         preferences_manager.clone(),
+        std::sync::Arc::new(config.clone()),
     )
     .await;
     info!("Tool registry initialized with usage tracking");
@@ -178,6 +181,23 @@ async fn main() -> Result<()> {
         "LLM client initialized with {} backend(s)",
         config.llm.backends.len()
     );
+
+    // Register default pre-LLM prompt hooks (inject task summaries into prompts)
+    {
+        let task_manager_for_hook = task_manager.clone();
+        let hook = Arc::new(move || {
+            let task_manager = task_manager_for_hook.clone();
+            let fut = async move {
+                match task_manager.get_task_summary().await {
+                    Ok(s) if !s.is_empty() => Ok(Some(format!("[lucide:clipboard] Current Tasks:\n{}", s))),
+                    _ => Ok(None),
+                }
+            };
+            Box::pin(fut) as std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<String>>> + Send>>
+        });
+        // Register hook
+        crate::prompt::register_pre_hook(hook).await;
+    }
 
     // Start trigger loop in background
     let trigger_registry_clone = trigger_registry.clone();

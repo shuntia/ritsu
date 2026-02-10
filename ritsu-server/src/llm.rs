@@ -626,7 +626,15 @@ impl LlmClient {
                     debug!(tool=%call_name, "Spawning tool executor task");
                     let handle = tokio::spawn(async move {
                         // Acquire a permit (await inside spawned task so we don't block the outer task)
-                        let _permit = permit_sem.acquire_owned().await.expect("semaphore closed");
+                        let _permit = match permit_sem.acquire_owned().await {
+                            Ok(permit) => permit,
+                            Err(e) => {
+                                tracing::warn!(tool=%call_name, "Semaphore closed before executing tool: {:?}", e);
+                                let msg = format!("\n\n[lucide:wrench] Tool '{}' execution failed: internal semaphore closed\n", call_name);
+                                let _ = tx_clone.send(Ok(msg)).await;
+                                return;
+                            }
+                        };
 
                         // Log start
                         let start = std::time::Instant::now();

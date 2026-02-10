@@ -352,6 +352,107 @@ Example args: { "content": "Met with Alice about roadmap", "tags": "meeting,road
         }
     }
 
+    pub fn edit_note(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
+        Tool {
+            name: "edit_note".to_string(),
+            description: r#"Edit an existing note by id.
+
+Parameters:
+- id (string, required): Note ID to edit.
+- content (string, optional): New content.
+- tags (string, optional): Comma-separated tags to replace existing tags.
+
+Behavior:
+At least one of content or tags must be provided. Calls MemoryManager.update_note(id, content_opt, tags_opt) to persist changes.
+
+Return:
+ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_string(),
+            tags: vec!["memory".to_string(), "note".to_string()],
+            parameters: vec![
+                ToolParameter {
+                    name: "id".to_string(),
+                    description: "Note ID".to_string(),
+                    required: true,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "content".to_string(),
+                    description: "New content".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "tags".to_string(),
+                    description: "Comma-separated tags".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let memory = memory.clone();
+                Box::pin(async move {
+                    let id_str = match args.get("id") {
+                        Some(i) if !i.trim().is_empty() => i.clone(),
+                        _ => return ToolResult::error("Missing required parameter: id".to_string()),
+                    };
+                    let id = match id_str.parse::<i64>() {
+                        Ok(v) => v,
+                        Err(_) => return ToolResult::error(format!("Invalid id: {}", id_str)),
+                    };
+
+                    let content_opt = args.get("content").cloned();
+                    let tags_opt = args.get("tags").cloned().map(|s| {
+                        s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>()
+                    });
+
+                    if content_opt.is_none() && tags_opt.is_none() {
+                        return ToolResult::error("No updates provided (need content or tags)".to_string());
+                    }
+
+                    match memory.update_note(id, content_opt, tags_opt).await {
+                        Ok(()) => ToolResult::success(format!("Note {} updated", id)),
+                        Err(e) => {
+                            tracing::error!("Failed to update note: {}", e);
+                            ToolResult::error(format!("Failed to update note: {e}"))
+                        }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn delete_note(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
+        Tool {
+            name: "delete_note".to_string(),
+            description: r#"Delete a note by ID."#.to_string(),
+            tags: vec!["memory".to_string(), "note".to_string()],
+            parameters: vec![
+                ToolParameter { name: "id".to_string(), description: "Note ID".to_string(), required: true, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let memory = memory.clone();
+                Box::pin(async move {
+                    let id_str = match args.get("id") {
+                        Some(i) if !i.trim().is_empty() => i.clone(),
+                        _ => return ToolResult::error("Missing required parameter: id".to_string()),
+                    };
+                    let id = match id_str.parse::<i64>() {
+                        Ok(v) => v,
+                        Err(_) => return ToolResult::error(format!("Invalid id: {}", id_str)),
+                    };
+
+                    match memory.delete_note(id).await {
+                        Ok(()) => ToolResult::success(format!("Note {} deleted", id)),
+                        Err(e) => {
+                            tracing::error!("Failed to delete note: {}", e);
+                            ToolResult::error(format!("Failed to delete note: {e}"))
+                        }
+                    }
+                })
+            }),
+        }
+    }
+
     pub fn query_memory(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
         Tool {
             name: "query_memory".to_string(),
@@ -508,7 +609,7 @@ Example args: { "type": "notes", "query": "roadmap", "limit": "5" }"#.to_string(
 
 Parameters:
 - name (string, required): Unique trigger name (e.g., 'morning_pr_review').
-- schedule (string, required): Schedule format - 'HH:MM' for daily, a number of seconds (interval), or a cron expression.
+- schedule (string, required): Schedule format - 'HH:MM' for daily, a number of seconds (interval), or a cron expression. Cron expressions are expected in the canonical six-field form with a leading seconds field: 's m H D M *' (e.g. '0 30 08 10 2 *' for 2026-02-10 08:30 UTC). Five-field cron (minute hour day month day-of-week) is still accepted by the parser but canonical one-shot triggers use the six-field form.
 - type (string, optional): 'time', 'interval', 'cron', 'dynamic' (default: 'time').
 - note (string, optional): Instructional note describing what AI should do when the trigger fires.
 - open_chat (string, optional): 'true' to open the chat window on trigger.
@@ -655,6 +756,240 @@ Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time",
         }
     }
 
+    pub fn create_one_shot(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "create_one_shot".to_string(),
+            description: r#"Create a one-shot trigger at an exact ISO8601 datetime (e.g. 2026-02-10T08:30:00Z). The tool validates that the generated cron expression will fire exactly at the requested minute; otherwise it fails. The internal (canonical) cron format used for one-shot triggers includes a seconds field: 's m H D M *' (e.g. '0 30 08 10 2 *').
+
+Parameters:
+- name (string, required): Unique trigger name.
+- datetime (string, required): ISO8601 datetime when the trigger should fire (UTC-aware, e.g., 2026-02-10T08:30:00Z).
+- tags (string, optional): Comma-separated tags.
+- description (string, optional): Description.
+
+Behavior:
+Parses the provided datetime, builds a cron expression including day and month, validates the cron's next occurrence matches the requested minute, and inserts a one-shot cron trigger into the DB.
+"#.to_string(),
+            tags: vec!["trigger".to_string(), "one_shot".to_string()],
+            parameters: vec![
+                ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "datetime".to_string(), description: "ISO8601 datetime (UTC-aware)".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "tags".to_string(), description: "Comma-separated tags".to_string(), required: false, param_type: "string".to_string() },
+                ToolParameter { name: "description".to_string(), description: "Description".to_string(), required: false, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let name = match args.get("name") {
+                        Some(n) if !n.trim().is_empty() => n.clone(),
+                        _ => return ToolResult::error("Missing required parameter: name".to_string()),
+                    };
+                    let datetime = match args.get("datetime") {
+                        Some(d) if !d.trim().is_empty() => d.clone(),
+                        _ => return ToolResult::error("Missing required parameter: datetime".to_string()),
+                    };
+                    let tags_str = args.get("tags").cloned().unwrap_or_default();
+                    let tags: Vec<String> = tags_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                    let description = args.get("description").cloned();
+
+                    match trigger_registry.create_one_shot_trigger(&name, &datetime, tags, description.as_deref()).await {
+                        Ok(()) => ToolResult::success(format!("One-shot trigger '{}' created for {}", name, datetime)),
+                        Err(e) => {
+                            tracing::error!("Failed to create one-shot trigger: {}", e);
+                            ToolResult::error(format!("Failed to create one-shot trigger: {}", e))
+                        }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn edit_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "edit_trigger".to_string(),
+            description: r#"Edit an existing trigger's properties.
+
+Parameters:
+- name (string, required): Current trigger name.
+- new_name (string, optional): New name.
+- schedule (string, optional): New schedule.
+- type (string, optional): New type.
+- tag (string, optional): Tag.
+- description (string, optional): Description.
+- enabled (string, optional): 'true' or 'false'.
+- any other metadata keys will be merged into the trigger's metadata.
+
+Behavior:
+Applies provided updates to the trigger and reloads triggers.
+
+Return:
+ToolResult::success or ToolResult::error."#.to_string(),
+            tags: vec!["trigger".to_string(), "automation".to_string()],
+            parameters: vec![
+                ToolParameter { name: "name".to_string(), description: "Current trigger name".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "new_name".to_string(), description: "New trigger name".to_string(), required: false, param_type: "string".to_string() },
+                ToolParameter { name: "schedule".to_string(), description: "New schedule (HH:MM, seconds, or cron)".to_string(), required: false, param_type: "string".to_string() },
+                ToolParameter { name: "type".to_string(), description: "Trigger type: time, interval, cron, dynamic".to_string(), required: false, param_type: "string".to_string() },
+                ToolParameter { name: "tag".to_string(), description: "Tag for categorization".to_string(), required: false, param_type: "string".to_string() },
+                ToolParameter { name: "description".to_string(), description: "Description of the trigger".to_string(), required: false, param_type: "string".to_string() },
+                ToolParameter { name: "enabled".to_string(), description: "Enable or disable: true/false".to_string(), required: false, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let name = match args.get("name") {
+                        Some(n) if !n.trim().is_empty() => n.clone(),
+                        _ => return ToolResult::error("Missing required parameter: name".to_string()),
+                    };
+
+                    // Build updates map excluding the 'name' key
+                    let mut updates: HashMap<String, String> = HashMap::new();
+                    for (k, v) in args.iter() {
+                        if k == "name" { continue; }
+                        updates.insert(k.clone(), v.clone());
+                    }
+
+                    if updates.is_empty() {
+                        return ToolResult::error("No updates provided for trigger".to_string());
+                    }
+
+                    match trigger_registry.update_trigger(&name, updates).await {
+                        Ok(()) => ToolResult::success(format!("Trigger '{}' updated", name)),
+                        Err(e) => {
+                            tracing::error!("Failed to update trigger: {}", e);
+                            ToolResult::error(format!("Failed to update trigger: {e}"))
+                        }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn list_triggers(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "list_triggers".to_string(),
+            description: r#"List all registered triggers with basic metadata."#.to_string(),
+            tags: vec!["trigger".to_string(), "automation".to_string()],
+            parameters: vec![],
+            handler: Arc::new(move |_args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let triggers = trigger_registry.get_all_triggers().await;
+                    if triggers.is_empty() {
+                        return ToolResult::success("No triggers registered".to_string());
+                    }
+                    let summary = triggers.iter()
+                        .map(|t| {
+                            let ttype = match &t.trigger_type {
+                                crate::trigger::TriggerType::Cron(s) => format!("cron({})", s),
+                            };
+                            format!("#{}: {} ({}) [enabled: {}]", t.id, t.name, ttype, t.enabled)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    ToolResult::success(format!("Found {} triggers:\n{}", triggers.len(), summary))
+                })
+            }),
+        }
+    }
+
+    pub fn delete_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "delete_trigger".to_string(),
+            description: r#"Delete a trigger by name."#.to_string(),
+            tags: vec!["trigger".to_string()],
+            parameters: vec![ ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() } ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let name = match args.get("name") { Some(n) if !n.trim().is_empty() => n.clone(), _ => return ToolResult::error("Missing required parameter: name".to_string()) };
+                    match trigger_registry.delete_trigger(&name).await {
+                        Ok(()) => ToolResult::success(format!("Trigger '{}' deleted", name)),
+                        Err(e) => { tracing::error!("Failed to delete trigger: {}", e); ToolResult::error(format!("Failed to delete trigger: {e}")) }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn cancel_cron(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "cancel_cron".to_string(),
+            description: r#"Cancel a specific scheduled occurrence of a cron trigger.
+
+Parameters:
+- name (string, required): Trigger name.
+- occurrence (string, required): ISO8601 datetime (UTC-aware) of the occurrence to cancel.
+
+Behavior:
+Validates that the trigger exists and that its cron expression would fire at the provided minute (the occurrence is matched to minute precision), checks that the occurrence isn't already cancelled, and stores a cancellation in the cron_exceptions table. Note: cron expressions are interpreted by the parser; canonical stored one-shot cron strings include a leading seconds field ('s m H D M *').
+"#.to_string(),
+            tags: vec!["trigger".to_string(), "cron".to_string()],
+            parameters: vec![
+                ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "occurrence".to_string(), description: "ISO8601 datetime of occurrence to cancel".to_string(), required: true, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let name = match args.get("name") {
+                        Some(n) if !n.trim().is_empty() => n.clone(),
+                        _ => return ToolResult::error("Missing required parameter: name".to_string()),
+                    };
+                    let occurrence = match args.get("occurrence") {
+                        Some(o) if !o.trim().is_empty() => o.clone(),
+                        _ => return ToolResult::error("Missing required parameter: occurrence".to_string()),
+                    };
+
+                    match trigger_registry.cancel_cron(&name, &occurrence).await {
+                        Ok(()) => ToolResult::success(format!("Cancelled occurrence {} for trigger {}", occurrence, name)),
+                        Err(e) => { tracing::error!("Failed to cancel cron occurrence: {}", e); ToolResult::error(format!("Failed to cancel cron occurrence: {}", e)) }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn enable_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "enable_trigger".to_string(),
+            description: r#"Enable a trigger by name."#.to_string(),
+            tags: vec!["trigger".to_string()],
+            parameters: vec![ ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() } ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let name = match args.get("name") { Some(n) if !n.trim().is_empty() => n.clone(), _ => return ToolResult::error("Missing required parameter: name".to_string()) };
+                    let mut updates = std::collections::HashMap::new();
+                    updates.insert("enabled".to_string(), "true".to_string());
+                    match trigger_registry.update_trigger(&name, updates).await {
+                        Ok(()) => ToolResult::success(format!("Trigger '{}' enabled", name)),
+                        Err(e) => { tracing::error!("Failed to enable trigger: {}", e); ToolResult::error(format!("Failed to enable trigger: {e}")) }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn disable_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
+        Tool {
+            name: "disable_trigger".to_string(),
+            description: r#"Disable a trigger by name."#.to_string(),
+            tags: vec!["trigger".to_string()],
+            parameters: vec![ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() }],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let trigger_registry = trigger_registry.clone();
+                Box::pin(async move {
+                    let name = match args.get("name") { Some(n) if !n.trim().is_empty() => n.clone(), _ => return ToolResult::error("Missing required parameter: name".to_string()) };
+                    match trigger_registry.disable_trigger(&name).await {
+                        Ok(()) => ToolResult::success(format!("Trigger '{}' disabled", name)),
+                        Err(e) => { tracing::error!("Failed to disable trigger: {}", e); ToolResult::error(format!("Failed to disable trigger: {e}")) }
+                    }
+                })
+            }),
+        }
+    }
+
     pub fn analyze_now(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "analyze_now".to_string(),
@@ -765,6 +1100,48 @@ Example args: { "message": "Time to review PRs" }"#.to_string(),
                                 urgency,
                             }).await;
                             ToolResult::success("Chat window opened (fallback)".to_string())
+                        }
+                    }
+                })
+            }),
+        }
+    }
+
+    pub fn set_title(conversation_manager: Arc<super::super::conversations::ConversationManager>) -> Tool {
+        Tool {
+            name: "set_title".to_string(),
+            description: r#"Set the title of a conversation session.
+Parameters:
+- session_id (string, required): Session ID.
+- title (string, required): New title.
+Behavior:
+Updates conversations.title via ConversationManager.set_title(session_id, title).
+Return:
+ToolResult::success on success or ToolResult::error on failure."#.to_string(),
+            tags: vec!["conversation".to_string(), "meta".to_string()],
+            parameters: vec![
+                ToolParameter { name: "session_id".to_string(), description: "Session ID".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "title".to_string(), description: "New title for conversation session".to_string(), required: true, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let conversation_manager = conversation_manager.clone();
+                Box::pin(async move {
+                    let session_id = match args.get("session_id") {
+                        Some(s) if !s.trim().is_empty() => s.clone(),
+                        _ => return ToolResult::error("Missing required parameter: session_id".to_string()),
+                    };
+                    let title = match args.get("title") {
+                        Some(t) if !t.trim().is_empty() => t.clone(),
+                        _ => return ToolResult::error("Missing required parameter: title".to_string()),
+                    };
+                    match conversation_manager.set_title(&session_id, &title).await {
+                        Ok(()) => {
+                            info!("Set title for session {}: {}", session_id, title);
+                            ToolResult::success(format!("Title set for session {}: {}", session_id, title))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to set title: {}", e);
+                            ToolResult::error(format!("Failed to set title: {e}"))
                         }
                     }
                 })
@@ -1038,6 +1415,26 @@ Example args: { "status": "pending" }"#.to_string(),
         }
     }
 
+    pub fn delete_task(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
+        Tool {
+            name: "delete_task".to_string(),
+            description: r#"Delete a task by ID via TaskManager."#.to_string(),
+            tags: vec!["task".to_string()],
+            parameters: vec![ ToolParameter { name: "id".to_string(), description: "Task ID".to_string(), required: true, param_type: "string".to_string() } ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let tm = task_manager.clone();
+                Box::pin(async move {
+                    let id_str = match args.get("id") { Some(i) if !i.trim().is_empty() => i.clone(), _ => return ToolResult::error("Missing required parameter: id".to_string()) };
+                    let id = match id_str.parse::<i64>() { Ok(v) => v, Err(_) => return ToolResult::error(format!("Invalid task ID: {id_str}")) };
+                    match tm.delete_task(id).await {
+                        Ok(()) => ToolResult::success(format!("Deleted task {}", id)),
+                        Err(e) => { tracing::error!("Failed to delete task: {}", e); ToolResult::error(format!("Failed to delete task: {e}")) }
+                    }
+                })
+            }),
+        }
+    }
+
     pub fn set_preference(preferences: Arc<super::super::preferences::PreferencesManager>) -> Tool {
         Tool {
             name: "set_preference".to_string(),
@@ -1149,41 +1546,186 @@ Example args: { "seconds": "1.5" }"#.to_string(),
             }),
         }
     }
+
+    pub fn get(config: Arc<crate::config::Config>) -> Tool {
+        Tool {
+            name: "get".to_string(),
+            description: r#"Perform an HTTP GET request to a whitelisted endpoint.
+Allowed endpoints are configured via the [network].allowed_http_hosts config key. Each entry may be a host (e.g., "example.com") or include an optional path prefix (e.g., "example.com/foo") — in which case requests to "example.com/foo/bar?baz=..." are allowed.
+
+Parameters:
+- url (string, required): Full URL to fetch (must match one of the configured allowed hosts/prefixes).
+- timeout_seconds (string, optional): Request timeout in seconds (default: 10).
+
+Behavior:
+Validates the URL's host and optional path prefix against configuration, requires https scheme, performs GET request with a timeout, and returns HTTP status and body (truncated to 8192 chars) on success or ToolResult::error on failure.
+
+Return:
+ToolResult::success("Status: 200\\n\\n<body...>") or ToolResult::error(...)
+
+Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
+            tags: vec!["http".to_string(), "network".to_string()],
+            parameters: vec![
+                ToolParameter { name: "url".to_string(), description: "URL to fetch (must be whitelisted)".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "timeout_seconds".to_string(), description: "Request timeout in seconds (default: 10)".to_string(), required: false, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let cfg = config.clone();
+                Box::pin(async move {
+                    let url_str = match args.get("url") {
+                        Some(u) if !u.trim().is_empty() => u.trim().to_string(),
+                        _ => return ToolResult::error("Missing required parameter: url".to_string()),
+                    };
+                    // Parse URL
+                    let url = match reqwest::Url::parse(&url_str) {
+                        Ok(u) => u,
+                        Err(e) => return ToolResult::error(format!("Invalid URL: {}", e)),
+                    };
+                    if url.scheme() != "https" {
+                        return ToolResult::error("Only https:// URLs are allowed".to_string());
+                    }
+                    let host = match url.host_str() {
+                        Some(h) => h,
+                        None => return ToolResult::error("URL missing host".to_string()),
+                    };
+                    let allowed_entries = &cfg.network.allowed_http_hosts;
+                    if allowed_entries.is_empty() {
+                        return ToolResult::error("No allowed hosts configured for 'get' tool".to_string());
+                    }
+                    // Each entry may be "host" or "host/path" and may optionally be a full URL with scheme.
+                    let mut permitted = false;
+                    for entry in allowed_entries.iter() {
+                        // Parse entry into host and optional path prefix
+                        let (entry_host, entry_path_opt) = if entry.starts_with("http://") || entry.starts_with("https://") {
+                            match reqwest::Url::parse(entry) {
+                                Ok(u) => (u.host_str().map(|s| s.to_string()), Some(u.path().to_string())),
+                                Err(_) => {
+                                    // fallback: treat entire entry as host-like
+                                    let h = entry.split('/').next().map(|s| s.split(':').next().unwrap_or(s).to_string());
+                                    (h, None)
+                                }
+                            }
+                        } else {
+                            if let Some(pos) = entry.find('/') {
+                                let host_part = &entry[..pos];
+                                let path_part = &entry[pos..]; // includes '/'
+                                (Some(host_part.split(':').next().unwrap_or(host_part).to_string()), Some(path_part.to_string()))
+                            } else {
+                                (Some(entry.split(':').next().unwrap_or(entry).to_string()), None)
+                            }
+                        };
+
+                        let entry_host = match entry_host {
+                            Some(h) => h,
+                            None => continue,
+                        };
+
+                        // Host match: exact or subdomain
+                        if !(host == entry_host || host.ends_with(&format!(".{}", entry_host))) {
+                            continue;
+                        }
+
+                        // Path match if provided
+                        if let Some(ref prefix) = entry_path_opt {
+                            let target_path = url.path();
+                            if target_path.starts_with(prefix) {
+                                permitted = true;
+                                break;
+                            } else {
+                                continue;
+                            }
+                        } else {
+                            permitted = true;
+                            break;
+                        }
+                    }
+
+                    if !permitted {
+                        return ToolResult::error(format!("Host or path not allowed: {}{}", host, url.path()));
+                    }
+
+                    let timeout_secs = args.get("timeout_seconds").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
+                    let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs)).build() {
+                        Ok(c) => c,
+                        Err(e) => return ToolResult::error(format!("Failed to build HTTP client: {}", e)),
+                    };
+                    // Perform GET
+                    let resp = match client.get(url.clone()).send().await {
+                        Ok(r) => r,
+                        Err(e) => return ToolResult::error(format!("HTTP request failed: {}", e)),
+                    };
+                    let status = resp.status();
+                    let body = match resp.text().await {
+                        Ok(t) => t,
+                        Err(e) => return ToolResult::error(format!("Failed to read response body: {}", e)),
+                    };
+                    let max = 8192usize;
+                    let truncated = if body.len() > max { format!("{}...[truncated {} bytes]", &body[..max], body.len() - max) } else { body.clone() };
+                    ToolResult::success(format!("Status: {}\\n\\n{}", status, truncated))
+                })
+            }),
+        }
+    }
 }
+
 
 use crate::memory::MemoryManager;
 use crate::preferences::PreferencesManager;
 use crate::state::ServerState;
 use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry as TriggerReg;
+use crate::conversations::ConversationManager;
 
 pub async fn register_all_tools(
     registry: &ToolRegistry,
     memory: Arc<MemoryManager>,
+    conversation_manager: Arc<crate::conversations::ConversationManager>,
     task_manager: Arc<TaskManager>,
     trigger_registry: Arc<TriggerReg>,
     state: Arc<ServerState>,
     preferences: Arc<PreferencesManager>,
+    config: Arc<crate::config::Config>,
 ) {
     registry.register(tool_impls::notify_client(state.clone())).await;
     registry.register(tool_impls::create_note(memory.clone())).await;
+    registry.register(tool_impls::edit_note(memory.clone())).await;
+    registry.register(tool_impls::delete_note(memory.clone())).await;
     registry.register(tool_impls::query_memory(memory.clone())).await;
     registry.register(tool_impls::create_trigger(trigger_registry.clone())).await;
+    registry.register(tool_impls::create_one_shot(trigger_registry.clone())).await;
+    registry.register(tool_impls::cancel_cron(trigger_registry.clone())).await;
+    registry.register(tool_impls::edit_trigger(trigger_registry.clone())).await;
+    registry.register(tool_impls::list_triggers(trigger_registry.clone())).await;
+    registry.register(tool_impls::delete_trigger(trigger_registry.clone())).await;
+    registry.register(tool_impls::enable_trigger(trigger_registry.clone())).await;
+    registry.register(tool_impls::disable_trigger(trigger_registry.clone())).await;
     registry.register(tool_impls::analyze_now(trigger_registry.clone())).await;
     registry.register(tool_impls::open_chat(state.clone())).await;
+    registry.register(tool_impls::set_title(conversation_manager.clone())).await;
     registry.register(tool_impls::create_task(task_manager.clone())).await;
     registry.register(tool_impls::update_task(task_manager.clone())).await;
+    registry.register(tool_impls::delete_task(task_manager.clone())).await;
     registry.register(tool_impls::list_tasks(task_manager.clone())).await;
     registry.register(tool_impls::set_preference(preferences.clone())).await;
     registry.register(tool_impls::wait()).await;
+    registry.register(tool_impls::get(config.clone())).await;
     
-    info!("Registered {} tools", 11);
+    info!("Registered {} tools", 21);
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::database::Database;
+    use crate::memory::MemoryManager;
+    use crate::trigger::TriggerRegistry;
+    use crate::tasks::TaskManager;
+    use crate::conversations::ConversationManager;
+    use std::sync::Arc;
+    use std::collections::HashMap;
+    use ritsu_common::TaskPriority;
+    use chrono::{Datelike, Timelike};
 
     #[tokio::test]
     async fn test_tool_registration() {
@@ -1250,5 +1792,208 @@ mod tests {
         let error = ToolResult::error("failed".to_string());
         assert!(!error.success);
         assert_eq!(error.error, Some("failed".to_string()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_delete_note_tool() {
+        let tmp_dir = std::env::temp_dir();
+        let db_path = tmp_dir.join(format!("ritsu_test_delete_note_{}_{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let db = Database::new(&db_path).await.expect("DB init");
+        let memory = Arc::new(MemoryManager::new(db.connection.clone(), db_path_str.clone(), false));
+
+        // create a note
+        let note_id = memory.create_note("Test note content", &vec!["test".to_string()]).await.expect("create_note");
+
+        // Call delete_note tool
+        let tool = tool_impls::delete_note(memory.clone());
+        let mut args = HashMap::new();
+        args.insert("id".to_string(), note_id.to_string());
+        let res = (tool.handler)(args).await;
+        assert!(res.success, "delete_note failed: {:?}", res.error);
+
+        // Verify note removed
+        let notes = memory.query_notes(10).await.expect("query_notes");
+        assert!(!notes.iter().any(|(id, _, _)| *id == note_id));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_trigger_crud_tools() {
+        let tmp_dir = std::env::temp_dir();
+        let db_path = tmp_dir.join(format!("ritsu_test_trigger_crud_{}_{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let _db = Database::new(&db_path).await.expect("DB init");
+        let trig_reg = Arc::new(TriggerRegistry::new(db_path_str.clone()));
+
+        // Create a trigger via the registry helper
+        trig_reg.create_trigger("ttest", "time", "12:34", Some("tag1"), Some("desc")).await.expect("create_trigger");
+
+        // List triggers tool
+        let list_tool = tool_impls::list_triggers(trig_reg.clone());
+        let res = (list_tool.handler)(HashMap::new()).await;
+        assert!(res.success);
+        assert!(res.output.contains("ttest"), "list did not include trigger: {}", res.output);
+
+        // Disable trigger
+        let disable_tool = tool_impls::disable_trigger(trig_reg.clone());
+        let mut args = HashMap::new();
+        args.insert("name".to_string(), "ttest".to_string());
+        let res2 = (disable_tool.handler)(args.clone()).await;
+        assert!(res2.success, "disable failed: {:?}", res2.error);
+
+        // After disable, listing should not contain the trigger
+        let res_list_after = (list_tool.handler)(HashMap::new()).await;
+        assert!(res_list_after.success);
+        assert!(res_list_after.output.contains("No triggers registered") || !res_list_after.output.contains("ttest"));
+
+        // Enable trigger
+        let enable_tool = tool_impls::enable_trigger(trig_reg.clone());
+        let res3 = (enable_tool.handler)(args.clone()).await;
+        assert!(res3.success, "enable failed: {:?}", res3.error);
+
+        let res_list_after_enable = (list_tool.handler)(HashMap::new()).await;
+        assert!(res_list_after_enable.success);
+        assert!(res_list_after_enable.output.contains("ttest"));
+
+        // Delete trigger
+        let delete_tool = tool_impls::delete_trigger(trig_reg.clone());
+        let res4 = (delete_tool.handler)(args.clone()).await;
+        assert!(res4.success, "delete failed: {:?}", res4.error);
+
+        let res_list_after_delete = (list_tool.handler)(HashMap::new()).await;
+        assert!(res_list_after_delete.success);
+        assert!(res_list_after_delete.output.contains("No triggers registered") || !res_list_after_delete.output.contains("ttest"));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_one_shot_trigger_tool() {
+        use chrono::Utc;
+        let tmp_dir = std::env::temp_dir();
+        let db_path = tmp_dir.join(format!("ritsu_test_create_one_shot_{}_{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let _db = Database::new(&db_path).await.expect("DB init");
+        let trig_reg = Arc::new(TriggerRegistry::new(db_path_str.clone()));
+
+        // Use a near-future time (UTC) to avoid timezone surprises
+        let dt = Utc::now() + chrono::Duration::minutes(2);
+        let dt_str = dt.to_rfc3339();
+
+        let tool = tool_impls::create_one_shot(trig_reg.clone());
+        let mut args = HashMap::new();
+        args.insert("name".to_string(), "oneshot_test".to_string());
+        args.insert("datetime".to_string(), dt_str.clone());
+        args.insert("tags".to_string(), "test".to_string());
+        args.insert("description".to_string(), "one-shot trigger test".to_string());
+
+        let res = (tool.handler)(args).await;
+        assert!(res.success, "create_one_shot failed: {:?}", res.error);
+
+        // Ensure trigger exists and its cron schedule matches expected
+        let triggers = trig_reg.get_all_triggers().await;
+        let expected_cron = format!("0 {} {} {} {} *", dt.minute(), dt.hour(), dt.day(), dt.month());
+        let found = triggers.iter().any(|t| t.name == "oneshot_test" && matches!(t.trigger_type, crate::trigger::TriggerType::Cron(ref s) if s == &expected_cron));
+        assert!(found, "One-shot trigger not found with expected cron: {}", expected_cron);
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_cancel_cron_tool() {
+        use chrono::Utc;
+        let tmp_dir = std::env::temp_dir();
+        let db_path = tmp_dir.join(format!("ritsu_test_cancel_cron_{}_{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let _db = Database::new(&db_path).await.expect("DB init");
+        let trig_reg = Arc::new(TriggerRegistry::new(db_path_str.clone()));
+
+        // Create a one-shot trigger for near future
+        let dt = Utc::now() + chrono::Duration::minutes(3);
+        let dt_str = dt.to_rfc3339();
+        trig_reg.create_one_shot_trigger("cancel_test", &dt_str, vec!["test".to_string()], Some("cancel test")).await.expect("create_one_shot_trigger");
+
+        // Cancel the exact occurrence via tool
+        let tool = tool_impls::cancel_cron(trig_reg.clone());
+        let mut args = HashMap::new();
+        args.insert("name".to_string(), "cancel_test".to_string());
+        args.insert("occurrence".to_string(), dt_str.clone());
+        let res = (tool.handler)(args.clone()).await;
+        assert!(res.success, "cancel_cron failed: {:?}", res.error);
+
+        // Attempt to cancel again should fail with already cancelled
+        let res2 = (tool.handler)(args.clone()).await;
+        assert!(!res2.success);
+        assert!(res2.error.unwrap_or_default().contains("already cancelled"));
+
+        // Attempt to cancel a non-matching time should error
+        let bad_dt = (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
+        let mut bad_args = HashMap::new();
+        bad_args.insert("name".to_string(), "cancel_test".to_string());
+        bad_args.insert("occurrence".to_string(), bad_dt.clone());
+        let res3 = (tool.handler)(bad_args).await;
+        assert!(!res3.success);
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_delete_task_tool() {
+        let tmp_dir = std::env::temp_dir();
+        let db_path = tmp_dir.join(format!("ritsu_test_delete_task_{}_{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let db = Database::new(&db_path).await.expect("DB init");
+        let tm = Arc::new(TaskManager::new(db.connection.clone()));
+
+        // Create a task
+        let task_id = tm.create_task("Do unit tests", None, &TaskPriority::Medium, &[], None).await.expect("create_task");
+
+        // Delete via tool
+        let del_tool = tool_impls::delete_task(tm.clone());
+        let mut args = HashMap::new();
+        args.insert("id".to_string(), task_id.to_string());
+        let res = (del_tool.handler)(args).await;
+        assert!(res.success, "delete_task failed: {:?}", res.error);
+
+        // Ensure task removed
+        let tasks = tm.list_tasks(None, None).await.expect("list_tasks");
+        assert!(!tasks.iter().any(|t| t.id == task_id));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_set_title_tool() {
+        let tmp_dir = std::env::temp_dir();
+        let db_path = tmp_dir.join(format!("ritsu_test_set_title_{}_{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let db = Database::new(&db_path).await.expect("DB init");
+        let conv = Arc::new(ConversationManager::new(db.connection.clone()));
+
+        // Create or get session
+        let session = conv.get_or_create_session("sess1").await.expect("get_or_create");
+        assert!(session.title.is_none());
+
+        // Set title via tool
+        let tool = tool_impls::set_title(conv.clone());
+        let mut args = HashMap::new();
+        args.insert("session_id".to_string(), "sess1".to_string());
+        args.insert("title".to_string(), "My Session Title".to_string());
+        let res = (tool.handler)(args).await;
+        assert!(res.success, "set_title failed: {:?}", res.error);
+
+        // Re-read session
+        let session2 = conv.get_or_create_session("sess1").await.expect("get_or_create2");
+        assert_eq!(session2.title, Some("My Session Title".to_string()));
+
+        let _ = std::fs::remove_file(&db_path);
     }
 }

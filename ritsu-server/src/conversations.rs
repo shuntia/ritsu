@@ -271,6 +271,20 @@ impl ConversationManager {
         
         Ok(title)
     }
+    
+    /// Set a conversation session's title explicitly
+    pub async fn set_title(&self, session_id: &str, title: &str) -> Result<()> {
+        let session_id = session_id.to_string();
+        let title = title.to_string();
+        self.db.call(move |conn| -> rusqlite::Result<()> {
+            conn.execute(
+                "UPDATE conversations SET title = ?1 WHERE session_id = ?2",
+                (&title, &session_id),
+            )?;
+            Ok(())
+        }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
+        Ok(())
+    }
 
     /// Check if session needs title generation (has turns but no title)
     pub async fn needs_title_generation(&self, session_id: &str) -> Result<bool> {
@@ -357,6 +371,7 @@ mod tests {
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     turn_count INTEGER DEFAULT 0,
+                    title TEXT,
                     metadata TEXT
                 )",
                 [],
@@ -374,6 +389,7 @@ mod tests {
                     content TEXT NOT NULL,
                     tool_calls TEXT,
                     tool_results TEXT,
+                    thinking TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES conversations(session_id) ON DELETE CASCADE
                 )",

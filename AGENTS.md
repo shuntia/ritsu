@@ -479,6 +479,9 @@ async fn wait_for_user_response(
 
 ### Trigger Types
 
+Note: Triggers use canonical six-field cron strings with a leading seconds field: `second minute hour day month day-of-week` (use `0` for seconds). Five-field cron expressions (minute hour day month day-of-week) are still accepted by the parser and will be canonicalized by prepending a `0` seconds field.
+
+
 1. **Time-based**: Fire at specific time(s)
    - Example: `"0 7 * * *"` (7:00 AM daily, cron-like syntax)
    - Use `tokio::time::sleep_until` for scheduling
@@ -801,7 +804,7 @@ ritsu task update 123 --status completed
 ### Trigger Management
 ```bash
 ritsu trigger list                           # List all triggers
-ritsu trigger add "morning-alarm" --time "0 7 * * *"
+ritsu trigger add "morning-alarm" --time "0 0 7 * * *"
 ritsu trigger disable morning-alarm
 ritsu trigger delete morning-alarm
 ```

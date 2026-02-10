@@ -625,14 +625,14 @@ async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) 
 
 
 pub async fn stop() -> Result<()> {
-    println!("Stopping client daemon...");
+    tracing::info!("Stopping client daemon...");
     
     let config = crate::config::ClientConfig::load()?;
     let client_socket = config.client_socket_path();
     
     // Check if daemon is running by checking socket
     if !Path::new(&client_socket).exists() {
-        println!("Client daemon is not running");
+        tracing::info!("Client daemon is not running");
         return Ok(());
     }
     
@@ -648,11 +648,11 @@ pub async fn stop() -> Result<()> {
                 let _ = Command::new("kill")
                     .arg(pid_num.to_string())
                     .status();
-                println!("Stopped client daemon (PID: {})", pid_num);
+                tracing::info!("Stopped client daemon (PID: {})", pid_num);
             }
         }
     } else {
-        println!("Client daemon process not found");
+        tracing::info!("Client daemon process not found");
     }
     
     // Clean up socket in both cases
@@ -669,22 +669,22 @@ pub async fn status() -> Result<()> {
         // Try to connect to verify it's actually running
         match UnixStream::connect(&client_socket).await {
             Ok(_) => {
-                println!("Client daemon: Running");
-                println!("Socket: {}", client_socket);
+                tracing::info!("Client daemon: Running");
+                tracing::info!("Socket: {}", client_socket);
             }
             Err(_) => {
-                println!("Client daemon: Socket exists but not responding (stale?)");
+                tracing::info!("Client daemon: Socket exists but not responding (stale?)");
             }
         }
     } else {
-        println!("Client daemon: Not running");
+        tracing::info!("Client daemon: Not running");
     }
     
     Ok(())
 }
 
 pub async fn restart() -> Result<()> {
-    println!("Restarting client daemon...");
+    tracing::info!("Restarting client daemon...");
     stop().await?;
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     
@@ -694,6 +694,6 @@ pub async fn restart() -> Result<()> {
         .spawn()
         .context("Failed to spawn client daemon")?;
     
-    println!("Client daemon restarting in background");
+    tracing::info!("Client daemon restarting in background");
     Ok(())
 }

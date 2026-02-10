@@ -185,6 +185,23 @@ impl Database {
             [],
         )?;
 
+        // Cron exceptions table: store cancelled specific occurrences for cron triggers
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cron_exceptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trigger_name TEXT NOT NULL,
+                occurrence TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cron_exceptions_trigger_occurrence 
+             ON cron_exceptions(trigger_name, occurrence)",
+            [],
+        )?;
+
         // Conversation sessions table
         conn.execute(
             "CREATE TABLE IF NOT EXISTS conversations (

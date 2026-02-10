@@ -238,16 +238,7 @@ async fn handle_send_message_streaming(
         return Ok(());
     }
 
-    // Get chat-specific system prompt
-    let system_prompt = memory.build_chat_prompt().await
-        .unwrap_or_else(|_| {
-            warn!("Failed to build chat prompt, using fallback");
-            "You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string()
-        });
-    
-    let system_prompt = Some(system_prompt);
-
-    // Get conversation history
+    // Build system prompt and messages via PromptBuilder
     let history = conversation_manager.get_history(&session_id, 20).await
         .unwrap_or_default()
         .into_iter()
@@ -258,24 +249,13 @@ async fn handle_send_message_streaming(
         })
         .collect::<Vec<_>>();
 
-    // Build enhanced message
-    let now = chrono::Local::now();
-    let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
-    let task_summary = task_manager.get_task_summary().await
-        .unwrap_or_else(|_| "Unable to retrieve task summary".to_string());
-    
-    let enhanced_content = format!(
-        "[Current Time: {}]\n[{}]\n\n{}",
-        time_str,
-        task_summary,
-        content
-    );
-
-    let mut messages = history;
-    messages.push(crate::llm::Message {
-        role: "user".to_string(),
-        content: enhanced_content,
-    });
+    let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(memory, task_manager, history, &content).await {
+        Ok((sp, msgs)) => (sp, msgs),
+        Err(e) => {
+            warn!("Failed to build chat prompt: {}", e);
+            (Some("You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string()), vec![crate::llm::Message { role: "user".to_string(), content }])
+        }
+    };
 
     // Check if streaming is disabled in config
     if disable_streaming {
@@ -466,16 +446,7 @@ async fn handle_request(
                 warn!("Failed to store in conversations: {}", e);
             }
 
-            // Get chat-specific system prompt (unify with streaming path)
-            let system_prompt = match memory.build_chat_prompt().await {
-                Ok(prompt) => Some(prompt),
-                Err(e) => {
-                    warn!("Failed to build chat prompt: {}", e);
-                    Some("You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string())
-                }
-            };
-
-            // Get conversation history from session (last 20 turns)
+            // Build system prompt and messages via PromptBuilder
             let history = match conversation_manager.get_history(&session_id, 20).await {
                 Ok(turns) => turns.into_iter()
                     .filter(|turn| turn.turn_number < session.turn_count) // Exclude current turn
@@ -490,27 +461,13 @@ async fn handle_request(
                 }
             };
 
-            // Build enhanced user message with context
-            let now = chrono::Local::now();
-            let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
-            
-            // Get task count
-            let task_summary = task_manager.get_task_summary().await
-                .unwrap_or_else(|_| "Unable to retrieve task summary".to_string());
-            
-            let enhanced_content = format!(
-                "[Current Time: {}]\n[{}]\n\n{}",
-                time_str,
-                task_summary,
-                content
-            );
-
-            // Add current message with context
-            let mut messages = history;
-            messages.push(crate::llm::Message {
-                role: "user".to_string(),
-                content: enhanced_content,
-            });
+            let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(memory, task_manager, history, &content).await {
+                Ok((sp, msgs)) => (sp, msgs),
+                Err(e) => {
+                    warn!("Failed to build chat prompt: {}", e);
+                    (Some("You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string()), vec![crate::llm::Message { role: "user".to_string(), content }])
+                }
+            };
 
             // Generate response with tool execution
             match llm_client.generate_with_tool_execution(
@@ -551,11 +508,7 @@ async fn handle_request(
                 .into_iter()
                 .map(|t| {
                     let (trigger_type_str, schedule_str) = match &t.trigger_type {
-                        crate::trigger::TriggerType::Time(time) => ("time".to_string(), time.clone()),
-                        crate::trigger::TriggerType::Interval(secs) => ("interval".to_string(), secs.to_string()),
-                        crate::trigger::TriggerType::Inactivity(secs) => ("inactivity".to_string(), secs.to_string()),
                         crate::trigger::TriggerType::Cron(expr) => ("cron".to_string(), expr.clone()),
-                        crate::trigger::TriggerType::Dynamic => ("dynamic".to_string(), String::new()),
                     };
                     ritsu_common::protocol::TriggerInfo {
                         id: t.id,

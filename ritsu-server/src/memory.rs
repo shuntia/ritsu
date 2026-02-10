@@ -60,8 +60,58 @@ impl MemoryManager {
         Ok(id)
     }
 
+    /// Update an existing note
+    pub async fn update_note(&self, id: i64, content: Option<String>, tags: Option<Vec<String>>) -> Result<()> {
+        // Prepare owned values for closure capture
+        let content_owned = content;
+        let tags_json_owned: Option<String> = if let Some(t) = tags {
+            Some(serde_json::to_string(&t)?)
+        } else {
+            None
+        };
+        let id_owned = id;
+
+        self.conn.call(move |conn| -> rusqlite::Result<()> {
+            // Fetch existing values
+            let (old_content, old_tags): (String, Option<String>) = match conn.query_row(
+                "SELECT content, tags FROM notes WHERE id = ?1",
+                [id_owned],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            ) {
+                Ok(v) => v,
+                Err(rusqlite::Error::QueryReturnedNoRows) => return Err(rusqlite::Error::QueryReturnedNoRows),
+                Err(e) => return Err(e),
+            };
+
+            let new_content = content_owned.clone().unwrap_or(old_content);
+            let new_tags_json = tags_json_owned.clone().unwrap_or_else(|| old_tags.unwrap_or_else(|| "[]".to_string()));
+
+            conn.execute(
+                "UPDATE notes SET content = ?1, tags = ?2 WHERE id = ?3",
+                (&new_content, &new_tags_json, &id_owned),
+            )?;
+            Ok(())
+        }).await?;
+
+        Ok(())
+    }
+
+    /// Delete a note by ID
+    pub async fn delete_note(&self, id: i64) -> Result<()> {
+        let id_owned = id;
+        let rows = self.conn.call(move |conn| -> rusqlite::Result<usize> {
+            Ok(conn.execute("DELETE FROM notes WHERE id = ?1", [&id_owned])?)
+        }).await?;
+
+        if rows == 0 {
+            anyhow::bail!("Note not found: {}", id_owned);
+        }
+
+        Ok(())
+    }
+
     /// Compact daily conversations into a daily summary
-    pub async fn compact_daily(&self, date: &NaiveDate, llm_client: &LlmClient, task_context: Option<&str>) -> Result<()> {
+    pub async fn compact_daily(&self, date: &NaiveDate, llm_client: &LlmClient, task_context: Option<&str>, system_prompt_override: Option<&str>) -> Result<()> {
         info!("Compacting conversations for {date}");
 
         // Get all conversations for the date
@@ -107,8 +157,12 @@ impl MemoryManager {
             None
         };
 
-        // Get compact-specific system prompt
-        let system_prompt = self.build_background_prompt(Some("compact")).await?;
+        // Get compact-specific system prompt or use override if provided
+        let system_prompt = if let Some(override_sp) = system_prompt_override {
+            override_sp.to_string()
+        } else {
+            self.build_background_prompt(Some("compact")).await?
+        };
 
         // Generate summary with LLM (no lock held)
         let conversation_text = conversations.iter()
@@ -143,7 +197,7 @@ impl MemoryManager {
                 content: format!("Conversation summary for {date} ({} messages)", conversations.len()),
                 tool_calls: Vec::new(),
             });
-        
+
         let summary = response.content;
         let tags = serde_json::to_string(&Vec::<String>::new())?;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
@@ -165,7 +219,7 @@ impl MemoryManager {
     }
 
     /// Compact daily summaries into a monthly summary
-    pub async fn compact_monthly(&self, year_month: &str, llm_client: &LlmClient, task_context: Option<&str>) -> Result<()> {
+    pub async fn compact_monthly(&self, year_month: &str, llm_client: &LlmClient, task_context: Option<&str>, system_prompt_override: Option<&str>) -> Result<()> {
         info!("Compacting daily summaries for {year_month}");
 
         // Get all daily summaries for the month
@@ -193,8 +247,12 @@ impl MemoryManager {
             return Ok(());
         }
 
-        // Get compact-specific system prompt
-        let system_prompt = self.build_background_prompt(Some("compact")).await?;
+        // Get compact-specific system prompt or use override if provided
+        let system_prompt = if let Some(override_sp) = system_prompt_override {
+            override_sp.to_string()
+        } else {
+            self.build_background_prompt(Some("compact")).await?
+        };
 
         // Get previous month's summary for continuity
         let year_month_str = year_month.to_string();
@@ -244,7 +302,7 @@ impl MemoryManager {
                 content: format!("Monthly summary for {year_month} ({} days)", summaries.len()),
                 tool_calls: Vec::new(),
             });
-        
+
         let summary = response.content;
         let tags = serde_json::to_string(&Vec::<String>::new())?;
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
@@ -447,6 +505,25 @@ impl MemoryManager {
         }
 
         Err(anyhow::anyhow!("Context prompt not found: {context}"))
+    }
+
+    /// Load a trigger-specific prompt from config if present
+    pub async fn load_trigger_prompt(&self, trigger_name: &str) -> Result<Option<String>> {
+        // Local repository config
+        let local_path = format!(".config/ritsu/prompts/triggers/{trigger_name}.md");
+        if let Ok(content) = crate::database::read_file_async(local_path).await {
+            return Ok(Some(content));
+        }
+
+        // Home directory config
+        if let Some(home) = dirs::home_dir() {
+            let home_path = home.join(format!(".config/ritsu/prompts/triggers/{trigger_name}.md"));
+            if let Ok(content) = crate::database::read_file_async(home_path).await {
+                return Ok(Some(content));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Build chat-specific system prompt

@@ -120,9 +120,8 @@ impl ServerState {
         // temporarily to avoid holding the lock across I/O; reinsert it after I/O completes.
         {
             let mut guard = self.client_daemon.lock().await;
-            if guard.is_some() {
-                // Take ownership of the stream and drop the lock while we talk to it
-                let mut stream = guard.take().unwrap();
+            if let Some(mut stream) = guard.take() {
+                // We have a persistent stream. Drop the lock while performing I/O to avoid holding the mutex across awaits.
                 drop(guard);
 
                 // Serialize request

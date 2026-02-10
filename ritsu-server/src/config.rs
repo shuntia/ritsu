@@ -16,6 +16,8 @@ pub struct Config {
     pub memory: MemoryConfig,
     #[serde(default)]
     pub timeouts: TimeoutConfig,
+    #[serde(default)]
+    pub network: NetworkConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +220,10 @@ client_binary_path = "{client_binary_path}"
 daily_rotation_days = {rotation_days}
 include_ai_generated = true
 
+[network]
+# Allowed hosts for the 'get' tool. Only requests to these hosts will be permitted.
+allowed_http_hosts = ["api.ipify.org", "httpbin.org", "jsonplaceholder.typicode.com", "example.com", "api.github.com", "api.openweathermap.org", "api.weatherapi.com", "api.weather.gov", "ipinfo.io", "ip-api.com"]
+
 [timeouts]
 user_response_seconds = {user_response}
 http_request_seconds = {http_request}
@@ -257,6 +263,32 @@ impl TimeoutConfig {
     #[allow(dead_code)]
     pub const fn llm_request(&self) -> Duration {
         Duration::from_secs(self.llm_request_seconds)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NetworkConfig {
+    /// List of allowed hosts for the 'get' tool (e.g., ["api.ipify.org", "example.com"]).
+    pub allowed_http_hosts: Vec<String>,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            allowed_http_hosts: vec![
+                "api.ipify.org".to_string(),
+                "httpbin.org".to_string(),
+                "jsonplaceholder.typicode.com".to_string(),
+                "example.com".to_string(),
+                "api.github.com".to_string(),
+                "api.openweathermap.org".to_string(),
+                "api.weatherapi.com".to_string(),
+                "api.weather.gov".to_string(),
+                "ipinfo.io".to_string(),
+                "ip-api.com".to_string(),
+            ],
+        }
     }
 }
 

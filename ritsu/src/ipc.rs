@@ -255,7 +255,7 @@ mod tests {
         
         match deserialized {
             ClientRequest::Ping => (),
-            _ => panic!("Unexpected request type"),
+            _ => unreachable!("Unexpected request type"),
         }
     }
 
@@ -274,7 +274,7 @@ mod tests {
                 assert_eq!(content, "test message");
                 assert_eq!(session_id, Some("session123".to_string()));
             }
-            _ => panic!("Unexpected request type"),
+            _ => unreachable!("Unexpected request type"),
         }
     }
 }

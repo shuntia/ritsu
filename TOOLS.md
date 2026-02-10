@@ -102,7 +102,7 @@ Each tool is documented below with parameters, behavior, return values, and exam
 - Tags: automation, trigger, reminder
 - Parameters:
   - name (string, required): Unique trigger name (e.g., `morning_pr_review`).
-  - schedule (string, required): Schedule format - can be `HH:MM` for daily, a number of seconds (interval), or a cron expression.
+  - schedule (string, required): Schedule format - can be `HH:MM` for daily, a number of seconds (interval), or a cron expression. Cron expressions are expected in canonical six-field form with a leading seconds field: `s m H D M *` (e.g., `0 30 08 10 2 *` for 2026-02-10 08:30 UTC). Five-field cron expressions (minute hour day month day-of-week) are accepted and will be canonicalized by prepending a `0` seconds field.
   - type (string, optional): `time` (daily HH:MM), `interval` (seconds), `cron` (cron expression), or `dynamic` (one-time). Defaults to `time`.
   - note (string, optional): Instructional note describing what AI should do when the trigger fires (used for custom triggers).
   - open_chat (string, optional): `'true'` to open chat window when triggered, otherwise notification-only.
