@@ -105,13 +105,13 @@ Each tool is documented below with parameters, behavior, return values, and exam
   - schedule (string, required): Schedule format - can be `HH:MM` for daily, a number of seconds (interval), or a cron expression. Cron expressions are expected in canonical six-field form with a leading seconds field: `s m H D M *` (e.g., `0 30 08 10 2 *` for 2026-02-10 08:30 UTC). Five-field cron expressions (minute hour day month day-of-week) are accepted and will be canonicalized by prepending a `0` seconds field.
   - type (string, optional): `time` (daily HH:MM), `interval` (seconds), `cron` (cron expression), or `dynamic` (one-time). Defaults to `time`.
   - note (string, optional): Instructional note describing what AI should do when the trigger fires (used for custom triggers).
-  - open_chat (string, optional): `'true'` to open chat window when triggered, otherwise notification-only.
+
   - urgency (string, optional): Notification urgency (`low`, `normal`, `critical`).
   - tag (string, optional): Tag for categorization.
   - description (string, optional): Short description of the trigger.
 - Behavior:
   - Validates `name` and `schedule`.
-  - Builds JSON metadata from optional parameters (note, open_chat, urgency, tag, description).
+  - Builds JSON metadata from optional parameters (note, urgency, tag, description).
   - Inserts a row into the `triggers` database table as `created_by = 'ai'` and then reloads triggers via trigger_registry.load_from_database().await.
   - Notifies the trigger loop to reschedule via trigger_registry.notify_changed().
 - Return: ToolResult::success on success or ToolResult::error on DB/migration errors.
