@@ -261,10 +261,37 @@ async fn handle_tool_request(
             message,
             urgency,
         } => handle_notification(&title, &message, urgency).await,
-        ServerToClientRequest::OpenChat {
-            message,
-            session_id,
-        } => handle_open_chat(message.as_deref(), session_id.as_deref()).await,
+        ServerToClientRequest::OpenChat { message, session_id } => {
+            // Prefer requesting focus/open on connected GUI clients. If none accept, spawn the GUI.
+            let push = ServerPush::OpenChat {
+                message: message.clone(),
+                urgency: NotificationUrgency::Normal,
+            };
+            let body = postcard::to_allocvec(&push)?;
+
+            // Snapshot current pushers
+            let senders = {
+                let guard = gui_pushers.lock().await;
+                guard.clone()
+            };
+
+            if senders.is_empty() {
+                // No GUI clients connected - spawn GUI process
+                handle_open_chat(message.as_deref(), session_id.as_deref()).await
+            } else {
+                // Try most-recent first
+                for sender in senders.into_iter().rev() {
+                    if sender.clone().send(body.clone()).await.is_ok() {
+                        info!("OpenChat push accepted by GUI client");
+                        return Ok(());
+                    }
+                }
+
+                // No GUI accepted the push - spawn GUI as fallback
+                warn!("No GUI accepted OpenChat push; launching GUI as fallback");
+                handle_open_chat(message.as_deref(), session_id.as_deref()).await
+            }
+        }
         ServerToClientRequest::FocusChat => handle_focus_chat(gui_pushers).await,
     }
 }
