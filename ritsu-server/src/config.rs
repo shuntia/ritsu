@@ -18,6 +18,8 @@ pub struct Config {
     pub timeouts: TimeoutConfig,
     #[serde(default)]
     pub network: NetworkConfig,
+    #[serde(default)]
+    pub triggers: TriggersConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +67,31 @@ pub struct MemoryConfig {
     /// Whether to include AI-generated prompt enhancements when building effective prompts
     #[serde(default = "default_include_ai_generated")]
     pub include_ai_generated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggersConfig {
+    #[serde(default = "default_enable_builtin_triggers")]
+    pub enable_builtin_triggers: bool,
+    #[serde(default = "default_enable_compactions")]
+    pub enable_compactions: bool,
+}
+
+impl Default for TriggersConfig {
+    fn default() -> Self {
+        Self {
+            enable_builtin_triggers: default_enable_builtin_triggers(),
+            enable_compactions: default_enable_compactions(),
+        }
+    }
+}
+
+fn default_enable_builtin_triggers() -> bool {
+    true
+}
+
+fn default_enable_compactions() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +256,12 @@ client_binary_path = "{client_binary_path}"
 [memory]
 daily_rotation_days = {rotation_days}
 include_ai_generated = true
+
+[triggers]
+# Whether to auto-create built-in triggers (daily compaction, weekly pattern, monthly reflection)
+enable_builtin_triggers = true
+# Whether to enable automatic compaction-related built-in triggers
+enable_compactions = true
 
 [network]
 # Allowed hosts for the 'get' tool. Only requests to these hosts will be permitted.

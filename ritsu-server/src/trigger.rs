@@ -137,39 +137,45 @@ impl TriggerRegistry {
         Ok(())
     }
 
-    pub async fn register_builtin_triggers(&self) -> Result<()> {
+    pub async fn register_builtin_triggers(&self, config: &crate::config::Config) -> Result<()> {
         let db_path = self.db_path.clone();
+        let enable_builtin = config.triggers.enable_builtin_triggers;
+        let enable_compactions = config.triggers.enable_compactions;
 
-        crate::database::Database::execute_blocking(db_path, |conn| {
-            // Daily conversation compaction at 2:00 AM
-            Self::insert_trigger_if_not_exists(
-                conn,
-                "daily_compaction",
-                "time",
-                "02:00",
-                "system",
-                r#"{"analysis_type":"conversation"}"#,
-            )?;
+        crate::database::Database::execute_blocking(db_path, move |conn| {
+            if enable_builtin {
+                if enable_compactions {
+                    // Daily conversation compaction at 2:00 AM
+                    Self::insert_trigger_if_not_exists(
+                        conn,
+                        "daily_compaction",
+                        "time",
+                        "02:00",
+                        "system",
+                        r#"{"analysis_type":"conversation"}"#,
+                    )?;
 
-            // Weekly pattern recognition on Sunday at 3:00 AM
-            Self::insert_trigger_if_not_exists(
-                conn,
-                "weekly_pattern",
-                "time",
-                "03:00",
-                "system",
-                r#"{"analysis_type":"pattern","day":"sunday"}"#,
-            )?;
+                    // Weekly pattern recognition on Sunday at 3:00 AM
+                    Self::insert_trigger_if_not_exists(
+                        conn,
+                        "weekly_pattern",
+                        "time",
+                        "03:00",
+                        "system",
+                        r#"{"analysis_type":"pattern","day":"sunday"}"#,
+                    )?;
 
-            // Monthly self-reflection on last day at 5:00 AM
-            Self::insert_trigger_if_not_exists(
-                conn,
-                "monthly_reflection",
-                "time",
-                "05:00",
-                "system",
-                r#"{"analysis_type":"reflection","day":"last"}"#,
-            )?;
+                    // Monthly self-reflection on last day at 5:00 AM
+                    Self::insert_trigger_if_not_exists(
+                        conn,
+                        "monthly_reflection",
+                        "time",
+                        "05:00",
+                        "system",
+                        r#"{"analysis_type":"reflection","day":"last"}"#,
+                    )?;
+                }
+            }
 
             Ok(())
         })

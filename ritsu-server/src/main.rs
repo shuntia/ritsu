@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     let trigger_registry = std::sync::Arc::new(trigger::TriggerRegistry::new(
         config.server.database_path.clone(),
     ));
-    trigger_registry.register_builtin_triggers().await?;
+    trigger_registry.register_builtin_triggers(&config).await?;
     info!(
         "Trigger registry initialized with {} triggers",
         trigger_registry.get_all_triggers().await.len()
