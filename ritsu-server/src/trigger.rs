@@ -948,16 +948,8 @@ pub async fn execute_idle_analysis(
                 .get("urgency")
                 .map_or("normal", String::as_str);
 
-            let open_chat = trigger
-                .metadata
-                .get("open_chat")
-                .is_some_and(|v| v == "true");
-
             // Log the intended action
-            info!(
-                "Custom trigger would notify: {} (open_chat: {})",
-                note, open_chat
-            );
+            info!("Custom trigger would notify: {}", note);
 
             // Store as note so user can see it later (include GUI presence)
             let gui_connected = state.has_gui_clients().await;

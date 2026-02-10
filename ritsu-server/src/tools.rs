@@ -623,13 +623,13 @@ Parameters:
 - schedule (string, required): Schedule format - 'HH:MM' for daily, a number of seconds (interval), or a cron expression. Cron expressions are expected in the canonical six-field form with a leading seconds field: 's m H D M *' (e.g. '0 30 08 10 2 *' for 2026-02-10 08:30 UTC). Five-field cron (minute hour day month day-of-week) is still accepted by the parser but canonical one-shot triggers use the six-field form.
 - type (string, optional): 'time', 'interval', 'cron', 'dynamic' (default: 'time').
 - note (string, optional): Instructional note describing what AI should do when the trigger fires.
-- open_chat (string, optional): 'true' to open the chat window on trigger.
+
 - urgency (string, optional): 'low', 'normal', 'critical'.
 - tag (string, optional): Tag for categorization.
 - description (string, optional): Short description of the trigger.
 
 Behavior:
-Validates 'name' and 'schedule', builds JSON metadata from optional parameters (note, open_chat, urgency, tag, description), inserts a row into the 'triggers' database table as created_by='ai', reloads triggers, and notifies the trigger loop to reschedule (trigger_registry.notify_changed()).
+Validates 'name' and 'schedule', builds JSON metadata from optional parameters (note, urgency, tag, description), inserts a row into the 'triggers' database table as created_by='ai', reloads triggers, and notifies the trigger loop to reschedule (trigger_registry.notify_changed()).
 
 Return:
 ToolResult::success on success or ToolResult::error on DB/migration errors.
@@ -662,12 +662,7 @@ Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time",
                     param_type: "string".to_string(),
                 },
 
-                ToolParameter {
-                    name: "open_chat".to_string(),
-                    description: "'true' to open chat window when triggered, 'false' for notification only".to_string(),
-                    required: false,
-                    param_type: "string".to_string(),
-                },
+
                 ToolParameter {
                     name: "urgency".to_string(),
                     description: "Notification urgency: 'low', 'normal', or 'critical'".to_string(),
@@ -720,9 +715,7 @@ Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time",
                         if let Some(note) = args.get("note") {
                             metadata.insert("note".to_string(), note.clone());
                         }
-                        if let Some(open_chat) = args.get("open_chat") {
-                            metadata.insert("open_chat".to_string(), open_chat.clone());
-                        }
+
                         if let Some(urgency) = args.get("urgency") {
                             metadata.insert("urgency".to_string(), urgency.clone());
                         }
