@@ -267,11 +267,9 @@ impl TriggerRegistry {
         );
 
         // Validate that the cron schedule will fire exactly at the requested minute
-        use cron::Schedule;
-        use std::str::FromStr;
-
-        let schedule = Schedule::from_str(&cron_expr)
-            .map_err(|e| anyhow::anyhow!("Failed to parse cron expression: {}", e))?;
+        // Use tolerant cron parsing (accept 5-field or 6-field cron expressions)
+        let schedule = parse_cron_schedule(&cron_expr)
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse cron expression: {}", cron_expr))?;
 
         // Compute the next occurrence from 'now' and compare to desired datetime truncated to minute
         let next_occurrence = schedule
@@ -508,9 +506,9 @@ impl TriggerRegistry {
             TriggerType::Cron(s) => s.clone(),
         };
 
-        // Validate that cron produces the requested occurrence
-        let schedule = Schedule::from_str(&cron_expr)
-            .map_err(|e| anyhow::anyhow!("Failed to parse cron expression: {}", e))?;
+        // Validate that cron produces the requested occurrence (tolerant parse)
+        let schedule = parse_cron_schedule(&cron_expr)
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse cron expression: {}", cron_expr))?;
 
         let before = desired_minute - chrono::Duration::seconds(1);
         let next_occ = schedule.after(&before).next().ok_or_else(|| {
@@ -586,7 +584,7 @@ impl std::fmt::Display for Trigger {
                     parts.push(format!("one_shot_time={}", one_shot_time));
                 } else {
                     // Attempt to compute next occurrence for human-friendly display
-                    if let Ok(schedule) = expr.parse::<cron::Schedule>() {
+                    if let Some(schedule) = parse_cron_schedule(expr) {
                         if let Some(next) = schedule.after(&chrono::Utc::now()).next() {
                             let next_local = next.with_timezone(&chrono::Local);
                             parts.push(format!(
@@ -603,12 +601,18 @@ impl std::fmt::Display for Trigger {
     }
 }
 
-/// Calculate next trigger time for cron-based triggers
-fn calculate_next_cron_time(cron_expr: &str) -> Option<Instant> {
+/// Try parsing a cron expression, accepting either five-field (no seconds) or six-field (with seconds) formats.
+fn parse_cron_schedule(expr: &str) -> Option<cron::Schedule> {
     use cron::Schedule;
     use std::str::FromStr;
 
-    let schedule = Schedule::from_str(cron_expr).ok()?;
+    // Try directly, then try prepending a leading seconds field ("0 ")
+    Schedule::from_str(expr).or_else(|_| Schedule::from_str(&format!("0 {}", expr))).ok()
+}
+
+/// Calculate next trigger time for cron-based triggers
+fn calculate_next_cron_time(cron_expr: &str) -> Option<Instant> {
+    let schedule = parse_cron_schedule(cron_expr)?;
     let now = Utc::now();
     let next = schedule.after(&now).next()?;
 
