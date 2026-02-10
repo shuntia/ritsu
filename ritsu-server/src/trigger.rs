@@ -1067,9 +1067,7 @@ pub async fn run_trigger_loop(
                         // Before considering this trigger, ensure the next occurrence isn't cancelled
                         let next_dt = {
                             // compute the next occurrence time in UTC minute precision
-                            use cron::Schedule;
-                            use std::str::FromStr;
-                            if let Ok(schedule) = Schedule::from_str(cron_expr) {
+                            if let Some(schedule) = parse_cron_schedule(cron_expr) {
                                 if let Some(next) = schedule.after(&Utc::now()).next() {
                                     let next_min = Utc
                                         .ymd(next.year(), next.month(), next.day())
