@@ -693,6 +693,7 @@ pub async fn execute_idle_analysis(
     memory: &MemoryManager,
     task_manager: &crate::tasks::TaskManager,
     llm_client: &LlmClient,
+    state: Arc<crate::state::ServerState>,
 ) -> Result<()> {
     let analysis_type = trigger
         .metadata
@@ -918,14 +919,20 @@ pub async fn execute_idle_analysis(
                     }
                 });
 
-            // Store as a note for the user to see
+            // Store as a note for the user to see (include whether any GUI client is connected)
+            let gui_connected = state.has_gui_clients().await;
             memory
                 .create_note(
-                    &format!("Daily Briefing - {}: {}", today, response.content),
+                    &format!(
+                        "Daily Briefing - {}: {}\n\nGUI connected: {}",
+                        today,
+                        response.content,
+                        if gui_connected { "yes" } else { "no" }
+                    ),
                     &["briefing".to_string()],
                 )
                 .await?;
-            info!("Daily briefing generated and stored as note");
+            info!("Daily briefing generated and stored as note (gui_connected={})", gui_connected);
         }
         "custom" | "reminder" => {
             // Custom AI-created trigger - send notification/note and start LLM with the note as instructions
@@ -952,14 +959,20 @@ pub async fn execute_idle_analysis(
                 note, open_chat
             );
 
-            // Store as note so user can see it later
+            // Store as note so user can see it later (include GUI presence)
+            let gui_connected = state.has_gui_clients().await;
             let note_id = memory
                 .create_note(
-                    &format!("Trigger '{}': {}", trigger.name, note),
+                    &format!(
+                        "Trigger '{}': {}\n\nGUI connected: {}",
+                        trigger.name,
+                        note,
+                        if gui_connected { "yes" } else { "no" }
+                    ),
                     &["trigger".to_string(), "reminder".to_string()],
                 )
                 .await?;
-            info!("Stored trigger note id: {}", note_id);
+            info!("Stored trigger note id: {} (gui_connected={})", note_id, gui_connected);
 
             // Build a background system prompt for the LLM and invoke it with the note as instructions.
             let (mut system_prompt, messages) =
@@ -1007,16 +1020,20 @@ pub async fn execute_idle_analysis(
                         resp.content.len()
                     );
                     if !resp.content.is_empty() {
-                        // Store LLM response for user visibility
+                        // Store LLM response for user visibility (include GUI presence)
+                        let gui_connected_resp = state.has_gui_clients().await;
                         let _ = memory
                             .create_note(
                                 &format!(
-                                    "Trigger '{}' LLM response: {}",
-                                    trigger.name, resp.content
+                                    "Trigger '{}' LLM response: {}\n\nGUI connected: {}",
+                                    trigger.name,
+                                    resp.content,
+                                    if gui_connected_resp { "yes" } else { "no" }
                                 ),
                                 &["trigger_response".to_string()],
                             )
                             .await;
+                        info!("Stored LLM response note for trigger '{}' (gui_connected={})", trigger.name, gui_connected_resp);
                     }
                 }
                 Err(e) => {
@@ -1143,7 +1160,7 @@ pub async fn run_trigger_loop(
                 () = sleep_until(instant) => {
                     // Trigger time reached - execute it
                     info!("Executing trigger: {}", trigger.name);
-                    if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client).await {
+                    if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client, state.clone()).await {
                         error!("Failed to execute trigger {}: {}", trigger.name, e);
                     }
 

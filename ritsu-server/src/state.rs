@@ -52,6 +52,12 @@ impl ServerState {
         clients.push(sender);
     }
 
+    /// Returns true if any GUI clients are currently connected to the daemon
+    pub async fn has_gui_clients(&self) -> bool {
+        let clients = self.clients.read().await;
+        !clients.is_empty()
+    }
+
     /// Broadcast a push notification to all connected clients
     pub async fn broadcast_push(&self, push: ServerPush) {
         let mut clients = self.clients.write().await;
