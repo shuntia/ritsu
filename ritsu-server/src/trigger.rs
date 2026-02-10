@@ -76,7 +76,8 @@ impl TriggerRegistry {
                         if parts.len() == 2 {
                             let hour = parts[0].parse::<u32>().unwrap_or(0);
                             let minute = parts[1].parse::<u32>().unwrap_or(0);
-                            format!("{minute} {hour} * * *")
+                            // Use six-field cron expressions with leading seconds field for compatibility with the cron crate
+                            format!("0 {minute} {hour} * * *")
                         } else {
                             schedule.clone()
                         }
@@ -86,10 +87,11 @@ impl TriggerRegistry {
                         if let Ok(secs) = schedule.parse::<u64>() {
                             if secs >= 60 && secs % 60 == 0 {
                                 let mins = secs / 60;
-                                format!("*/{} * * * *", mins)
+                                // Use six-field cron expressions with leading seconds
+                                format!("0 */{} * * * *", mins)
                             } else {
-                                // Fallback to every minute
-                                "*/1 * * * *".to_string()
+                                // Fallback to every minute (at second 0)
+                                "0 */1 * * * *".to_string()
                             }
                         } else {
                             schedule.clone()
@@ -99,7 +101,8 @@ impl TriggerRegistry {
                         // Schedule near-future one-shot via cron (next minute)
                         let now = Local::now();
                         let next = now + chrono::Duration::minutes(1);
-                        format!("{} {} * * *", next.minute(), next.hour())
+                        // Use six-field cron with leading seconds for dynamic one-shot triggers
+                        format!("0 {} {} * * *", next.minute(), next.hour())
                     }
                     // inactivity and unknown types - fallback to the stored schedule as cron
                     _ => schedule.clone(),
