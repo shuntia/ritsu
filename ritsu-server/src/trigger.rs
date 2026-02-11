@@ -284,9 +284,11 @@ impl TriggerRegistry {
             .ok_or_else(|| anyhow::anyhow!("Cron schedule produced no next occurrence"))?;
 
         // Truncate desired datetime to minute precision
-        let desired_minute = Utc
-            .ymd(dt_utc.year(), dt_utc.month(), dt_utc.day())
-            .and_hms(dt_utc.hour(), dt_utc.minute(), 0);
+        let naive_date = dt_utc.date_naive();
+        let naive_time = NaiveTime::from_hms_opt(dt_utc.hour(), dt_utc.minute(), 0)
+            .ok_or_else(|| anyhow::anyhow!("Invalid time while creating one-shot trigger"))?;
+        let naive_dt = chrono::NaiveDateTime::new(naive_date, naive_time);
+        let desired_minute = chrono::DateTime::<Utc>::from_utc(naive_dt, Utc);
 
         if next_occurrence != desired_minute {
             anyhow::bail!("Cron expression does not match the requested datetime (next cron occurrence: {} vs requested: {})", next_occurrence, desired_minute);
@@ -496,9 +498,11 @@ impl TriggerRegistry {
         let occ_utc = parsed.with_timezone(&Utc);
 
         // Truncate to minute precision
-        let desired_minute = Utc
-            .ymd(occ_utc.year(), occ_utc.month(), occ_utc.day())
-            .and_hms(occ_utc.hour(), occ_utc.minute(), 0);
+        let naive_date = occ_utc.date_naive();
+        let naive_time = NaiveTime::from_hms_opt(occ_utc.hour(), occ_utc.minute(), 0)
+            .ok_or_else(|| anyhow::anyhow!("Invalid time in occurrence"))?;
+        let naive_dt = chrono::NaiveDateTime::new(naive_date, naive_time);
+        let desired_minute = chrono::DateTime::<Utc>::from_utc(naive_dt, Utc);
 
         // Find trigger
         let triggers = self.triggers.read().await;
@@ -521,9 +525,11 @@ impl TriggerRegistry {
             anyhow::anyhow!("Cron schedule produced no occurrence near requested time")
         })?;
 
-        let next_min = Utc
-            .ymd(next_occ.year(), next_occ.month(), next_occ.day())
-            .and_hms(next_occ.hour(), next_occ.minute(), 0);
+        let naive_date = next_occ.date_naive();
+        let naive_time = NaiveTime::from_hms_opt(next_occ.hour(), next_occ.minute(), 0)
+            .ok_or_else(|| anyhow::anyhow!("Invalid time from cron schedule"))?;
+        let naive_dt = chrono::NaiveDateTime::new(naive_date, naive_time);
+        let next_min = chrono::DateTime::<Utc>::from_utc(naive_dt, Utc);
 
         if next_min != desired_minute {
             anyhow::bail!("Cron schedule does not trigger at the requested time (next cron occurrence: {} vs requested: {})", next_min, desired_minute);
@@ -1118,10 +1124,12 @@ pub async fn run_trigger_loop(
                             // compute the next occurrence time in UTC minute precision
                             if let Some(schedule) = parse_cron_schedule(cron_expr) {
                                 if let Some(next) = schedule.after(&Utc::now()).next() {
-                                    let next_min = Utc
-                                        .ymd(next.year(), next.month(), next.day())
-                                        .and_hms(next.hour(), next.minute(), 0);
-                                    Some(next_min)
+                                    if let Some(naive_time) = NaiveTime::from_hms_opt(next.hour(), next.minute(), 0) {
+                                        let naive_dt = chrono::NaiveDateTime::new(next.date_naive(), naive_time);
+                                        Some(chrono::DateTime::<Utc>::from_utc(naive_dt, Utc))
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }

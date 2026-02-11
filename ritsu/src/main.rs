@@ -45,7 +45,15 @@ enum Commands {
     Halt(HaltCommands),
 
     /// Open chat GUI interface
-    Chat,
+    Chat {
+        /// Session ID to select on startup
+        #[arg(long)]
+        session: Option<String>,
+
+        /// Initial message to display in chat GUI
+        #[arg(long)]
+        message: Option<String>,
+    },
 
     /// Run TUI config editor for system prompts (uses ratatui)
     Config,
@@ -349,10 +357,10 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Commands::Chat => {
+        Commands::Chat { session, message } => {
             println!("Starting Ritsu GUI...");
             // Run GUI - it creates its own runtime
-            gui::run_blocking()
+            gui::run_blocking(session, message)
         }
         // All other commands need async runtime
         _ => tokio::runtime::Runtime::new()?.block_on(async {
@@ -395,7 +403,7 @@ fn main() -> Result<()> {
                 }
                 Commands::Dev(cmd) => commands::dev::handle(cmd).await?,
                 Commands::Attach => commands::attach::attach().await?,
-                Commands::Chat | Commands::Init { config: _, prompts: _ } => {}
+                Commands::Chat { session: _, message: _ } | Commands::Init { config: _, prompts: _ } => {}
             }
             Ok(())
         }),

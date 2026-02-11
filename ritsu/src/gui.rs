@@ -131,12 +131,23 @@ struct ChatMessage {
 
 impl RitsuGui {
     #[allow(dead_code)]
-    fn new() -> (Self, Task<Message>) {
-        let session_id = format!("gui_session_{}", chrono::Utc::now().timestamp());
+    fn new(session_id_opt: Option<String>, initial_message: Option<String>) -> (Self, Task<Message>) {
+        let session_id = session_id_opt.unwrap_or_else(|| format!("gui_session_{}", chrono::Utc::now().timestamp()));
+        let mut messages = Vec::new();
+        if let Some(msg) = initial_message {
+            messages.push(ChatMessage {
+                content: msg,
+                is_user: false,
+                opacity: 1.0,
+                timestamp: chrono::Utc::now(),
+                thinking: None,
+                show_thinking: false,
+            });
+        }
         (
             Self {
                 input: String::new(),
-                messages: Vec::new(),
+                messages,
                 session_id,
                 is_loading: false,
                 animation_frame: 0,
@@ -1921,8 +1932,8 @@ fn subscription(_state: &RitsuGui) -> Subscription<Message> {
     })
 }
 
-pub fn run_blocking() -> anyhow::Result<()> {
-    iced::application(RitsuGui::default, update, view)
+pub fn run_blocking(session: Option<String>, message: Option<String>) -> anyhow::Result<()> {
+    iced::application(move || RitsuGui::new(session.clone(), message.clone()), update, view)
         .subscription(subscription)
         .theme(|_state: &RitsuGui| Theme::Dark)
         .font(LUCIDE_FONT_BYTES)

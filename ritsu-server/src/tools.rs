@@ -1133,27 +1133,34 @@ Example args: { "type": "conversation" }"#.to_string(),
         }
     }
 
-    pub fn open_chat(state: Arc<super::super::state::ServerState>) -> Tool {
+    pub fn open_chat(state: Arc<super::super::state::ServerState>, conversation_manager: Arc<super::super::conversations::ConversationManager>) -> Tool {
         Tool {
             name: "open_chat".to_string(),
-            description: r#"Request that the client open the chat GUI and optionally display an initial message.
+            description: r#"Request that the client open the chat GUI, optionally display an initial message, and select a conversation session.
 
 Parameters:
 - message (string, optional): Initial message to display in the chat.
+- session_id (string, optional): Session ID to select. If omitted, the most recently active session will be selected or a new session will be created.
 - urgency (string, optional): Urgency level (unused by send_to_client_daemon path but included for parity).
 
 Behavior:
-Sends ServerToClientRequest::OpenChat to the client daemon via state.send_to_client_daemon; on failure, falls back to broadcasting ServerPush::OpenChat via state.broadcast_push.
+Selects an appropriate conversation session (provided session_id, or most recent active session, or creates a new session) and sends ServerToClientRequest::OpenChat with that session_id. On failure, falls back to broadcasting ServerPush::OpenChat (which may not include session selection).
 
 Return:
-ToolResult::success("Chat window opened") or ToolResult::success("Chat window opened (fallback)") on fallback; ToolResult::error for other failures.
+ToolResult::success("Chat window opened (session <id>)") or ToolResult::success("Chat window opened (fallback)") on fallback; ToolResult::error for other failures.
 
-Example args: { "message": "Time to review PRs" }"#.to_string(),
+Example args: { "message": "Time to review PRs", "session_id": "abcd" }"#.to_string(),
             tags: vec!["ui".to_string(), "interaction".to_string()],
             parameters: vec![
                 ToolParameter {
                     name: "message".to_string(),
                     description: "Initial message to display".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "session_id".to_string(),
+                    description: "Session ID to select (optional)".to_string(),
                     required: false,
                     param_type: "string".to_string(),
                 },
@@ -1166,26 +1173,43 @@ Example args: { "message": "Time to review PRs" }"#.to_string(),
             ],
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let state = state.clone();
+                let conv = conversation_manager.clone();
                 Box::pin(async move {
                     let message = args.get("message").cloned();
+                    let session_arg = args.get("session_id").cloned();
 
-                    // Send to client daemon
+                    // Determine session id: use provided, else pick most recent active, else create a new auto session
+                    let session_id = if let Some(s) = session_arg {
+                        s
+                    } else {
+                        match conv.get_active_sessions().await {
+                            Ok(sessions) if !sessions.is_empty() => sessions[0].session_id.clone(),
+                            _ => format!("auto-{}", chrono::Utc::now().timestamp_nanos()),
+                        }
+                    };
+
+                    // Ensure session exists (best-effort)
+                    if let Err(e) = conv.get_or_create_session(&session_id).await {
+                        warn!("Failed to ensure session exists {}: {}", session_id, e);
+                    }
+
+                    // Send to client daemon with session selection
                     let request = ritsu_common::protocol::ServerToClientRequest::OpenChat {
                         message: message.clone(),
-                        session_id: None,
+                        session_id: Some(session_id.clone()),
                     };
 
                     match state.send_to_client_daemon(request).await {
                         Ok(()) => {
-                            info!("Chat window open requested via client daemon");
+                            info!("Chat window open requested via client daemon (session={})", session_id);
                             if let Some(msg) = &message {
                                 info!("With message: {msg}");
                             }
-                            ToolResult::success("Chat window opened".to_string())
+                            ToolResult::success(format!("Chat window opened (session {})", session_id))
                         }
                         Err(e) => {
                             warn!("Failed to open chat via client daemon: {}", e);
-                            // Fallback to broadcast
+                            // Fallback to broadcast (no session selection available)
                             let urgency = ritsu_common::protocol::NotificationUrgency::Normal;
                             state.broadcast_push(ritsu_common::protocol::ServerPush::OpenChat {
                                 message: message.clone(),
@@ -1653,6 +1677,169 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
         }
     }
 
+    pub fn update_system_prompt(memory: Arc<super::super::memory::MemoryManager>, config: Arc<crate::config::Config>) -> Tool {
+        Tool {
+            name: "update_system_prompt".to_string(),
+            description: "Safely update or propose changes to system prompts.\n\nParameters:\n- old (string, required): Exact substring to replace.\n- new (string, required): Replacement text or new prompt content.\n- apply (string, optional): 'true' to force apply immediately (overrides require_user_approval).\n\nBehavior:\nAttempts to replace `old` with `new` in the following order: user's base prompt file (~/.config/ritsu/prompts/system_base.md), DB-stored `base` prompt, DB-stored `ai_generated` prompt. If `old` is not found and `apply=true`, inserts `new` as a new `ai_generated` prompt. If require_user_approval is enabled in config, the change will be recorded as a proposal (idle_analysis) and audit-logged instead of applying automatically.".to_string(),
+            tags: vec!["prompt".to_string(), "config".to_string()],
+            parameters: vec![
+                ToolParameter { name: "old".to_string(), description: "Old substring to replace".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "new".to_string(), description: "New replacement text".to_string(), required: true, param_type: "string".to_string() },
+                ToolParameter { name: "apply".to_string(), description: "Set to 'true' to force apply immediately".to_string(), required: false, param_type: "string".to_string() },
+            ],
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let memory = memory.clone();
+                let config = config.clone();
+                Box::pin(async move {
+                    // Validate params
+                    let old = match args.get("old") {
+                        Some(s) if !s.trim().is_empty() => s.clone(),
+                        _ => return ToolResult::error("Missing required parameter: old".to_string()),
+                    };
+                    let new = match args.get("new") {
+                        Some(s) if !s.trim().is_empty() => s.clone(),
+                        _ => return ToolResult::error("Missing required parameter: new".to_string()),
+                    };
+                    let apply_override = args.get("apply").map(|v| v == "true" || v == "1").unwrap_or(false);
+
+                    // Read tool config (optional)
+                    let mut require_user_approval = true;
+                    let mut max_prompt_length: usize = 800;
+                    let mut audit_log_path: Option<String> = None;
+                    let mut allow_background_updates = false;
+
+                    if let Ok(cfg_contents) = crate::database::read_file_async(crate::config::Config::config_file_path()).await {
+                        if let Ok(cfg_val) = toml::from_str::<toml::Value>(&cfg_contents) {
+                            if let Some(tools_tbl) = cfg_val.get("tools").and_then(|v| v.as_table()) {
+                                if let Some(usp) = tools_tbl.get("update_system_prompt").and_then(|v| v.as_table()) {
+                                    if let Some(b) = usp.get("require_user_approval").and_then(|v| v.as_bool()) { require_user_approval = b; }
+                                    if let Some(i) = usp.get("max_prompt_length").and_then(|v| v.as_integer()) { max_prompt_length = i as usize; }
+                                    if let Some(s) = usp.get("audit_log").and_then(|v| v.as_str()) { audit_log_path = Some(s.to_string()); }
+                                    if let Some(b) = usp.get("allow_background_updates").and_then(|v| v.as_bool()) { allow_background_updates = b; }
+                                }
+                            }
+                        }
+                    }
+
+                    if new.len() > max_prompt_length {
+                        return ToolResult::error(format!("New prompt exceeds max length ({} > {})", new.len(), max_prompt_length));
+                    }
+
+                    // Helper: replace first occurrence only
+                    let replace_first = |text: &str, needle: &str, replacement: &str| -> Option<String> {
+                        if let Some(pos) = text.find(needle) {
+                            let mut s = String::with_capacity(text.len() - needle.len() + replacement.len());
+                            s.push_str(&text[..pos]);
+                            s.push_str(replacement);
+                            s.push_str(&text[pos + needle.len()..]);
+                            Some(s)
+                        } else { None }
+                    };
+
+                    // Helper: append audit log (best-effort)
+                    let append_audit = |path_opt: Option<String>, location: &str, applied: bool, old_snip: &str, new_snip: &str| {
+                        let mut path = path_opt.unwrap_or_else(|| {
+                            if let Some(h) = dirs::home_dir() { h.join(".local/share/ritsu/ai_prompt_changes.log").to_string_lossy().to_string() } else { "/tmp/ritsu_ai_prompt_changes.log".to_string() }
+                        });
+                        if path.starts_with("~/") {
+                            if let Some(h) = dirs::home_dir() { path = path.replacen("~", &h.to_string_lossy(), 1); }
+                        }
+                        let entry = format!("{} | update_system_prompt | location={} | applied={}\nOLD:\n{}\n---\nNEW:\n{}\n\n", chrono::Utc::now().to_rfc3339(), location, applied, old_snip, new_snip);
+                        let _ = std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(entry.as_bytes()));
+                    };
+
+                    // 1) Try user's base prompt file
+                    if let Some(home) = dirs::home_dir() {
+                        let base_path = home.join(".config/ritsu/prompts/system_base.md");
+                        if let Ok(content) = crate::database::read_file_async(base_path.clone()).await {
+                            if content.contains(&old) {
+                                if require_user_approval && !apply_override {
+                                    let mut findings = std::collections::HashMap::new();
+                                    findings.insert("old_snippet".to_string(), old.clone());
+                                    findings.insert("new_snippet".to_string(), new.clone());
+                                    let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                                    append_audit(audit_log_path.clone(), "file:system_base.md", false, &old, &new);
+                                    return ToolResult::success("Proposed prompt update recorded; requires user approval".to_string());
+                                }
+                                // Apply change to file
+                                if let Some(updated) = replace_first(&content, &old, &new) {
+                                    let write_path = base_path.clone();
+                                    let updated_clone = updated.clone();
+                                    let res = tokio::task::spawn_blocking(move || std::fs::write(write_path, updated_clone)).await;
+                                    if let Err(e) = res {
+                                        return ToolResult::error(format!("Failed to write updated prompt file: {}", e));
+                                    }
+                                    let _ = memory.store_idle_analysis("prompt_update", &std::collections::HashMap::from([("applied".to_string(), "true".to_string())]), Some(&new)).await;
+                                    append_audit(audit_log_path.clone(), "file:system_base.md", true, &old, &new);
+                                    return ToolResult::success("System base prompt updated".to_string());
+                                }
+                            }
+                        }
+                    }
+
+                    // 2) Try DB-stored base prompt
+                    if let Ok(Some(base)) = memory.get_system_prompt("base").await {
+                        if base.contains(&old) {
+                            if require_user_approval && !apply_override {
+                                let mut findings = std::collections::HashMap::new();
+                                findings.insert("old_snippet".to_string(), old.clone());
+                                findings.insert("new_snippet".to_string(), new.clone());
+                                let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                                append_audit(audit_log_path.clone(), "db:base", false, &old, &new);
+                                return ToolResult::success("Proposed prompt update recorded; requires user approval".to_string());
+                            }
+                            if let Some(updated) = replace_first(&base, &old, &new) {
+                                if let Err(e) = memory.store_system_prompt("base", &updated).await {
+                                    return ToolResult::error(format!("Failed to store updated base prompt: {}", e));
+                                }
+                                append_audit(audit_log_path.clone(), "db:base", true, &old, &new);
+                                return ToolResult::success("DB base prompt updated".to_string());
+                            }
+                        }
+                    }
+
+                    // 3) Try DB-stored ai_generated prompt
+                    if let Ok(Some(ai)) = memory.get_system_prompt("ai_generated").await {
+                        if ai.contains(&old) {
+                            if require_user_approval && !apply_override {
+                                let mut findings = std::collections::HashMap::new();
+                                findings.insert("old_snippet".to_string(), old.clone());
+                                findings.insert("new_snippet".to_string(), new.clone());
+                                let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                                append_audit(audit_log_path.clone(), "db:ai_generated", false, &old, &new);
+                                return ToolResult::success("Proposed prompt update recorded; requires user approval".to_string());
+                            }
+                            if let Some(updated) = replace_first(&ai, &old, &new) {
+                                if let Err(e) = memory.store_system_prompt("ai_generated", &updated).await {
+                                    return ToolResult::error(format!("Failed to store updated ai_generated prompt: {}", e));
+                                }
+                                append_audit(audit_log_path.clone(), "db:ai_generated", true, &old, &new);
+                                return ToolResult::success("AI-generated prompt updated".to_string());
+                            }
+                        }
+                    }
+
+                    // Not found - if apply_override and approval not required, insert as new ai_generated prompt
+                    if apply_override && !require_user_approval {
+                        if let Err(e) = memory.store_system_prompt("ai_generated", &new).await {
+                            return ToolResult::error(format!("Failed to store new ai_generated prompt: {}", e));
+                        }
+                        append_audit(audit_log_path.clone(), "db:ai_generated:new", true, "", &new);
+                        return ToolResult::success("New ai_generated prompt stored".to_string());
+                    }
+
+                    // Otherwise record proposal
+                    let mut findings = std::collections::HashMap::new();
+                    findings.insert("old_snippet".to_string(), old.clone());
+                    findings.insert("new_snippet".to_string(), new.clone());
+                    let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                    append_audit(audit_log_path.clone(), "proposal", false, &old, &new);
+                    ToolResult::success("No matching prompt found; proposal recorded for review".to_string())
+                })
+            }),
+        }
+    }
+
     pub fn wait() -> Tool {
         Tool {
             name: "wait".to_string(),
@@ -1885,7 +2072,7 @@ pub async fn register_all_tools(
         .register(tool_impls::analyze_now(trigger_registry.clone()))
         .await;
     registry
-        .register(tool_impls::open_chat(state.clone()))
+        .register(tool_impls::open_chat(state.clone(), conversation_manager.clone()))
         .await;
     registry
         .register(tool_impls::set_title(conversation_manager.clone()))
@@ -1904,6 +2091,9 @@ pub async fn register_all_tools(
         .await;
     registry
         .register(tool_impls::set_preference(preferences.clone()))
+        .await;
+    registry
+        .register(tool_impls::update_system_prompt(memory.clone(), config.clone()))
         .await;
     registry.register(tool_impls::wait()).await;
     registry.register(tool_impls::get(config.clone())).await;
