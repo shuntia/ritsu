@@ -79,7 +79,13 @@ impl PromptBuilder {
         };
 
         // Run pre-prompt hooks for injected context; fall back to direct task summary if none
-        let hook_outputs = run_pre_hooks().await.unwrap_or_default();
+        let hook_outputs = match run_pre_hooks().await {
+            Ok(h) => h,
+            Err(e) => {
+                warn!("Pre-prompt hooks failed: {}", e);
+                Vec::new()
+            }
+        };
         let context_block = if !hook_outputs.is_empty() {
             hook_outputs.join("\n\n")
         } else {
@@ -123,7 +129,13 @@ impl PromptBuilder {
         };
 
         // Run pre-prompt hooks
-        let hook_outputs = run_pre_hooks().await.unwrap_or_default();
+        let hook_outputs = match run_pre_hooks().await {
+            Ok(h) => h,
+            Err(e) => {
+                warn!("Pre-prompt hooks failed: {}", e);
+                Vec::new()
+            }
+        };
 
         // Compose user message: hooks first, then provided content
         let mut user_text = String::new();
