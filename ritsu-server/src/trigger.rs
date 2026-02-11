@@ -761,7 +761,13 @@ pub async fn execute_idle_analysis(
                 .join("\n\n");
 
             // Gather recent notes and discussions to provide richer context
-            let recent_notes = memory.query_notes(50).await.unwrap_or_default();
+            let recent_notes = match memory.query_notes(50).await {
+                Ok(n) => n,
+                Err(e) => {
+                    warn!("Failed to query recent notes for pattern analysis: {}", e);
+                    Vec::new()
+                }
+            };
             let notes_text = recent_notes
                 .iter()
                 .take(10)
@@ -769,7 +775,13 @@ pub async fn execute_idle_analysis(
                 .collect::<Vec<_>>()
                 .join("\n\n");
 
-            let recent_discussions = memory.get_recent_conversations_days(7).await.unwrap_or_default();
+            let recent_discussions = match memory.get_recent_conversations_days(7).await {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!("Failed to get recent discussions for pattern analysis: {}", e);
+                    Vec::new()
+                }
+            };
             let discussions_text = recent_discussions
                 .iter()
                 .take(20)
@@ -1147,11 +1159,17 @@ pub async fn run_trigger_loop(
                             let db_path_clone = registry.db_path.clone();
                             let trig_name_check = trig_name.clone();
                             let occ_check = occ_str.clone();
-                            let cancelled = crate::database::Database::execute_blocking(db_path_clone, move |conn| {
+                            let cancelled = match crate::database::Database::execute_blocking(db_path_clone, move |conn| {
                                 let mut stmt = conn.prepare("SELECT COUNT(1) FROM cron_exceptions WHERE trigger_name = ?1 AND occurrence = ?2")?;
                                 let count: i64 = stmt.query_row((&trig_name_check, &occ_check), |r| r.get(0))?;
                                 Ok(count > 0)
-                            }).await.unwrap_or(false);
+                            }).await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    warn!("Failed to check cron_exceptions: {}", e);
+                                    false
+                                }
+                            };
                             is_cancelled = cancelled;
                         }
 
