@@ -195,7 +195,7 @@ async fn main() -> Result<()> {
     let tool_registry =
         std::sync::Arc::new(tools::ToolRegistry::new().with_database(db.connection.clone()));
     tools::register_all_tools(
-        &tool_registry,
+        tool_registry.clone(),
         memory.clone(),
         conversation_manager.clone(),
         task_manager.clone(),
@@ -306,9 +306,15 @@ async fn main() -> Result<()> {
         let shutdown_flag_clone = shutdown_flag.clone();
         tokio::spawn(async move {
             // Signal setup failure is fatal - we need graceful shutdown capability
-            #[allow(clippy::expect_used)]
-            let mut sigterm =
-                signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to setup SIGTERM handler: {}", e);
+                    // Notify shutdown and return from this task
+                    shutdown_flag_clone.notify_waiters();
+                    return;
+                }
+            };
             sigterm.recv().await;
             info!("Received SIGTERM! Shutting down gracefully...");
             shutdown_flag_clone.notify_waiters();

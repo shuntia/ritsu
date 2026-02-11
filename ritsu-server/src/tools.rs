@@ -92,7 +92,13 @@ impl ToolRegistry {
         // Log tool usage to database
         if let Some(db) = &self.db_conn {
             let name_clone = name.to_string();
-            let args_json = serde_json::to_string(&args).unwrap_or_default();
+            let args_json = match serde_json::to_string(&args) {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!(error = %e, "Failed to serialize tool args for DB logging");
+                    String::new()
+                }
+            };
             let result_str = result.output.clone();
             let success = result.success;
 
@@ -580,7 +586,13 @@ Example args: { "type": "notes", "query": "roadmap", "limit": "5" }"#.to_string(
 
                                     let summary = filtered_notes.iter()
                                         .map(|(id, content, tags_json)| {
-                                            let tags: Vec<String> = serde_json::from_str(tags_json).unwrap_or_default();
+                                            let tags: Vec<String> = match serde_json::from_str(tags_json) {
+                                                Ok(t) => t,
+                                                Err(e) => {
+                                                    warn!(error = %e, "Failed to parse tags JSON for note id {} - using empty tags", id);
+                                                    Vec::new()
+                                                }
+                                            };
                                             let tags_display = if tags.is_empty() {
                                                 String::new()
                                             } else {
@@ -1745,7 +1757,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                             if let Some(h) = dirs::home_dir() { path = path.replacen("~", &h.to_string_lossy(), 1); }
                         }
                         let entry = format!("{} | update_system_prompt | location={} | applied={}\nOLD:\n{}\n---\nNEW:\n{}\n\n", chrono::Utc::now().to_rfc3339(), location, applied, old_snip, new_snip);
-                        let _ = std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| f.write_all(entry.as_bytes()));
+                        let _ = std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()));
                     };
 
                     // 1) Try user's base prompt file
@@ -2010,6 +2022,110 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
             }),
         }
     }
+
+    pub fn parallel(registry: std::sync::Arc<super::ToolRegistry>) -> Tool {
+        Tool {
+            name: "parallel".to_string(),
+            description: r#"Execute multiple registered tools in parallel.
+
+Parameters:
+- calls (string, required): JSON array of calls. Each call may be either a string (tool name) or an object {"name":"tool_name", "args": {"k":"v"}}.
+
+Return:
+A JSON array string with per-call results: [{"name": "tool", "success": bool, "output": "...", "error": null}, ...]."#.to_string(),
+            tags: vec!["parallel".to_string(), "utility".to_string()],
+            parameters: vec![ToolParameter { name: "calls".to_string(), description: "JSON array of tool calls (string or {name,args})".to_string(), required: true, param_type: "string".to_string() }],
+            handler: std::sync::Arc::new(move |args: std::collections::HashMap<String, String>| {
+                let registry = registry.clone();
+                Box::pin(async move {
+                    let calls_str = match args.get("calls") {
+                        Some(s) if !s.trim().is_empty() => s.clone(),
+                        _ => return ToolResult::error("Missing required parameter: calls".to_string()),
+                    };
+
+                    let calls_val: serde_json::Value = match serde_json::from_str(&calls_str) {
+                        Ok(v) => v,
+                        Err(e) => return ToolResult::error(format!("Invalid JSON for 'calls': {}", e)),
+                    };
+
+                    let calls_arr = match calls_val.as_array() {
+                        Some(a) => a.clone(),
+                        None => return ToolResult::error("'calls' must be a JSON array".to_string()),
+                    };
+
+                    let mut handles = Vec::new();
+
+                    for item in calls_arr.into_iter() {
+                        // Normalize to (name, args_map)
+                        let (name, arg_map) = if item.is_string() {
+                            match item.as_str() {
+                                Some(s) => (s.to_string(), std::collections::HashMap::new()),
+                                None => continue,
+                            }
+                        } else if let Some(obj) = item.as_object() {
+                            let name = match obj.get("name").and_then(|v| v.as_str()) {
+                                Some(n) if !n.is_empty() => n.to_string(),
+                                _ => continue,
+                            };
+                            let mut hm = std::collections::HashMap::new();
+                            if let Some(a) = obj.get("args").and_then(|v| v.as_object()) {
+                                for (k, v) in a.iter() {
+                                    let val_str = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
+                                    hm.insert(k.clone(), val_str);
+                                }
+                            }
+                            (name, hm)
+                        } else {
+                            continue;
+                        };
+
+                        // Lookup handler without holding lock across await
+                        let handler_opt = {
+                            let tools_map = registry.tools.read().await;
+                            tools_map.get(&name).map(|t| t.handler.clone())
+                        };
+
+                        if let Some(handler) = handler_opt {
+                            let args_clone = arg_map.clone();
+                            let name_clone = name.clone();
+                            // Spawn per-call task
+                            handles.push(tokio::spawn(async move {
+                                let res = (handler)(args_clone).await;
+                                (name_clone, res)
+                            }));
+                        } else {
+                            // Tool not found: immediate error result
+                            let name_clone = name.clone();
+                            handles.push(tokio::spawn(async move {
+                                let msg = format!("Tool '{}' not found", name_clone.clone());
+                                (name_clone, ToolResult::error(msg))
+                            }));
+                        }
+                    }
+
+                    // Await all
+                    let mut results = Vec::new();
+                    for h in handles {
+                        match h.await {
+                            Ok((name, res)) => {
+                                results.push(serde_json::json!({"name": name, "success": res.success, "output": res.output, "error": res.error }));
+                            }
+                            Err(e) => {
+                                results.push(serde_json::json!({"name": "<join_error>", "success": false, "output": "", "error": format!("Join error: {}", e) }));
+                            }
+                        }
+                    }
+
+                    let out = match serde_json::to_string(&results) {
+                        Ok(s) => s,
+                        Err(e) => format!("Failed to serialize results: {}", e),
+                    };
+
+                    ToolResult::success(out)
+                })
+            }),
+        }
+    }
 }
 
 use crate::conversations::ConversationManager;
@@ -2020,7 +2136,7 @@ use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry as TriggerReg;
 
 pub async fn register_all_tools(
-    registry: &ToolRegistry,
+    registry: std::sync::Arc<ToolRegistry>,
     memory: Arc<MemoryManager>,
     conversation_manager: Arc<crate::conversations::ConversationManager>,
     task_manager: Arc<TaskManager>,
@@ -2097,8 +2213,9 @@ pub async fn register_all_tools(
         .await;
     registry.register(tool_impls::wait()).await;
     registry.register(tool_impls::get(config.clone())).await;
+    registry.register(tool_impls::parallel(registry.clone())).await;
 
-    info!("Registered {} tools", 21);
+    info!("Registered {} tools", 22);
 }
 
 #[cfg(test)]
