@@ -737,7 +737,7 @@ pub async fn execute_idle_analysis(
             }
         }
         "pattern" => {
-            // Weekly pattern recognition
+            // Weekly pattern recognition with prompt modification
             info!("Starting weekly pattern recognition");
 
             // Get past week's daily summaries
@@ -754,9 +754,29 @@ pub async fn execute_idle_analysis(
                 .collect::<Vec<_>>()
                 .join("\n\n");
 
+            // Gather recent notes and discussions to provide richer context
+            let recent_notes = memory.query_notes(50).await.unwrap_or_default();
+            let notes_text = recent_notes
+                .iter()
+                .take(10)
+                .map(|(id, content, tags)| format!("Note {}: {} [tags: {}]", id, content, tags))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            let recent_discussions = memory.get_recent_conversations_days(7).await.unwrap_or_default();
+            let discussions_text = recent_discussions
+                .iter()
+                .take(20)
+                .map(|(ts, role, content, user_id)| format!("[{}] {}: {}", ts, role, content))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            let task_context = task_manager.get_task_summary().await.ok().unwrap_or_else(|| "No active tasks".to_string());
+
+            // Build an instruction for the LLM to generate an AI-enhancement to the system prompt
             let prompt_text = format!(
-                "Analyze patterns from the past week's activity:\n\n{}\n\nIdentify:\n1. Recurring themes and topics\n2. Time-based patterns\n3. User preferences and habits\n4. Areas of focus",
-                summaries_text
+                "You are the system prompt editor for Ritsu. Using the following data, create a concise 'AI-generated' prompt addition (plain text only) that should be appended to the base system prompt so Ritsu better reflects user preferences, recurring topics, notes, and discussion context. Keep it focused, instructive, and no more than 800 words.\n\nWeekly Summaries:\n{}\n\nRecent Notes (up to 10):\n{}\n\nRecent Discussions (up to 20 turns):\n{}\n\nActive Tasks Summary:\n{}\n\nProduce ONLY the prompt text to be used as an AI-generated system prompt (do not add commentary or headers).",
+                summaries_text, notes_text, discussions_text, task_context
             );
 
             let (mut system_prompt, messages) =
@@ -804,17 +824,31 @@ pub async fn execute_idle_analysis(
                     }
                 });
 
+            // Store findings and update AI-generated prompt in the database
             let findings = HashMap::from([
                 ("type".to_string(), "pattern_recognition".to_string()),
                 ("summary".to_string(), response.content.clone()),
                 ("period".to_string(), "7_days".to_string()),
             ]);
+
+            // Attempt to persist the generated prompt as an 'ai_generated' system prompt
+            let ai_generated_content = response.content.clone();
+            if !ai_generated_content.trim().is_empty() {
+                if let Err(e) = memory.store_system_prompt("ai_generated", &ai_generated_content).await {
+                    warn!("Failed to store ai_generated prompt: {}", e);
+                } else {
+                    info!("Updated ai_generated system prompt from weekly pattern analysis");
+                }
+            }
+
+            // Save the analysis results and include the generated prompt as prompted_changes for audit
             memory
-                .store_idle_analysis("pattern", &findings, None)
+                .store_idle_analysis("pattern", &findings, Some(&ai_generated_content))
                 .await?;
+
             info!(
-                "Weekly pattern recognition completed: {}",
-                response.content.chars().take(100).collect::<String>()
+                "Weekly pattern recognition completed and ai_generated prompt updated: {}",
+                ai_generated_content.chars().take(100).collect::<String>()
             );
         }
         "reflection" => {

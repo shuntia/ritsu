@@ -9,6 +9,7 @@ pub mod dev;
 pub mod export;
 pub mod memory;
 pub mod prompt;
+pub mod config;
 pub mod send;
 pub mod task;
 pub mod trigger;

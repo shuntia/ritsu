@@ -240,7 +240,7 @@ impl ClientConfig {
             Ok(config)
         } else {
             warn!("Client configuration file not found: {}", path.display());
-            info!("Using default client configuration. To customize, create '{}' or run 'ritsu --write-example-config'", path.display());
+            info!("Using default client configuration. To customize, create '{}' or run 'ritsu init --config --prompts'", path.display());
             Ok(Self::default())
         }
     }
@@ -254,8 +254,8 @@ impl ClientConfig {
             .join("client.toml")
     }
 
-    /// Write an example configuration file
-    pub fn write_example(path: &PathBuf) -> Result<()> {
+    /// Write an example configuration file (client only)
+    pub fn write_example_config(path: &PathBuf) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
@@ -271,6 +271,196 @@ impl ClientConfig {
             .with_context(|| format!("Failed to write example config to: {}", path.display()))?;
 
         info!("Created example client config: {}", path.display());
+        Ok(())
+    }
+
+    /// Write example prompts to ~/.config/ritsu/prompts and per-trigger prompts
+    pub fn write_example_prompts() -> Result<()> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+        let prompts_dir = home.join(".config/ritsu/prompts");
+
+        // Create prompts directory
+        std::fs::create_dir_all(&prompts_dir)?;
+
+        // Base system prompt
+        let base_path = prompts_dir.join("system_base.md");
+        let base_content = r#"# Ritsu System Prompt
+
+You are Ritsu, an autonomous AI assistant with the following capabilities:
+
+## Core Identity
+- Self-triggering agent that can schedule and execute tasks independently
+- Maintain long-term memory through conversation summaries
+- Learn user preferences over time
+- Proactive in suggesting improvements and automations
+
+## Interaction Style
+- Concise and direct in responses
+- Ask clarifying questions when needed
+- Provide context for your actions
+- Be transparent about limitations
+
+## Key Responsibilities
+1. Manage scheduled tasks and triggers
+2. Maintain organized memory (notes, summaries)
+3. Execute tools to help the user
+4. Learn from conversations to improve service
+5. Suggest optimizations and automations
+
+## Available Tools
+You have access to various tools for:
+- Creating notes and managing memory
+- Scheduling triggers for future actions
+- Sending notifications to the user
+- Managing tasks with priorities and due dates
+- Analyzing patterns in user behavior
+
+Use these tools proactively to assist the user effectively.
+"#;
+        std::fs::write(&base_path, base_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, base_path.display());
+
+        // Chat context prompt
+        let chat_path = prompts_dir.join("chat.md");
+        let chat_content = r#"# Chat Context
+
+You are in an interactive chat session with the user.
+
+## Behavior
+- Respond naturally and conversationally
+- Keep responses focused and relevant
+- Use tools when appropriate (notifications, notes, tasks)
+- Reference relevant memory when helpful
+
+## Response Style
+- Be helpful and attentive
+- Clarify ambiguous requests
+- Provide actionable suggestions
+"#;
+        std::fs::write(&chat_path, chat_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, chat_path.display());
+
+        // Background prompt
+        let background_path = prompts_dir.join("background.md");
+        let background_content = r#"# Background Task Context
+
+You are executing a scheduled background task.
+
+## Behavior
+- Complete the task efficiently
+- Use tools to accomplish goals (notifications, notes)
+- Log important findings
+- Return concise summary of actions taken
+
+## Decision Making
+- Only notify user for important events
+- Create notes for information worth remembering
+- Suggest new triggers if patterns emerge
+"#;
+        std::fs::write(&background_path, background_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, background_path.display());
+
+        // Create background subdirectory
+        let background_dir = prompts_dir.join("background");
+        std::fs::create_dir_all(&background_dir)?;
+
+        // Compact prompt
+        let compact_path = background_dir.join("compact.md");
+        let compact_content = r#"# Memory Compaction Context
+
+You are compacting conversation history into a summary.
+
+## Task
+- Extract key information from conversations
+- Identify important decisions and preferences
+- Tag content appropriately
+- Be concise but preserve context
+
+## Format
+Generate a well-structured summary with:
+- Key topics discussed
+- Important decisions made
+- Action items identified
+- User preferences learned
+"#;
+        std::fs::write(&compact_path, compact_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, compact_path.display());
+
+        // Pattern analysis prompt
+        let pattern_path = background_dir.join("pattern.md");
+        let pattern_content = r#"# Pattern Recognition Context
+
+You are analyzing user behavior patterns.
+
+## Task
+- Identify recurring themes and preferences
+- Detect optimal timing for tasks
+- Recognize automation opportunities
+- Note communication preferences
+
+## Output
+Produce insights about:
+- Common workflows
+- Preferred interaction times
+- Tool usage patterns
+- Suggested optimizations
+"#;
+        std::fs::write(&pattern_path, pattern_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, pattern_path.display());
+
+        // Briefing prompt
+        let briefing_path = background_dir.join("briefing.md");
+        let briefing_content = r#"# Morning Briefing Context
+
+You are preparing a daily briefing for the user.
+
+## Task
+- Summarize yesterday's activities
+- List pending tasks by priority
+- Note upcoming events/deadlines
+- Provide relevant reminders
+
+## Style
+- Brief and scannable
+- Prioritize actionable items
+- Highlight urgent matters
+- Be encouraging and positive
+"#;
+        std::fs::write(&briefing_path, briefing_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, briefing_path.display());
+
+        // Create triggers directory and per-trigger prompts
+        let triggers_dir = prompts_dir.join("triggers");
+        std::fs::create_dir_all(&triggers_dir)?;
+
+        let daily_comp_path = triggers_dir.join("daily_compaction.md");
+        let daily_comp_content = r#"# daily_compaction trigger
+
+This trigger runs daily to compact conversations into summaries. Use compact prompt context and include relevant task summary. Ensure output is concise and focuses on key points and action items.
+"#;
+        std::fs::write(&daily_comp_path, daily_comp_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, daily_comp_path.display());
+
+        let weekly_pattern_path = triggers_dir.join("weekly_pattern.md");
+        let weekly_pattern_content = r#"# weekly_pattern trigger
+
+This trigger runs weekly to analyze user behavior and detect patterns. Focus on recurring themes, tool usage, and timing recommendations. Produce actionable suggestions.
+"#;
+        std::fs::write(&weekly_pattern_path, weekly_pattern_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, weekly_pattern_path.display());
+
+        let monthly_reflect_path = triggers_dir.join("monthly_reflection.md");
+        let monthly_reflect_content = r#"# monthly_reflection trigger
+
+This trigger runs monthly for self-reflection and long-term summary. Aggregate monthly progress, highlight trends, and suggest strategic improvements.
+"#;
+        std::fs::write(&monthly_reflect_path, monthly_reflect_content)?;
+        println!("{} Created: {}", nerd_font::categories::Fa::Check, monthly_reflect_path.display());
+
+        println!("\n");
+        println!("All example prompts and trigger prompts created successfully!");
+        println!("Edit these files to customize Ritsu's behavior.");
+
         Ok(())
     }
 

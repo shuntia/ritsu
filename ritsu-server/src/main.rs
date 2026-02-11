@@ -1,7 +1,7 @@
 //! Ritsu Server - Self-triggering AI agent daemon
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -36,13 +36,31 @@ struct Cli {
     #[arg(short, long, value_name = "PATH")]
     database: Option<String>,
 
-    /// Write example configuration file and exit
+    /// Write example configuration file and exit (legacy)
     #[arg(long)]
     write_example_config: bool,
 
-    /// Write example system prompts and exit
+    /// Write example system prompts and exit (legacy)
     #[arg(long)]
     write_example_prompts: bool,
+
+    /// Optional subcommand mode (e.g., init)
+    #[command(subcommand)]
+    command: Option<ServerCommand>,
+}
+
+#[derive(Subcommand)]
+enum ServerCommand {
+    /// Initialize example files (config and prompts)
+    Init {
+        /// Write example configuration file
+        #[arg(short = 'c', long)]
+        config: bool,
+
+        /// Write example prompts
+        #[arg(short = 'p', long)]
+        prompts: bool,
+    },
 }
 
 #[tokio::main]
@@ -58,14 +76,32 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Handle --write-example-config
+    // Handle subcommands (e.g. init)
+    if let Some(ServerCommand::Init { config: init_cfg, prompts: init_prompts }) = &cli.command {
+        let config_path = config::Config::config_file_path();
+        // If no flags provided, write both
+        if !*init_cfg && !*init_prompts {
+            config::Config::write_example(&config_path)?;
+            write_example_prompts()?;
+        } else {
+            if *init_cfg {
+                config::Config::write_example(&config_path)?;
+            }
+            if *init_prompts {
+                write_example_prompts()?;
+            }
+        }
+        return Ok(());
+    }
+
+    // Handle --write-example-config (legacy)
     if cli.write_example_config {
         let config_path = config::Config::config_file_path();
         config::Config::write_example(&config_path)?;
         return Ok(());
     }
 
-    // Handle --write-example-prompts
+    // Handle --write-example-prompts (legacy)
     if cli.write_example_prompts {
         write_example_prompts()?;
         return Ok(());

@@ -35,6 +35,8 @@ iced_widget.workspace = true
 notify-rust.workspace = true
 "lucide-icons".workspace = true
 nerd_font = { workspace = true, features = ["iced"] }
+ratatui = "0.20"
+crossterm = "0.27"
 
 [features]
 default = []

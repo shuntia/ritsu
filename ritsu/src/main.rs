@@ -47,6 +47,9 @@ enum Commands {
     /// Open chat GUI interface
     Chat,
 
+    /// Run TUI config editor for system prompts (uses ratatui)
+    Config,
+
     /// Attach to server and client logs
     Attach,
 
@@ -75,7 +78,7 @@ enum Commands {
     /// Export conversation history
     Export {
         /// Session ID to export (defaults to current session)
-        #[arg(long)]
+        #[arg(short, long)]
         session: Option<String>,
 
         /// Output file path
@@ -90,26 +93,34 @@ enum Commands {
     /// Query memory
     Memory {
         /// Number of days to query
-        #[arg(long, default_value = "7")]
+        #[arg(short, long, default_value = "7")]
         days: u32,
     },
 
     /// Query notes
     Notes {
         /// Filter by tag
-        #[arg(long)]
+        #[arg(short, long)]
         tag: Option<String>,
     },
 
     /// Clear all memory (for testing)
     ClearMemory {
         /// Skip confirmation prompt
-        #[arg(long)]
+        #[arg(short = 'y', long)]
         noconfirm: bool,
     },
 
-    /// Write example client configuration file
-    WriteExampleConfig,
+    /// Initialize example files (config and prompts)
+    Init {
+        /// Write example client configuration file
+        #[arg(short = 'c', long)]
+        config: bool,
+
+        /// Write example prompts
+        #[arg(short = 'p', long)]
+        prompts: bool,
+    },
 
     /// Developer tools and inspection commands (hidden)
     #[command(subcommand, hide = true)]
@@ -144,14 +155,14 @@ enum HaltCommands {
     /// Halt the server daemon (forceful shutdown)
     Server {
         /// Skip confirmation prompt
-        #[arg(long)]
+        #[arg(short = 'y', long)]
         noconfirm: bool,
     },
 
     /// Halt client processes (GUI windows)
     Client {
         /// Skip confirmation prompt
-        #[arg(long)]
+        #[arg(short = 'y', long)]
         noconfirm: bool,
     },
 }
@@ -167,7 +178,7 @@ enum TriggerCommands {
         name: String,
 
         /// Cron-like schedule
-        #[arg(long)]
+        #[arg(short, long)]
         time: String,
     },
 
@@ -189,7 +200,7 @@ enum TaskCommands {
     /// List tasks
     List {
         /// Filter by status
-        #[arg(long)]
+        #[arg(short, long)]
         status: Option<String>,
     },
 
@@ -199,11 +210,11 @@ enum TaskCommands {
         title: String,
 
         /// Priority (low, medium, high, urgent)
-        #[arg(long, default_value = "medium")]
+        #[arg(short, long, default_value = "medium")]
         priority: String,
 
         /// Due date (YYYY-MM-DD)
-        #[arg(long)]
+        #[arg(short = 'd', long)]
         due: Option<String>,
     },
 
@@ -213,7 +224,7 @@ enum TaskCommands {
         id: i64,
 
         /// New status
-        #[arg(long)]
+        #[arg(short, long)]
         status: String,
     },
 }
@@ -292,20 +303,20 @@ enum DevCommands {
     /// Force memory compaction (dangerous)
     ForceCompact {
         /// Skip confirmation
-        #[arg(long)]
+        #[arg(short = 'y', long)]
         noconfirm: bool,
     },
 
     /// Reset the server database (destructive)
     DbReset {
         /// Skip confirmation prompt
-        #[arg(long)]
+        #[arg(short = 'y', long)]
         noconfirm: bool,
     },
     /// Rebuild database indexes
     ReindexDb {
         /// Skip confirmation
-        #[arg(long)]
+        #[arg(short = 'y', long)]
         noconfirm: bool,
     },
 }
@@ -322,9 +333,20 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::WriteExampleConfig => {
+        Commands::Init { config, prompts } => {
             let config_path = config::ClientConfig::config_file_path();
-            config::ClientConfig::write_example(&config_path)?;
+            // If no flags provided, write both config and prompts
+            if !config && !prompts {
+                config::ClientConfig::write_example_config(&config_path)?;
+                config::ClientConfig::write_example_prompts()?;
+            } else {
+                if config {
+                    config::ClientConfig::write_example_config(&config_path)?;
+                }
+                if prompts {
+                    config::ClientConfig::write_example_prompts()?;
+                }
+            }
             Ok(())
         }
         Commands::Chat => {
@@ -356,6 +378,7 @@ fn main() -> Result<()> {
                 } => commands::send::send_message(&message, new_session).await?,
                 Commands::Trigger(cmd) => commands::trigger::handle(cmd).await?,
                 Commands::Task(cmd) => commands::task::handle(cmd).await?,
+                Commands::Config => commands::config::handle().await?,
                 Commands::Prompt(cmd) => commands::prompt::handle(cmd).await?,
                 Commands::Export {
                     session,
@@ -372,7 +395,7 @@ fn main() -> Result<()> {
                 }
                 Commands::Dev(cmd) => commands::dev::handle(cmd).await?,
                 Commands::Attach => commands::attach::attach().await?,
-                Commands::Chat | Commands::WriteExampleConfig => {}
+                Commands::Chat | Commands::Init { config: _, prompts: _ } => {}
             }
             Ok(())
         }),

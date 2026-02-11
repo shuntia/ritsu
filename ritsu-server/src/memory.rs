@@ -373,14 +373,16 @@ impl MemoryManager {
 
         // Insert monthly summary
         let year_month_str = year_month.to_string();
-        self.conn.call(move |conn| -> rusqlite::Result<()> {
-            conn.execute(
+        self.conn
+            .call(move |conn| -> rusqlite::Result<()> {
+                conn.execute(
                 "INSERT OR REPLACE INTO monthly_summaries (year_month, summary, tags, days_included)
                  VALUES (?1, ?2, ?3, ?4)",
                 (&year_month_str, &summary, &tags, &days_count),
             )?;
-            Ok(())
-        }).await?;
+                Ok(())
+            })
+            .await?;
 
         info!("Compacted {days_count} daily summaries into monthly summary for {year_month}");
         Ok(())
