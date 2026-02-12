@@ -155,7 +155,6 @@ impl ToolRegistry {
     }
 
     /// Get tool information for AI context
-
     pub async fn get_tools_for_ai(&self) -> Vec<ToolInfo> {
         let tools = self.tools.read().await;
         tools
