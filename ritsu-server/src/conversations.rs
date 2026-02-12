@@ -205,26 +205,6 @@ impl ConversationManager {
             .map_err(Into::into)
     }
 
-    /// Clean up old conversations (older than 30 days)
-    pub async fn cleanup_old_sessions(&self, days: i64) -> Result<usize> {
-        self.db
-            .call(move |conn| -> rusqlite::Result<usize> {
-                let deleted = conn.execute(
-                    "DELETE FROM conversations
-                 WHERE last_activity < datetime('now', ? || ' days')",
-                    [format!("-{days}")],
-                )?;
-
-                if deleted > 0 {
-                    info!("Cleaned up {} old conversation sessions", deleted);
-                }
-
-                Ok(deleted)
-            })
-            .await
-            .map_err(Into::into)
-    }
-
     /// Generate a title for a session based on first few turns
     pub async fn generate_title(
         &self,
