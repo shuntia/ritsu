@@ -34,7 +34,6 @@ pub async fn register_pre_hook(hook: PrePromptHook) {
 }
 
 /// Clear registered hooks (useful for tests)
-
 pub async fn clear_pre_hooks() {
     let h = hooks();
     let mut w = h.write().await;
