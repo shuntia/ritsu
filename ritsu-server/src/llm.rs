@@ -42,14 +42,6 @@ pub struct LlmClient {
     timeout_seconds: u64,
 }
 
-fn select_backend(config: &LlmConfig) -> Option<&LlmBackend> {
-    config
-        .backends
-        .iter()
-        .find(|b| b.name == config.default_backend)
-        .or_else(|| config.backends.first())
-}
-
 impl LlmClient {
     pub async fn new(
         config: &LlmConfig,
