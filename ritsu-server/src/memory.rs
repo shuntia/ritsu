@@ -130,7 +130,7 @@ impl MemoryManager {
             .await?;
 
         if rows == 0 {
-            anyhow::bail!("Note not found: {}", id_owned);
+            anyhow::bail!("Note not found: {id_owned}");
         }
 
         Ok(())

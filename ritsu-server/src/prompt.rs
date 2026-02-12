@@ -151,11 +151,10 @@ impl PromptBuilder {
             user_text.push_str(uc);
         }
 
-        let mut messages = Vec::new();
-        messages.push(LlmMessage {
+        let messages = vec![LlmMessage {
             role: "user".to_string(),
             content: user_text,
-        });
+        }];
 
         Ok((system_prompt, messages))
     }
