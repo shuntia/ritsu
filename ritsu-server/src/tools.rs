@@ -59,10 +59,6 @@ impl ToolRegistry {
         info!("Registered tool: {name}");
     }
 
-    pub async fn tool_count(&self) -> usize {
-        self.tools.read().await.len()
-    }
-
     pub async fn execute(&self, name: &str, args: HashMap<String, String>) -> Result<ToolResult> {
         let start = std::time::Instant::now();
         // Summarize args: keys and lengths to avoid logging sensitive values
@@ -147,11 +143,6 @@ impl ToolRegistry {
             Ok(())
         }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
         Ok(())
-    }
-
-    pub async fn list_tools(&self) -> Vec<String> {
-        let tools = self.tools.read().await;
-        tools.keys().cloned().collect()
     }
 
     /// Get tool information for AI context
