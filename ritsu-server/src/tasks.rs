@@ -162,11 +162,11 @@ impl TaskManager {
             // Use parameterized queries to avoid SQL injection and to let the DB engine optimize.
             let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
 
-            if let Some(status) = &status_filter {
+            if status_filter.is_some() {
                 query.push_str(" AND status = ?");
             }
 
-            if let Some(priority) = &priority_filter {
+            if priority_filter.is_some() {
                 query.push_str(" AND priority = ?");
             }
 
