@@ -42,12 +42,6 @@ impl ServerState {
     }
 
     /// Returns true if any GUI clients are currently connected to the daemon
-    pub async fn register_client(&self, sender: mpsc::Sender<ServerPush>) {
-        let mut clients = self.clients.write().await;
-        clients.push(sender);
-    }
-
-    /// Returns true if any GUI clients are currently connected to the daemon
     pub async fn has_gui_clients(&self) -> bool {
         let clients = self.clients.read().await;
         !clients.is_empty()
