@@ -161,7 +161,6 @@ impl TaskManager {
         self.conn.call(move |conn| -> rusqlite::Result<Vec<Task>> {
             // Use parameterized queries to avoid SQL injection and to let the DB engine optimize.
             let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
-            let mut params: Vec<rusqlite::types::ToSqlOutput> = Vec::new();
 
             if let Some(status) = &status_filter {
                 query.push_str(" AND status = ?");
