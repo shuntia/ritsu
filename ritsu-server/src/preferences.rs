@@ -63,7 +63,6 @@ impl PreferencesManager {
     }
 
     /// Get a specific preference
-
     pub async fn get_preference(&self, category: &str, key: &str) -> Result<Option<Preference>> {
         let category = category.to_string();
         let key = key.to_string();
@@ -97,7 +96,6 @@ impl PreferencesManager {
     }
 
     /// Get all preferences in a category
-
     pub async fn get_category(&self, category: &str) -> Result<Vec<Preference>> {
         let category = category.to_string();
 
@@ -129,7 +127,6 @@ impl PreferencesManager {
     }
 
     /// Get all preferences as a map
-
     pub async fn get_all(&self) -> Result<HashMap<String, HashMap<String, String>>> {
         self.db
             .call(
@@ -161,7 +158,6 @@ impl PreferencesManager {
     }
 
     /// Format preferences for system prompt
-
     pub async fn format_for_prompt(&self) -> Result<String> {
         let prefs = self.get_all().await?;
 
@@ -182,7 +178,6 @@ impl PreferencesManager {
     }
 
     /// Remove a preference
-
     pub async fn remove_preference(&self, category: &str, key: &str) -> Result<bool> {
         let category = category.to_string();
         let key = key.to_string();
@@ -200,7 +195,6 @@ impl PreferencesManager {
     }
 
     /// Clear all preferences in a category
-
     pub async fn clear_category(&self, category: &str) -> Result<usize> {
         let category = category.to_string();
         let category_for_log = category.clone();
