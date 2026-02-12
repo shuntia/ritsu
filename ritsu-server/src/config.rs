@@ -293,25 +293,6 @@ llm_request_seconds = {llm_request}
     }
 }
 
-impl TimeoutConfig {
-    #[must_use]
-
-    pub const fn user_response(&self) -> Duration {
-        Duration::from_secs(self.user_response_seconds)
-    }
-
-    #[must_use]
-
-    pub const fn http_request(&self) -> Duration {
-        Duration::from_secs(self.http_request_seconds)
-    }
-
-    #[must_use]
-
-    pub const fn llm_request(&self) -> Duration {
-        Duration::from_secs(self.llm_request_seconds)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
