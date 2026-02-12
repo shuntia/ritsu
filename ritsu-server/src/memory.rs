@@ -378,28 +378,6 @@ impl MemoryManager {
         Ok(())
     }
 
-    /// Rotate old conversations (delete conversations older than rotation_days)
-    pub async fn rotate_old_conversations(&self, rotation_days: u32) -> Result<()> {
-        let cutoff_date = chrono::Utc::now()
-            .date_naive()
-            .checked_sub_days(chrono::Days::new(u64::from(rotation_days)))
-            .ok_or_else(|| anyhow::anyhow!("Failed to calculate cutoff date"))?;
-
-        let cutoff_str = cutoff_date.to_string();
-        let deleted = self
-            .conn
-            .call(move |conn| {
-                conn.execute(
-                    "DELETE FROM daily_conversations WHERE date < ?1",
-                    [&cutoff_str],
-                )
-            })
-            .await?;
-
-        info!("Rotated {deleted} old conversations (older than {cutoff_date})");
-        Ok(())
-    }
-
     /// Store a system prompt (base or AI-generated)
     pub async fn store_system_prompt(&self, prompt_type: &str, content: &str) -> Result<()> {
         let prompt_type = prompt_type.to_string();
@@ -802,93 +780,6 @@ impl MemoryManager {
             let results = rows.filter_map(Result::ok).collect();
             Ok(results)
         }).await.map_err(Into::into)
-    }
-
-    /// Get tool usage statistics
-    pub async fn get_tool_usage_stats(&self, days: i64) -> Result<Vec<(String, i64, i64, f64)>> {
-        self.conn
-            .call(
-                move |conn| -> rusqlite::Result<Vec<(String, i64, i64, f64)>> {
-                    let mut stmt = conn.prepare(
-                        "SELECT tool_name,
-                        COUNT(*) as total_calls,
-                        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_calls,
-                        AVG(execution_time_ms) as avg_execution_time
-             FROM tool_usage
-             WHERE datetime(timestamp) >= datetime('now', ? || ' days')
-             GROUP BY tool_name
-                 ORDER BY total_calls DESC",
-                    )?;
-
-                    let days_param = format!("-{days}");
-                    let rows = stmt.query_map([&days_param], |row| {
-                        Ok((
-                            row.get(0)?, // tool_name
-                            row.get(1)?, // total_calls
-                            row.get(2)?, // successful_calls
-                            row.get(3)?, // avg_execution_time
-                        ))
-                    })?;
-
-                    let results = rows.filter_map(Result::ok).collect();
-                    Ok(results)
-                },
-            )
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Get recent tool usage
-    pub async fn get_recent_tool_usage(&self, limit: i64) -> Result<Vec<ToolUsageRecord>> {
-        self.conn
-            .call(move |conn| -> rusqlite::Result<Vec<ToolUsageRecord>> {
-                let mut stmt = conn.prepare(
-                    "SELECT tool_name, arguments, success, result, timestamp
-                 FROM tool_usage
-                 ORDER BY timestamp DESC
-                 LIMIT ?1",
-                )?;
-
-                let rows = stmt.query_map([&limit], |row| {
-                    Ok((
-                        row.get(0)?, // tool_name
-                        row.get(1)?, // arguments
-                        row.get(2)?, // success
-                        row.get(3)?, // result
-                        row.get(4)?, // timestamp
-                    ))
-                })?;
-
-                let results = rows.filter_map(Result::ok).collect();
-                Ok(results)
-            })
-            .await
-            .map_err(Into::into)
-    }
-
-    /// Get tool effectiveness summary
-    pub async fn get_tool_effectiveness_summary(&self, days: i64) -> Result<String> {
-        let stats = self.get_tool_usage_stats(days).await?;
-
-        if stats.is_empty() {
-            return Ok(format!("No tool usage in the past {days} days"));
-        }
-
-        let mut summary = format!("Tool Usage Summary (Past {days} Days):\n\n");
-
-        for (tool_name, total, successful, avg_time) in stats {
-            let success_rate = if total > 0 {
-                #[allow(clippy::cast_precision_loss)]
-                let rate = (successful as f64 / total as f64) * 100.0;
-                rate
-            } else {
-                0.0
-            };
-
-            summary = format!("{summary}{} {tool_name}: {total} calls, {success_rate:.1}% success, {avg_time:.0}ms avg\n", nerd_font::categories::Fa::ChartBar);
-        }
-
-        Ok(summary)
     }
 
     /// Clear all memory tables (for testing)
