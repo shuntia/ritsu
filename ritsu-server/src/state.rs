@@ -35,19 +35,13 @@ impl ServerState {
         *last = Utc::now();
     }
 
-    /// Get seconds since last activity
-    pub async fn seconds_since_activity(&self) -> i64 {
-        let last = self.last_activity.read().await;
-        (Utc::now() - *last).num_seconds()
-    }
-
-    /// Check if inactive for given duration
-
-    pub async fn is_inactive_for(&self, seconds: u64) -> bool {
-        self.seconds_since_activity().await >= seconds as i64
-    }
-
     /// Register a new client for push notifications
+    pub async fn register_client(&self, sender: mpsc::Sender<ServerPush>) {
+        let mut clients = self.clients.write().await;
+        clients.push(sender);
+    }
+
+    /// Returns true if any GUI clients are currently connected to the daemon
     pub async fn register_client(&self, sender: mpsc::Sender<ServerPush>) {
         let mut clients = self.clients.write().await;
         clients.push(sender);
@@ -163,17 +157,13 @@ impl ServerState {
                 // Read response with timeout
                 let read_timeout = std::time::Duration::from_secs(5);
                 let mut len_buf = [0u8; 4];
-                if let Err(_) =
-                    tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await
-                {
+                if tokio::time::timeout(read_timeout, stream.read_exact(&mut len_buf)).await.is_err() {
                     warn!("Timeout reading response from client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to read response"));
                 }
                 let len = u32::from_be_bytes(len_buf) as usize;
                 let mut buf = vec![0u8; len];
-                if let Err(_) =
-                    tokio::time::timeout(read_timeout, stream.read_exact(&mut buf)).await
-                {
+                if tokio::time::timeout(read_timeout, stream.read_exact(&mut buf)).await.is_err() {
                     warn!("Timeout reading response from client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to read response"));
                 }
@@ -272,23 +262,32 @@ mod tests {
     async fn test_activity_tracking() {
         let state = ServerState::new();
 
-        // Initial state should have 0 seconds of inactivity
-        let initial = state.seconds_since_activity().await;
-        assert!(initial < 1);
+        // Initial state should have ~0 seconds of inactivity
+        {
+            let last = state.last_activity.read().await;
+            let initial = (Utc::now() - *last).num_seconds();
+            assert!(initial < 1);
+        }
 
         // Wait a bit
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Should have some inactivity now
-        let after_wait = state.seconds_since_activity().await;
-        assert!(after_wait >= 0);
+        {
+            let last = state.last_activity.read().await;
+            let after_wait = (Utc::now() - *last).num_seconds();
+            assert!(after_wait >= 0);
+        }
 
         // Mark activity
         state.mark_activity().await;
 
         // Should be fresh again
-        let after_mark = state.seconds_since_activity().await;
-        assert!(after_mark < 1);
+        {
+            let last = state.last_activity.read().await;
+            let after_mark = (Utc::now() - *last).num_seconds();
+            assert!(after_mark < 1);
+        }
     }
 
     #[tokio::test]
@@ -296,12 +295,20 @@ mod tests {
         let state = ServerState::new();
 
         // Should not be inactive for 10 seconds yet
-        assert!(!state.is_inactive_for(10).await);
+        {
+            let last = state.last_activity.read().await;
+            let inactive = (Utc::now() - *last).num_seconds() >= 10;
+            assert!(!inactive);
+        }
 
         // Mark activity
         state.mark_activity().await;
 
         // Should still not be inactive for any meaningful duration
-        assert!(!state.is_inactive_for(1).await);
+        {
+            let last = state.last_activity.read().await;
+            let inactive = (Utc::now() - *last).num_seconds() >= 1;
+            assert!(!inactive);
+        }
     }
 }
