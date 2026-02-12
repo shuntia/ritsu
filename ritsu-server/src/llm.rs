@@ -617,7 +617,7 @@ impl LlmClient {
                     };
 
                     let mut args: HashMap<String, String> = HashMap::new();
-                    for (k, v) in args_map.into_iter() {
+                    for (k, v) in args_map {
                         let val_str = match v {
                             serde_json::Value::String(s) => s,
                             other => other.to_string(),
@@ -647,7 +647,7 @@ impl LlmClient {
 
                 // Spawn each tool execution into its own task, limited by the semaphore
                 let mut handles = Vec::new();
-                for call in collected_calls.into_iter() {
+                for call in collected_calls {
                     let permit_sem = semaphore.clone();
                     let tool_registry = tool_registry.clone();
                     let tx_clone = tx.clone();
@@ -661,7 +661,7 @@ impl LlmClient {
                             Ok(permit) => permit,
                             Err(e) => {
                                 tracing::warn!(tool=%call_name, "Semaphore closed before executing tool: {:?}", e);
-                                let msg = format!("\n\n[lucide:wrench] Tool '{}' execution failed: internal semaphore closed\n", call_name);
+                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' execution failed: internal semaphore closed\n");
                                 let _ = tx_clone.send(Ok(msg)).await;
                                 return;
                             }
@@ -688,31 +688,21 @@ impl LlmClient {
                                 info!(tool=%call_name, duration_ms = %duration.as_millis(), success = res.success, "Tool execution completed");
                                 debug!(tool=%call_name, result_len = %result_text.len(), "Tool result length");
 
-                                let msg = format!(
-                                    "\n\n[lucide:wrench] Tool '{}' result:\n{}\n",
-                                    call_name, result_text
-                                );
+                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' result:\n{result_text}\n");
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Ok(Err(e)) => {
                                 let duration = start.elapsed();
                                 warn!(tool=%call_name, duration_ms = %duration.as_millis(), error=%e, "Tool execution failed");
 
-                                let msg = format!(
-                                    "\n\n[lucide:wrench] Tool '{}' execution failed: {}\n",
-                                    call_name, e
-                                );
+                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' execution failed: {e}\n");
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                             Err(_) => {
                                 let duration = start.elapsed();
                                 warn!(tool=%call_name, duration_ms = %duration.as_millis(), "Tool execution timed out after {}s", tool_timeout.as_secs());
 
-                                let msg = format!(
-                                    "\n\n[lucide:wrench] Tool '{}' execution timed out after {}s\n",
-                                    call_name,
-                                    tool_timeout.as_secs()
-                                );
+                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' execution timed out after {secs}s\n", call_name = call_name, secs = tool_timeout.as_secs());
                                 let _ = tx_clone.send(Ok(msg)).await;
                             }
                         }
