@@ -25,7 +25,7 @@ pub struct Tool {
 
 /// Tool parameter definition
 #[derive(Clone)]
-#[allow(dead_code)]
+
 pub struct ToolParameter {
     pub name: String,
     pub description: String,
@@ -59,12 +59,10 @@ impl ToolRegistry {
         info!("Registered tool: {name}");
     }
 
-    #[allow(dead_code)]
     pub async fn tool_count(&self) -> usize {
         self.tools.read().await.len()
     }
 
-    #[allow(dead_code)]
     pub async fn execute(&self, name: &str, args: HashMap<String, String>) -> Result<ToolResult> {
         let start = std::time::Instant::now();
         // Summarize args: keys and lengths to avoid logging sensitive values
@@ -151,14 +149,13 @@ impl ToolRegistry {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn list_tools(&self) -> Vec<String> {
         let tools = self.tools.read().await;
         tools.keys().cloned().collect()
     }
 
     /// Get tool information for AI context
-    #[allow(dead_code)]
+
     pub async fn get_tools_for_ai(&self) -> Vec<ToolInfo> {
         let tools = self.tools.read().await;
         tools
@@ -184,7 +181,7 @@ impl ToolRegistry {
 
 /// Tool information for AI (without the handler)
 #[derive(Clone)]
-#[allow(dead_code)]
+
 pub struct ToolInfo {
     pub name: String,
     pub description: String,
@@ -193,7 +190,7 @@ pub struct ToolInfo {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
+
 pub struct ToolParameterInfo {
     pub name: String,
     pub description: String,
@@ -407,9 +404,8 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                         Some(i) if !i.trim().is_empty() => i.clone(),
                         _ => return ToolResult::error("Missing required parameter: id".to_string()),
                     };
-                    let id = match id_str.parse::<i64>() {
-                        Ok(v) => v,
-                        Err(_) => return ToolResult::error(format!("Invalid id: {}", id_str)),
+                    let Ok(id) = id_str.parse::<i64>() else {
+                        return ToolResult::error(format!("Invalid id: {}", id_str));
                     };
 
                     let content_opt = args.get("content").cloned();
@@ -436,7 +432,7 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
     pub fn delete_note(memory: Arc<super::super::memory::MemoryManager>) -> Tool {
         Tool {
             name: "delete_note".to_string(),
-            description: r#"Delete a note by ID."#.to_string(),
+            description: r"Delete a note by ID.".to_string(),
             tags: vec!["memory".to_string(), "note".to_string()],
             parameters: vec![ToolParameter {
                 name: "id".to_string(),
@@ -674,7 +670,6 @@ Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time",
                     param_type: "string".to_string(),
                 },
 
-
                 ToolParameter {
                     name: "urgency".to_string(),
                     description: "Notification urgency: 'low', 'normal', or 'critical'".to_string(),
@@ -775,7 +770,7 @@ Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time",
     pub fn create_one_shot(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "create_one_shot".to_string(),
-            description: r#"Create a one-shot trigger at an exact ISO8601 datetime (e.g. 2026-02-10T08:30:00Z). The tool validates that the generated cron expression will fire exactly at the requested minute; otherwise it fails. The internal (canonical) cron format used for one-shot triggers includes a seconds field: 's m H D M *' (e.g. '0 30 08 10 2 *').
+            description: r"Create a one-shot trigger at an exact ISO8601 datetime (e.g. 2026-02-10T08:30:00Z). The tool validates that the generated cron expression will fire exactly at the requested minute; otherwise it fails. The internal (canonical) cron format used for one-shot triggers includes a seconds field: 's m H D M *' (e.g. '0 30 08 10 2 *').
 
 Parameters:
 - name (string, required): Unique trigger name.
@@ -785,7 +780,7 @@ Parameters:
 
 Behavior:
 Parses the provided datetime, builds a cron expression including day and month, validates the cron's next occurrence matches the requested minute, and inserts a one-shot cron trigger into the DB.
-"#.to_string(),
+".to_string(),
             tags: vec!["trigger".to_string(), "one_shot".to_string()],
             parameters: vec![
                 ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() },
@@ -823,7 +818,7 @@ Parses the provided datetime, builds a cron expression including day and month, 
     pub fn edit_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "edit_trigger".to_string(),
-            description: r#"Edit an existing trigger's properties.
+            description: r"Edit an existing trigger's properties.
 
 Parameters:
 - name (string, required): Current trigger name.
@@ -839,7 +834,7 @@ Behavior:
 Applies provided updates to the trigger and reloads triggers.
 
 Return:
-ToolResult::success or ToolResult::error."#
+ToolResult::success or ToolResult::error."
                 .to_string(),
             tags: vec!["trigger".to_string(), "automation".to_string()],
             parameters: vec![
@@ -926,7 +921,7 @@ ToolResult::success or ToolResult::error."#
     pub fn list_triggers(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "list_triggers".to_string(),
-            description: r#"List all registered triggers with basic metadata."#.to_string(),
+            description: r"List all registered triggers with basic metadata.".to_string(),
             tags: vec!["trigger".to_string(), "automation".to_string()],
             parameters: vec![],
             handler: Arc::new(move |_args: HashMap<String, String>| {
@@ -955,7 +950,7 @@ ToolResult::success or ToolResult::error."#
     pub fn delete_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "delete_trigger".to_string(),
-            description: r#"Delete a trigger by name."#.to_string(),
+            description: r"Delete a trigger by name.".to_string(),
             tags: vec!["trigger".to_string()],
             parameters: vec![ToolParameter {
                 name: "name".to_string(),
@@ -989,7 +984,7 @@ ToolResult::success or ToolResult::error."#
     pub fn cancel_cron(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "cancel_cron".to_string(),
-            description: r#"Cancel a specific scheduled occurrence of a cron trigger.
+            description: r"Cancel a specific scheduled occurrence of a cron trigger.
 
 Parameters:
 - name (string, required): Trigger name.
@@ -997,7 +992,7 @@ Parameters:
 
 Behavior:
 Validates that the trigger exists and that its cron expression would fire at the provided minute (the occurrence is matched to minute precision), checks that the occurrence isn't already cancelled, and stores a cancellation in the cron_exceptions table. Note: cron expressions are interpreted by the parser; canonical stored one-shot cron strings include a leading seconds field ('s m H D M *').
-"#.to_string(),
+".to_string(),
             tags: vec!["trigger".to_string(), "cron".to_string()],
             parameters: vec![
                 ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() },
@@ -1027,7 +1022,7 @@ Validates that the trigger exists and that its cron expression would fire at the
     pub fn enable_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "enable_trigger".to_string(),
-            description: r#"Enable a trigger by name."#.to_string(),
+            description: r"Enable a trigger by name.".to_string(),
             tags: vec!["trigger".to_string()],
             parameters: vec![ToolParameter {
                 name: "name".to_string(),
@@ -1063,7 +1058,7 @@ Validates that the trigger exists and that its cron expression would fire at the
     pub fn disable_trigger(trigger_registry: Arc<super::super::trigger::TriggerRegistry>) -> Tool {
         Tool {
             name: "disable_trigger".to_string(),
-            description: r#"Disable a trigger by name."#.to_string(),
+            description: r"Disable a trigger by name.".to_string(),
             tags: vec!["trigger".to_string()],
             parameters: vec![ToolParameter {
                 name: "name".to_string(),
@@ -1196,7 +1191,7 @@ Example args: { "message": "Time to review PRs", "session_id": "abcd" }"#.to_str
                     } else {
                         match conv.get_active_sessions().await {
                             Ok(sessions) if !sessions.is_empty() => sessions[0].session_id.clone(),
-                            _ => format!("auto-{}", chrono::Utc::now().timestamp_nanos()),
+                            _ => format!("auto-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
                         }
                     };
 
@@ -1240,14 +1235,14 @@ Example args: { "message": "Time to review PRs", "session_id": "abcd" }"#.to_str
     ) -> Tool {
         Tool {
             name: "set_title".to_string(),
-            description: r#"Set the title of a conversation session.
+            description: r"Set the title of a conversation session.
 Parameters:
 - session_id (string, required): Session ID.
 - title (string, required): New title.
 Behavior:
 Updates conversations.title via ConversationManager.set_title(session_id, title).
 Return:
-ToolResult::success on success or ToolResult::error on failure."#
+ToolResult::success on success or ToolResult::error on failure."
                 .to_string(),
             tags: vec!["conversation".to_string(), "meta".to_string()],
             parameters: vec![
@@ -1570,7 +1565,7 @@ Example args: { "status": "pending" }"#.to_string(),
     pub fn delete_task(task_manager: Arc<super::super::tasks::TaskManager>) -> Tool {
         Tool {
             name: "delete_task".to_string(),
-            description: r#"Delete a task by ID via TaskManager."#.to_string(),
+            description: r"Delete a task by ID via TaskManager.".to_string(),
             tags: vec!["task".to_string()],
             parameters: vec![ToolParameter {
                 name: "id".to_string(),
@@ -1701,7 +1696,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
             ],
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
-                let config = config.clone();
+                let _config = config.clone();
                 Box::pin(async move {
                     // Validate params
                     let old = match args.get("old") {
@@ -1718,7 +1713,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                     let mut require_user_approval = true;
                     let mut max_prompt_length: usize = 800;
                     let mut audit_log_path: Option<String> = None;
-                    let mut allow_background_updates = false;
+                    let mut _allow_background_updates = false;
 
                     if let Ok(cfg_contents) = crate::database::read_file_async(crate::config::Config::config_file_path()).await {
                         if let Ok(cfg_val) = toml::from_str::<toml::Value>(&cfg_contents) {
@@ -1727,7 +1722,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                                     if let Some(b) = usp.get("require_user_approval").and_then(|v| v.as_bool()) { require_user_approval = b; }
                                     if let Some(i) = usp.get("max_prompt_length").and_then(|v| v.as_integer()) { max_prompt_length = i as usize; }
                                     if let Some(s) = usp.get("audit_log").and_then(|v| v.as_str()) { audit_log_path = Some(s.to_string()); }
-                                    if let Some(b) = usp.get("allow_background_updates").and_then(|v| v.as_bool()) { allow_background_updates = b; }
+                                    if let Some(b) = usp.get("allow_background_updates").and_then(|v| v.as_bool()) { _allow_background_updates = b; }
                                 }
                             }
                         }
@@ -1987,13 +1982,11 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
                             if target_path.starts_with(prefix) {
                                 permitted = true;
                                 break;
-                            } else {
-                                continue;
                             }
-                        } else {
-                            permitted = true;
-                            break;
+                            continue;
                         }
+                        permitted = true;
+                        break;
                     }
 
                     if !permitted {
@@ -2128,7 +2121,6 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
     }
 }
 
-use crate::conversations::ConversationManager;
 use crate::memory::MemoryManager;
 use crate::preferences::PreferencesManager;
 use crate::state::ServerState;

@@ -2,7 +2,7 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::future_not_send)]
 #![allow(clippy::struct_field_names)]
-#![allow(dead_code)]
+
 #![allow(clippy::match_same_arms)]
 #![allow(clippy::option_if_let_else)]
 #![allow(clippy::uninlined_format_args)]
@@ -288,7 +288,7 @@ impl TriggerRegistry {
         let naive_time = NaiveTime::from_hms_opt(dt_utc.hour(), dt_utc.minute(), 0)
             .ok_or_else(|| anyhow::anyhow!("Invalid time while creating one-shot trigger"))?;
         let naive_dt = chrono::NaiveDateTime::new(naive_date, naive_time);
-        let desired_minute = chrono::DateTime::<Utc>::from_utc(naive_dt, Utc);
+        let desired_minute = Utc.from_utc_datetime(&naive_dt);
 
         if next_occurrence != desired_minute {
             anyhow::bail!("Cron expression does not match the requested datetime (next cron occurrence: {} vs requested: {})", next_occurrence, desired_minute);
@@ -489,8 +489,6 @@ impl TriggerRegistry {
     /// Cancel a specific cron occurrence by trigger name and ISO8601 datetime.
     /// Stores the cancelled occurrence in the cron_exceptions table and notifies the trigger loop.
     pub async fn cancel_cron(&self, name: &str, occurrence_iso: &str) -> Result<()> {
-        use cron::Schedule;
-        use std::str::FromStr;
 
         // Parse occurrence datetime (accept any offset and convert to UTC)
         let parsed = chrono::DateTime::parse_from_rfc3339(occurrence_iso)
@@ -502,7 +500,7 @@ impl TriggerRegistry {
         let naive_time = NaiveTime::from_hms_opt(occ_utc.hour(), occ_utc.minute(), 0)
             .ok_or_else(|| anyhow::anyhow!("Invalid time in occurrence"))?;
         let naive_dt = chrono::NaiveDateTime::new(naive_date, naive_time);
-        let desired_minute = chrono::DateTime::<Utc>::from_utc(naive_dt, Utc);
+        let desired_minute = Utc.from_utc_datetime(&naive_dt);
 
         // Find trigger
         let triggers = self.triggers.read().await;
@@ -529,7 +527,7 @@ impl TriggerRegistry {
         let naive_time = NaiveTime::from_hms_opt(next_occ.hour(), next_occ.minute(), 0)
             .ok_or_else(|| anyhow::anyhow!("Invalid time from cron schedule"))?;
         let naive_dt = chrono::NaiveDateTime::new(naive_date, naive_time);
-        let next_min = chrono::DateTime::<Utc>::from_utc(naive_dt, Utc);
+        let next_min = Utc.from_utc_datetime(&naive_dt);
 
         if next_min != desired_minute {
             anyhow::bail!("Cron schedule does not trigger at the requested time (next cron occurrence: {} vs requested: {})", next_min, desired_minute);
@@ -785,7 +783,7 @@ pub async fn execute_idle_analysis(
             let discussions_text = recent_discussions
                 .iter()
                 .take(20)
-                .map(|(ts, role, content, user_id)| format!("[{}] {}: {}", ts, role, content))
+                .map(|(ts, role, content, _user_id)| format!("[{}] {}: {}", ts, role, content))
                 .collect::<Vec<_>>()
                 .join("\n\n");
 
@@ -1138,7 +1136,7 @@ pub async fn run_trigger_loop(
                                 if let Some(next) = schedule.after(&Utc::now()).next() {
                                     if let Some(naive_time) = NaiveTime::from_hms_opt(next.hour(), next.minute(), 0) {
                                         let naive_dt = chrono::NaiveDateTime::new(next.date_naive(), naive_time);
-                                        Some(chrono::DateTime::<Utc>::from_utc(naive_dt, Utc))
+                                        Some(Utc.from_utc_datetime(&naive_dt))
                                     } else {
                                         None
                                     }

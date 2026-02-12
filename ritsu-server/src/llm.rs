@@ -42,7 +42,7 @@ pub struct LlmClient {
     timeout_seconds: u64,
 }
 
-fn select_backend<'a>(config: &'a LlmConfig) -> Option<&'a LlmBackend> {
+fn select_backend(config: &LlmConfig) -> Option<&LlmBackend> {
     config
         .backends
         .iter()
@@ -605,7 +605,7 @@ impl LlmClient {
             // Parse raw tool calls once the stream has completed to avoid partial/fragmented JSON during streaming
             let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
             if !collected_raw_calls.is_empty() {
-                for (name, raw_args) in collected_raw_calls.into_iter() {
+                for (name, raw_args) in collected_raw_calls {
                     let args_map: HashMap<String, serde_json::Value> = match serde_json::from_str(
                         &raw_args,
                     ) {

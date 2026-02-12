@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tokio_rusqlite::rusqlite;
 use tracing::info;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preference {
     pub category: String,
@@ -64,7 +63,7 @@ impl PreferencesManager {
     }
 
     /// Get a specific preference
-    #[allow(dead_code)]
+
     pub async fn get_preference(&self, category: &str, key: &str) -> Result<Option<Preference>> {
         let category = category.to_string();
         let key = key.to_string();
@@ -98,7 +97,7 @@ impl PreferencesManager {
     }
 
     /// Get all preferences in a category
-    #[allow(dead_code)]
+
     pub async fn get_category(&self, category: &str) -> Result<Vec<Preference>> {
         let category = category.to_string();
 
@@ -130,7 +129,7 @@ impl PreferencesManager {
     }
 
     /// Get all preferences as a map
-    #[allow(dead_code)]
+
     pub async fn get_all(&self) -> Result<HashMap<String, HashMap<String, String>>> {
         self.db
             .call(
@@ -162,7 +161,7 @@ impl PreferencesManager {
     }
 
     /// Format preferences for system prompt
-    #[allow(dead_code)]
+
     pub async fn format_for_prompt(&self) -> Result<String> {
         let prefs = self.get_all().await?;
 
@@ -183,7 +182,7 @@ impl PreferencesManager {
     }
 
     /// Remove a preference
-    #[allow(dead_code)]
+
     pub async fn remove_preference(&self, category: &str, key: &str) -> Result<bool> {
         let category = category.to_string();
         let key = key.to_string();
@@ -201,7 +200,7 @@ impl PreferencesManager {
     }
 
     /// Clear all preferences in a category
-    #[allow(dead_code)]
+
     pub async fn clear_category(&self, category: &str) -> Result<usize> {
         let category = category.to_string();
         let category_for_log = category.clone();

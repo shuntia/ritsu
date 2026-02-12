@@ -42,6 +42,7 @@ impl ServerState {
     }
 
     /// Check if inactive for given duration
+
     pub async fn is_inactive_for(&self, seconds: u64) -> bool {
         self.seconds_since_activity().await >= seconds as i64
     }
@@ -145,9 +146,7 @@ impl ServerState {
 
                 let write_timeout = std::time::Duration::from_secs(5);
                 // Write with timeout to avoid blocking forever
-                if let Err(_) =
-                    tokio::time::timeout(write_timeout, stream.write_all(&len_bytes)).await
-                {
+                if tokio::time::timeout(write_timeout, stream.write_all(&len_bytes)).await.is_err() {
                     warn!("Timeout writing to client daemon (persistent)");
                     // Do not reinsert the stream; let the reconnector re-establish
                     return Err(anyhow::anyhow!("Failed to send to client daemon (timeout)"));
@@ -156,7 +155,7 @@ impl ServerState {
                     error!("Failed to send to client daemon (persistent): {}", e);
                     return Err(anyhow::anyhow!("Failed to send to client daemon"));
                 }
-                if let Err(_) = tokio::time::timeout(write_timeout, stream.flush()).await {
+                if tokio::time::timeout(write_timeout, stream.flush()).await.is_err() {
                     warn!("Timeout flushing to client daemon (persistent)");
                     return Err(anyhow::anyhow!("Failed to flush to client daemon"));
                 }

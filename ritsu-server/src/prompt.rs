@@ -34,6 +34,7 @@ pub async fn register_pre_hook(hook: PrePromptHook) {
 }
 
 /// Clear registered hooks (useful for tests)
+
 pub async fn clear_pre_hooks() {
     let h = hooks();
     let mut w = h.write().await;
@@ -115,7 +116,7 @@ impl PromptBuilder {
     /// Build background system prompt and a single user message, running pre-hooks
     pub async fn build_background(
         memory: &MemoryManager,
-        task_manager: &TaskManager,
+        _task_manager: &TaskManager,
         analysis_type: Option<&str>,
         user_content: Option<&str>,
     ) -> Result<(Option<String>, Vec<LlmMessage>)> {

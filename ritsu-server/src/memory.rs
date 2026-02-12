@@ -16,13 +16,12 @@ type ToolUsageRecord = (String, String, bool, String, String);
 
 pub struct MemoryManager {
     conn: Arc<tokio_rusqlite::Connection>,
-    #[allow(dead_code)]
+
     db_path: String,
     /// Whether to include AI-generated prompt enhancements
     include_ai_generated: bool,
 }
 
-#[allow(dead_code)]
 impl MemoryManager {
     #[must_use]
     pub fn new(
@@ -126,7 +125,7 @@ impl MemoryManager {
         let rows = self
             .conn
             .call(move |conn| -> rusqlite::Result<usize> {
-                Ok(conn.execute("DELETE FROM notes WHERE id = ?1", [&id_owned])?)
+                conn.execute("DELETE FROM notes WHERE id = ?1", [&id_owned])
             })
             .await?;
 

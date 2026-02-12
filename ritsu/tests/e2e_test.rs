@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 /// Test configuration and paths
-#[allow(dead_code)]
+
 struct TestFixture {
     test_dir: PathBuf,
     db_path: PathBuf,

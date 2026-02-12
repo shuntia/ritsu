@@ -9,12 +9,10 @@ use iced::{
     widget::{button, column, container, row, scrollable, text, text_input},
     Element, Subscription, Task, Theme,
 };
-use iced::{Point, Rectangle};
 use iced_widget::svg as widget_svg;
 use lucide_icons::LUCIDE_FONT_BYTES;
 use std::time::Duration;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewState {
     Chat,
@@ -23,7 +21,6 @@ pub enum ViewState {
     Memory,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Message {
     InputChanged(String),
@@ -65,7 +62,7 @@ pub enum Message {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 pub struct SessionInfo {
     session_id: String,
     started_at: String,
@@ -75,7 +72,7 @@ pub struct SessionInfo {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+
 pub struct TaskInfo {
     id: i64,
     title: String,
@@ -83,6 +80,7 @@ pub struct TaskInfo {
     priority: String,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct RitsuGui {
     input: String,
     messages: Vec<ChatMessage>,
@@ -130,7 +128,7 @@ struct ChatMessage {
 }
 
 impl RitsuGui {
-    #[allow(dead_code)]
+
     fn new(session_id_opt: Option<String>, initial_message: Option<String>) -> (Self, Task<Message>) {
         let session_id = session_id_opt.unwrap_or_else(|| format!("gui_session_{}", chrono::Utc::now().timestamp()));
         let mut messages = Vec::new();
@@ -1792,7 +1790,6 @@ impl RitsuGui {
 
                 let status_icon = match task.status.as_str() {
                     "completed" => nerd_font::categories::Fa::Check.to_string(),
-                    "in_progress" => nerd_font::categories::Fa::Circle.to_string(),
                     _ => nerd_font::categories::Fa::Circle.to_string(),
                 };
 

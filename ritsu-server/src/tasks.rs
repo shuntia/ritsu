@@ -15,7 +15,6 @@ pub struct TaskManager {
     conn: Arc<tokio_rusqlite::Connection>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Task {
     pub id: i64,
@@ -29,7 +28,6 @@ pub struct Task {
     pub created_at: String,
 }
 
-#[allow(dead_code)]
 impl TaskManager {
     #[must_use]
     pub fn new(conn: Arc<tokio_rusqlite::Connection>) -> Self {
@@ -161,8 +159,6 @@ impl TaskManager {
         let priority_filter = priority_filter.map(str::to_string);
 
         self.conn.call(move |conn| -> rusqlite::Result<Vec<Task>> {
-            let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
-
             // Use parameterized queries to avoid SQL injection and to let the DB engine optimize.
             let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
             let mut params: Vec<rusqlite::types::ToSqlOutput> = Vec::new();

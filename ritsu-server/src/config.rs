@@ -86,11 +86,11 @@ impl Default for TriggersConfig {
     }
 }
 
-fn default_enable_builtin_triggers() -> bool {
+const fn default_enable_builtin_triggers() -> bool {
     true
 }
 
-fn default_enable_compactions() -> bool {
+const fn default_enable_compactions() -> bool {
     true
 }
 
@@ -141,7 +141,7 @@ impl Default for MemoryConfig {
     }
 }
 
-fn default_include_ai_generated() -> bool {
+const fn default_include_ai_generated() -> bool {
     true
 }
 
@@ -295,19 +295,19 @@ llm_request_seconds = {llm_request}
 
 impl TimeoutConfig {
     #[must_use]
-    #[allow(dead_code)]
+
     pub const fn user_response(&self) -> Duration {
         Duration::from_secs(self.user_response_seconds)
     }
 
     #[must_use]
-    #[allow(dead_code)]
+
     pub const fn http_request(&self) -> Duration {
         Duration::from_secs(self.http_request_seconds)
     }
 
     #[must_use]
-    #[allow(dead_code)]
+
     pub const fn llm_request(&self) -> Duration {
         Duration::from_secs(self.llm_request_seconds)
     }

@@ -1,6 +1,8 @@
 // Helper to produce rotated loader SVG frames from a base lucide loader SVG (embedded via include_str!).
 // This avoids depending on a specific lucide crate at build-time and allows smooth frame-based animation.
 
+use std::fmt::Write;
+
 pub fn make_spinner_frames() -> Vec<Vec<u8>> {
     const BASE: &str = include_str!("../assets/icons/loader.svg");
     let frames = 20usize; // number of discrete rotated frames (20 -> 1 rotation/sec at 50ms tick)
@@ -12,7 +14,7 @@ pub fn make_spinner_frames() -> Vec<Vec<u8>> {
         if let Some(open_end) = BASE.find('>') {
             let mut s = String::new();
             s.push_str(&BASE[..=open_end]);
-            s.push_str(&format!("<g transform=\"rotate({:.2} 12 12)\">", angle));
+            let _ = write!(&mut s, "<g transform=\"rotate({:.2} 12 12)\">", angle);
             s.push_str(&BASE[open_end + 1..]);
             if let Some(pos) = s.rfind("</svg>") {
                 s.replace_range(pos..pos + 6, "</g></svg>");

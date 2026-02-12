@@ -216,7 +216,7 @@ impl IpcClient {
     }
 
     /// Subscribe to server pushes and wait for next push notification
-    #[allow(dead_code)]
+
     pub async fn subscribe_and_wait(&self) -> Result<ritsu_common::protocol::ServerPush> {
         let mut stream = UnixStream::connect(&self.socket_path).await?;
 
