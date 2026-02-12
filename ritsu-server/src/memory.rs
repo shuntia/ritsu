@@ -11,29 +11,17 @@ use tracing::{info, warn};
 
 use crate::llm::LlmClient;
 
-/// Tool usage record: (tool_name, arguments, success, result, timestamp)
-type ToolUsageRecord = (String, String, bool, String, String);
-
 pub struct MemoryManager {
     conn: Arc<tokio_rusqlite::Connection>,
 
-    db_path: String,
     /// Whether to include AI-generated prompt enhancements
     include_ai_generated: bool,
 }
 
 impl MemoryManager {
     #[must_use]
-    pub fn new(
-        conn: Arc<tokio_rusqlite::Connection>,
-        db_path: String,
-        include_ai_generated: bool,
-    ) -> Self {
-        Self {
-            conn,
-            db_path,
-            include_ai_generated,
-        }
+    pub fn new(conn: Arc<tokio_rusqlite::Connection>, include_ai_generated: bool) -> Self {
+        Self { conn, include_ai_generated }
     }
 
     /// Store a conversation message
