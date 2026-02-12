@@ -25,7 +25,10 @@ pub enum ViewState {
 pub enum Message {
     InputChanged(String),
     SendMessage,
+    MessageReceived(String),
     MessageChunk(String, bool), // content, is_final
+    StreamingStarted,
+    ServerResponse(Result<String, String>),
     Tick,
     SwitchView(ViewState),
     LoadSession(String),
@@ -63,7 +66,7 @@ pub enum Message {
 pub struct SessionInfo {
     session_id: String,
     started_at: String,
-
+    last_activity: String,
     turn_count: i64,
     title: Option<String>,
 }
