@@ -11,6 +11,9 @@ use tracing::{info, warn};
 
 use crate::llm::LlmClient;
 
+/// Tool usage record: (tool_name, arguments, success, result, timestamp)
+type ToolUsageRecord = (String, String, bool, String, String);
+
 pub struct MemoryManager {
     conn: Arc<tokio_rusqlite::Connection>,
 
