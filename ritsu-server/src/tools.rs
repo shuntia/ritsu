@@ -395,7 +395,7 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                         _ => return ToolResult::error("Missing required parameter: id".to_string()),
                     };
                     let Ok(id) = id_str.parse::<i64>() else {
-                        return ToolResult::error(format!("Invalid id: {}", id_str));
+                        return ToolResult::error(format!("Invalid id: {id_str}"));
                     };
 
                     let content_opt = args.get("content").cloned();
@@ -408,7 +408,7 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                     }
 
                     match memory.update_note(id, content_opt, tags_opt).await {
-                        Ok(()) => ToolResult::success(format!("Note {} updated", id)),
+                        Ok(()) => ToolResult::success(format!("Note {id} updated")),
                         Err(e) => {
                             tracing::error!("Failed to update note: {}", e);
                             ToolResult::error(format!("Failed to update note: {e}"))
@@ -441,11 +441,11 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                     };
                     let id = match id_str.parse::<i64>() {
                         Ok(v) => v,
-                        Err(_) => return ToolResult::error(format!("Invalid id: {}", id_str)),
+                        Err(_) => return ToolResult::error(format!("Invalid id: {id_str}")),
                     };
 
                     match memory.delete_note(id).await {
-                        Ok(()) => ToolResult::success(format!("Note {} deleted", id)),
+                        Ok(()) => ToolResult::success(format!("Note {id} deleted")),
                         Err(e) => {
                             tracing::error!("Failed to delete note: {}", e);
                             ToolResult::error(format!("Failed to delete note: {e}"))
