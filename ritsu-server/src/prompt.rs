@@ -100,10 +100,7 @@ impl PromptBuilder {
         let now = Local::now();
         let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
 
-        let enhanced_content = format!(
-            "[Current Time: {}]\n[{}]\n\n{}",
-            time_str, context_block, user_content
-        );
+        let enhanced_content = format!("[Current Time: {time_str}]\n[{context_block}]\n\n{user_content}");
 
         history.push(LlmMessage {
             role: "user".to_string(),
