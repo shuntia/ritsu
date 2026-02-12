@@ -164,12 +164,10 @@ impl TaskManager {
 
             if let Some(status) = &status_filter {
                 query.push_str(" AND status = ?");
-                params.push(rusqlite::types::ToSqlOutput::from(status.as_str()));
             }
 
             if let Some(priority) = &priority_filter {
                 query.push_str(" AND priority = ?");
-                params.push(rusqlite::types::ToSqlOutput::from(priority.as_str()));
             }
 
             query.push_str(" ORDER BY created_at DESC");
