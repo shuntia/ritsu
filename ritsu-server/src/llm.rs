@@ -255,13 +255,108 @@ impl LlmClient {
             {
                 Ok(resp) => resp,
                 Err(e) => {
-                    warn!("Tool calling failed ({}), retrying without tools", e);
-                    self.provider.chat(&chat_messages).await.with_context(|| {
-                        format!(
-                            "Failed to send chat request without tools (timeout: {}s)",
-                            self.timeout_seconds
-                        )
-                    })?
+                    // Inspect the error for Groq rate-limit hints and wait if present, then retry once
+                    let err_str = e.to_string();
+
+                    if err_str.contains("429")
+                        || err_str.to_lowercase().contains("too many requests")
+                        || err_str.to_lowercase().contains("rate limit")
+                        || err_str.to_lowercase().contains("rate_limit_exceeded")
+                    {
+                        // Try to extract a suggested wait like "Please try again in 20.07s"
+                        if let Some(idx) = err_str.find("Please try again in") {
+                            let start = idx + "Please try again in".len();
+                            if let Some(s_pos) = err_str[start..].find('s') {
+                                let num_portion = &err_str[start..start + s_pos];
+                                let num_clean: String = num_portion
+                                    .chars()
+                                    .filter(|c| c.is_ascii_digit() || *c == '.')
+                                    .collect();
+
+                                if !num_clean.is_empty() {
+                                    if let Ok(parsed) = num_clean.parse::<f64>() {
+                                        let wait_secs = parsed.ceil() as u64;
+                                        info!("Detected Groq rate limit, waiting {}s before retrying tool call", wait_secs);
+                                        tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+
+                                        // Retry the tool call once after waiting
+                                        match self
+                                            .provider
+                                            .chat_with_tools(&chat_messages, self.provider.tools())
+                                            .await
+                                        {
+                                            Ok(resp2) => resp2,
+                                            Err(e2) => {
+                                                warn!("Tool calling failed after waiting ({}), retrying without tools", e2);
+                                                self.provider.chat(&chat_messages).await.with_context(|| {
+                                                    format!(
+                                                        "Failed to send chat request without tools (timeout: {}s)",
+                                                        self.timeout_seconds
+                                                    )
+                                                })?
+                                            }
+                                        }
+                                    } else {
+                                        warn!("Tool calling failed ({}), retrying without tools", err_str);
+                                        self.provider
+                                            .chat(&chat_messages)
+                                            .await
+                                            .with_context(|| {
+                                                format!(
+                                                    "Failed to send chat request without tools (timeout: {}s)",
+                                                    self.timeout_seconds
+                                                )
+                                            })?
+                                    }
+                                } else {
+                                    warn!("Tool calling failed ({}), retrying without tools", err_str);
+                                    self.provider
+                                        .chat(&chat_messages)
+                                        .await
+                                        .with_context(|| {
+                                            format!(
+                                                "Failed to send chat request without tools (timeout: {}s)",
+                                                self.timeout_seconds
+                                            )
+                                        })?
+                                }
+                            } else {
+                                warn!("Tool calling failed ({}), retrying without tools", err_str);
+                                self.provider
+                                    .chat(&chat_messages)
+                                    .await
+                                    .with_context(|| {
+                                        format!(
+                                            "Failed to send chat request without tools (timeout: {}s)",
+                                            self.timeout_seconds
+                                        )
+                                    })?
+                            }
+                        } else {
+                            // No suggested wait, fall back to retrying without tools
+                            warn!("Tool calling failed ({}), retrying without tools", err_str);
+                            self.provider
+                                .chat(&chat_messages)
+                                .await
+                                .with_context(|| {
+                                    format!(
+                                        "Failed to send chat request without tools (timeout: {}s)",
+                                        self.timeout_seconds
+                                    )
+                                })?
+                        }
+                    } else {
+                        warn!("Tool calling failed ({}), retrying without tools", err_str);
+                        self.provider
+                            .chat(&chat_messages)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "Failed to send chat request without tools (timeout: {}s)",
+                                    self.timeout_seconds
+                                )
+                            })?
+                    }
                 }
             }
         } else {
@@ -718,6 +813,15 @@ impl LlmClient {
 }
 
 #[cfg(test)]
+fn select_backend(cfg: &crate::config::LlmConfig) -> Option<&crate::config::LlmBackend> {
+    cfg.backends
+        .iter()
+        .find(|b| b.name == cfg.default_backend)
+        .or_else(|| cfg.backends.first())
+}
+
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{LlmBackend, LlmConfig};
@@ -745,8 +849,7 @@ mod tests {
             disable_streaming: false,
             disable_tools: false,
         };
-        let b = select_backend(&cfg).expect("backend");
-        assert_eq!(b.name, "openai");
+        assert_eq!(select_backend(&cfg).map(|b| b.name.clone()), Some("openai".to_string()));
     }
 
     #[test]
@@ -763,7 +866,6 @@ mod tests {
             disable_streaming: false,
             disable_tools: false,
         };
-        let b = select_backend(&cfg).expect("backend");
-        assert_eq!(b.name, "ollama");
+        assert_eq!(select_backend(&cfg).map(|b| b.name.clone()), Some("ollama".to_string()));
     }
 }
