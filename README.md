@@ -1,5 +1,7 @@
 # Ritsu - Self-Triggering AI Agent
 
+This project is entirely vibe coded by Claude Sonnet 4.5 and GPT-5-mini.
+
 An autonomous AI agent that can schedule and trigger itself arbitrarily, with persistent memory and task management.
 
 ## Features
