@@ -98,7 +98,7 @@ pub async fn run() -> Result<()> {
                 // a GUI client (which sends a ClientRequest immediately) or the
                 // server connecting for server->client requests (may be idle).
                 use std::time::Duration;
-                let initial_frame = match tokio::time::timeout(Duration::from_millis(50), async {
+                let initial_frame = tokio::time::timeout(Duration::from_millis(50), async {
                     let mut len_buf = [0u8; 4];
                     // Try read length
                     if stream.read_exact(&mut len_buf).await.is_err() {
@@ -118,10 +118,8 @@ pub async fn run() -> Result<()> {
                     Some(body)
                 })
                 .await
-                {
-                    Ok(opt) => opt,
-                    Err(_) => None,
-                };
+                .ok()
+                .flatten();
 
                 let server_socket_clone = server_socket.clone();
                 let gui_pushers_clone = gui_pushers.clone();
@@ -275,10 +273,7 @@ async fn handle_tool_request(
                 guard.clone()
             };
 
-            if senders.is_empty() {
-                // No GUI clients connected - spawn GUI process
-                handle_open_chat(message.as_deref(), session_id.as_deref()).await
-            } else {
+            if !senders.is_empty() {
                 // Try most-recent first
                 for sender in senders.into_iter().rev() {
                     if sender.clone().send(body.clone()).await.is_ok() {
@@ -289,15 +284,17 @@ async fn handle_tool_request(
 
                 // No GUI accepted the push - spawn GUI as fallback
                 warn!("No GUI accepted OpenChat push; launching GUI as fallback");
-                handle_open_chat(message.as_deref(), session_id.as_deref()).await
             }
+
+            // No GUI clients connected or none accepted the push - spawn GUI
+            handle_open_chat(message.as_deref(), session_id.as_deref()).await
         }
         ServerToClientRequest::FocusChat => handle_focus_chat(gui_pushers).await,
     }
 }
 
 async fn handle_gui_connection_with_initial(
-    mut stream: UnixStream,
+    stream: UnixStream,
     server_socket: &str,
     gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>,
     initial_req: Option<Vec<u8>>,
@@ -395,12 +392,11 @@ async fn handle_gui_connection_with_initial(
                             )
                             .await
                             .is_ok()
+                            && push_tx.send(resp_data).await.is_ok()
                             {
-                                if push_tx.send(resp_data).await.is_ok() {
-                                    info!(
-                                        "Forwarded final ServerResponse to GUI for initial request"
-                                    );
-                                }
+                                info!(
+                                    "Forwarded final ServerResponse to GUI for initial request"
+                                );
                             }
                         }
                     }
@@ -556,7 +552,7 @@ async fn handle_incoming_server_connection(
         match postcard::from_bytes::<ServerToClientRequest>(&body) {
             Ok(req) => {
                 let res = match handle_tool_request(req, gui_pushers.clone()).await {
-                    Ok(_) => ClientToServerResponse::Success,
+                    Ok(()) => ClientToServerResponse::Success,
                     Err(e) => ClientToServerResponse::Error {
                         message: e.to_string(),
                     },
@@ -603,7 +599,7 @@ async fn handle_incoming_server_connection(
         };
 
         let response = match handle_tool_request(request, gui_pushers.clone()).await {
-            Ok(_) => ClientToServerResponse::Success,
+            Ok(()) => ClientToServerResponse::Success,
             Err(e) => ClientToServerResponse::Error {
                 message: e.to_string(),
             },
@@ -660,6 +656,29 @@ async fn handle_notification(
 
 async fn handle_open_chat(message: Option<&str>, session_id: Option<&str>) -> Result<()> {
     info!("Opening chat GUI");
+
+    // If a chat GUI is already running, prefer focusing it instead of spawning another instance.
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(output) = std::process::Command::new("pgrep").arg("-f").arg("ritsu chat").output() {
+            if output.status.success() && !output.stdout.is_empty() {
+                info!("Chat GUI already running; attempting to focus instead of spawning a new instance");
+                // Try xdotool to focus existing window if available
+                if let Ok(xout) = std::process::Command::new("xdotool").args(["search", "--name", "Ritsu", "windowactivate"]).output() {
+                    if xout.status.success() {
+                        info!("Focused existing chat window via xdotool");
+                        return Ok(());
+                    } else {
+                        warn!("xdotool failed to focus existing window");
+                        return Ok(());
+                    }
+                } else {
+                    info!("xdotool not available; not spawning new chat since one is already running");
+                    return Ok(());
+                }
+            }
+        }
+    }
 
     let mut cmd = Command::new("ritsu");
     cmd.arg("chat");
@@ -735,14 +754,12 @@ async fn handle_focus_chat(gui_pushers: Arc<Mutex<Vec<mpsc::Sender<Vec<u8>>>>>) 
     let mut guard = gui_pushers.lock().await;
     while let Some(sender) = guard.pop() {
         match sender.clone().send(body.clone()).await {
-            Ok(_) => {
+            Ok(()) => {
                 info!("Focus push accepted by one GUI client");
                 return Ok(());
             }
             Err(e) => {
                 warn!("Failed to send focus push to GUI (removing pusher): {}", e);
-                // try previous pusher
-                continue;
             }
         }
     }

@@ -87,13 +87,13 @@ impl PromptBuilder {
                 Vec::new()
             }
         };
-        let context_block = if !hook_outputs.is_empty() {
-            hook_outputs.join("\n\n")
+        let context_block = if hook_outputs.is_empty() {
+            task_manager
+                .get_task_summary()
+                .await
+                .unwrap_or_else(|_| "Unable to retrieve task summary".to_string())
         } else {
-            match task_manager.get_task_summary().await {
-                Ok(s) => s,
-                Err(_) => "Unable to retrieve task summary".to_string(),
-            }
+            hook_outputs.join("\n\n")
         };
 
         // Inject current local time
@@ -158,6 +158,7 @@ impl PromptBuilder {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -172,11 +173,11 @@ mod tests {
         }))
         .await;
 
-        let outputs = run_pre_hooks().await.unwrap();
+        let outputs = run_pre_hooks().await.expect("run_pre_hooks failed");
         assert_eq!(outputs, vec!["TESTHOOK".to_string()]);
 
         clear_pre_hooks().await;
-        let outputs2 = run_pre_hooks().await.unwrap();
+        let outputs2 = run_pre_hooks().await.expect("run_pre_hooks failed");
         assert!(outputs2.is_empty());
     }
 }

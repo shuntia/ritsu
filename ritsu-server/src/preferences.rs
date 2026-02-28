@@ -1,12 +1,16 @@
 //! User preferences extraction and management
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_rusqlite::rusqlite;
 use tracing::info;
 
+#[cfg(test)]
+use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::collections::HashMap;
+
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preference {
     pub category: String,
@@ -63,6 +67,7 @@ impl PreferencesManager {
     }
 
     /// Get a specific preference
+    #[cfg(test)]
     pub async fn get_preference(&self, category: &str, key: &str) -> Result<Option<Preference>> {
         let category = category.to_string();
         let key = key.to_string();
@@ -96,6 +101,7 @@ impl PreferencesManager {
     }
 
     /// Get all preferences in a category
+    #[cfg(test)]
     pub async fn get_category(&self, category: &str) -> Result<Vec<Preference>> {
         let category = category.to_string();
 
@@ -127,6 +133,7 @@ impl PreferencesManager {
     }
 
     /// Get all preferences as a map
+    #[cfg(test)]
     pub async fn get_all(&self) -> Result<HashMap<String, HashMap<String, String>>> {
         self.db
             .call(
@@ -158,6 +165,7 @@ impl PreferencesManager {
     }
 
     /// Format preferences for system prompt
+    #[cfg(test)]
     pub async fn format_for_prompt(&self) -> Result<String> {
         let prefs = self.get_all().await?;
 
@@ -178,6 +186,7 @@ impl PreferencesManager {
     }
 
     /// Remove a preference
+    #[cfg(test)]
     pub async fn remove_preference(&self, category: &str, key: &str) -> Result<bool> {
         let category = category.to_string();
         let key = key.to_string();
@@ -194,27 +203,6 @@ impl PreferencesManager {
             .map_err(Into::into)
     }
 
-    /// Clear all preferences in a category
-    pub async fn clear_category(&self, category: &str) -> Result<usize> {
-        let category = category.to_string();
-        let category_for_log = category.clone();
-
-        let rows = self
-            .db
-            .call(move |conn| -> rusqlite::Result<usize> {
-                let rows =
-                    conn.execute("DELETE FROM preferences WHERE category = ?", [&category])?;
-                Ok(rows)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
-
-        info!(
-            "Cleared {} preferences from category: {}",
-            rows, category_for_log
-        );
-        Ok(rows)
-    }
 }
 
 #[cfg(test)]

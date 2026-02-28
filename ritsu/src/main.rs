@@ -6,7 +6,6 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing::{info, warn};
 
 mod commands;
 mod config;
@@ -358,6 +357,23 @@ fn main() -> Result<()> {
             Ok(())
         }
         Commands::Chat { session, message } => {
+            // Detect another running chat instance and exit this new one to avoid spawning duplicates that can cause resource issues.
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(output) = std::process::Command::new("pgrep").arg("-f").arg("ritsu chat").output() {
+                    if output.status.success() && !output.stdout.is_empty() {
+                        let my_pid = std::process::id().to_string();
+                        let pids = String::from_utf8_lossy(&output.stdout);
+                        for pid in pids.lines() {
+                            if pid.trim() != my_pid {
+                                eprintln!("Detected another ritsu chat instance (PID {}). Exiting new instance to avoid duplicates.", pid.trim());
+                                std::process::exit(0);
+                            }
+                        }
+                    }
+                }
+            }
+
             println!("Starting Ritsu GUI...");
             // Run GUI - it creates its own runtime
             gui::run_blocking(session, message)
@@ -371,12 +387,12 @@ fn main() -> Result<()> {
                 Commands::Restart => commands::client_daemon::restart().await?,
                 Commands::Server(cmd) => match cmd {
                     ServerCommands::Start { config } => {
-                        commands::daemon::start(config.as_deref()).await?
+                        commands::daemon::start(config.as_deref()).await?;
                     }
                     ServerCommands::Stop => commands::daemon::stop().await?,
                     ServerCommands::Status => commands::daemon::status().await?,
                     ServerCommands::Restart { config } => {
-                        commands::daemon::restart(config.as_deref()).await?
+                        commands::daemon::restart(config.as_deref()).await?;
                     }
                 },
                 Commands::Halt(cmd) => commands::daemon::handle_halt(cmd).await?,
@@ -399,7 +415,7 @@ fn main() -> Result<()> {
                 Commands::Memory { days } => commands::memory::query_memory(Some(days)).await?,
                 Commands::Notes { tag } => commands::memory::query_notes(tag.as_deref()).await?,
                 Commands::ClearMemory { noconfirm } => {
-                    commands::memory::clear_memory(noconfirm).await?
+                    commands::memory::clear_memory(noconfirm).await?;
                 }
                 Commands::Dev(cmd) => commands::dev::handle(cmd).await?,
                 Commands::Attach => commands::attach::attach().await?,

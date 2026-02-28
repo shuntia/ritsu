@@ -284,7 +284,7 @@ impl ClientConfig {
 
         // Base system prompt
         let base_path = prompts_dir.join("system_base.md");
-        let base_content = r#"# Ritsu System Prompt
+        let base_content = r"# Ritsu System Prompt
 
 You are Ritsu, an autonomous AI assistant with the following capabilities:
 
@@ -316,13 +316,13 @@ You have access to various tools for:
 - Analyzing patterns in user behavior
 
 Use these tools proactively to assist the user effectively.
-"#;
+";
         std::fs::write(&base_path, base_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, base_path.display());
 
         // Chat context prompt
         let chat_path = prompts_dir.join("chat.md");
-        let chat_content = r#"# Chat Context
+        let chat_content = r"# Chat Context
 
 You are in an interactive chat session with the user.
 
@@ -336,13 +336,13 @@ You are in an interactive chat session with the user.
 - Be helpful and attentive
 - Clarify ambiguous requests
 - Provide actionable suggestions
-"#;
+";
         std::fs::write(&chat_path, chat_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, chat_path.display());
 
         // Background prompt
         let background_path = prompts_dir.join("background.md");
-        let background_content = r#"# Background Task Context
+        let background_content = r"# Background Task Context
 
 You are executing a scheduled background task.
 
@@ -356,7 +356,7 @@ You are executing a scheduled background task.
 - Only notify user for important events
 - Create notes for information worth remembering
 - Suggest new triggers if patterns emerge
-"#;
+";
         std::fs::write(&background_path, background_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, background_path.display());
 
@@ -366,7 +366,7 @@ You are executing a scheduled background task.
 
         // Compact prompt
         let compact_path = background_dir.join("compact.md");
-        let compact_content = r#"# Memory Compaction Context
+        let compact_content = r"# Memory Compaction Context
 
 You are compacting conversation history into a summary.
 
@@ -382,13 +382,13 @@ Generate a well-structured summary with:
 - Important decisions made
 - Action items identified
 - User preferences learned
-"#;
+";
         std::fs::write(&compact_path, compact_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, compact_path.display());
 
         // Pattern analysis prompt
         let pattern_path = background_dir.join("pattern.md");
-        let pattern_content = r#"# Pattern Recognition Context
+        let pattern_content = r"# Pattern Recognition Context
 
 You are analyzing user behavior patterns.
 
@@ -404,13 +404,13 @@ Produce insights about:
 - Preferred interaction times
 - Tool usage patterns
 - Suggested optimizations
-"#;
+";
         std::fs::write(&pattern_path, pattern_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, pattern_path.display());
 
         // Briefing prompt
         let briefing_path = background_dir.join("briefing.md");
-        let briefing_content = r#"# Morning Briefing Context
+        let briefing_content = r"# Morning Briefing Context
 
 You are preparing a daily briefing for the user.
 
@@ -425,7 +425,7 @@ You are preparing a daily briefing for the user.
 - Prioritize actionable items
 - Highlight urgent matters
 - Be encouraging and positive
-"#;
+";
         std::fs::write(&briefing_path, briefing_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, briefing_path.display());
 
@@ -434,26 +434,26 @@ You are preparing a daily briefing for the user.
         std::fs::create_dir_all(&triggers_dir)?;
 
         let daily_comp_path = triggers_dir.join("daily_compaction.md");
-        let daily_comp_content = r#"# daily_compaction trigger
+        let daily_comp_content = r"# daily_compaction trigger
 
 This trigger runs daily to compact conversations into summaries. Use compact prompt context and include relevant task summary. Ensure output is concise and focuses on key points and action items.
-"#;
+";
         std::fs::write(&daily_comp_path, daily_comp_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, daily_comp_path.display());
 
         let weekly_pattern_path = triggers_dir.join("weekly_pattern.md");
-        let weekly_pattern_content = r#"# weekly_pattern trigger
+        let weekly_pattern_content = r"# weekly_pattern trigger
 
 This trigger runs weekly to analyze user behavior and detect patterns. Focus on recurring themes, tool usage, and timing recommendations. Produce actionable suggestions.
-"#;
+";
         std::fs::write(&weekly_pattern_path, weekly_pattern_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, weekly_pattern_path.display());
 
         let monthly_reflect_path = triggers_dir.join("monthly_reflection.md");
-        let monthly_reflect_content = r#"# monthly_reflection trigger
+        let monthly_reflect_content = r"# monthly_reflection trigger
 
 This trigger runs monthly for self-reflection and long-term summary. Aggregate monthly progress, highlight trends, and suggest strategic improvements.
-"#;
+";
         std::fs::write(&monthly_reflect_path, monthly_reflect_content)?;
         println!("{} Created: {}", nerd_font::categories::Fa::Check, monthly_reflect_path.display());
 

@@ -297,7 +297,7 @@ llm_request_seconds = {llm_request}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NetworkConfig {
-    /// List of allowed hosts for the 'get' tool (e.g., ["api.ipify.org", "example.com"]).
+    /// List of allowed hosts for the `get` tool (e.g., [`api.ipify.org`, `example.com`]).
     pub allowed_http_hosts: Vec<String>,
 }
 

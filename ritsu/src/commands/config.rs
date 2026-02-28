@@ -121,7 +121,7 @@ fn ui(f: &mut Frame<CrosstermBackend<Stdout>>, items: &[(String, PathBuf)], stat
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
-        .constraints(&[Constraint::Percentage(100)])
+        .constraints([Constraint::Percentage(100)])
         .split(size);
 
     let list_items: Vec<ListItem> = items

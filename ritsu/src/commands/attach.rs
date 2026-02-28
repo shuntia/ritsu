@@ -63,8 +63,8 @@ pub async fn attach() -> Result<()> {
     println!("Received Ctrl-C, shutting down tail processes...");
 
     // Try to kill child processes; ignore errors
-    let _ = tail_server.kill();
-    let _ = tail_client.kill();
+    let _ = tail_server.kill().await;
+    let _ = tail_client.kill().await;
 
     // Wait for reader tasks to finish
     let _ = server_task.await;

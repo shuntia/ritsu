@@ -24,8 +24,6 @@ pub struct Task {
     pub priority: TaskPriority,
     pub tags: Vec<String>,
     pub due_date: Option<String>,
-    pub created_by: String,
-    pub created_at: String,
 }
 
 impl TaskManager {
@@ -160,7 +158,7 @@ impl TaskManager {
 
         self.conn.call(move |conn| -> rusqlite::Result<Vec<Task>> {
             // Use parameterized queries to avoid SQL injection and to let the DB engine optimize.
-            let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date, created_by, created_at FROM tasks WHERE 1=1");
+            let mut query = String::from("SELECT id, title, description, status, priority, tags, due_date FROM tasks WHERE 1=1");
 
             if status_filter.is_some() {
                 query.push_str(" AND status = ?");
@@ -219,8 +217,6 @@ impl TaskManager {
                         priority,
                         tags,
                         due_date: row.get(6)?,
-                        created_by: row.get(7)?,
-                        created_at: row.get(8)?,
                     })
                 })?
                 .filter_map(Result::ok)
@@ -284,58 +280,4 @@ impl TaskManager {
         }).await.map_err(|e| anyhow::anyhow!("DB error: {e}"))
     }
 
-    /// Get detailed list of active tasks for AI context
-    pub async fn get_active_tasks_summary(&self) -> Result<String> {
-        let tasks = self.list_tasks(None, None).await?;
-
-        let active: Vec<_> = tasks
-            .into_iter()
-            .filter(|t| !matches!(t.status, TaskStatus::Completed | TaskStatus::Cancelled))
-            .collect();
-
-        if active.is_empty() {
-            return Ok("No active tasks".to_string());
-        }
-
-        let summary = active
-            .iter()
-            .take(10) // Limit to top 10
-            .map(|t| {
-                let priority_emoji = match t.priority {
-                    TaskPriority::Urgent => format!("{}", nerd_font::categories::Fa::Fire),
-                    TaskPriority::High => {
-                        format!("{}", nerd_font::categories::Fa::ExclamationCircle)
-                    }
-                    TaskPriority::Medium => format!("{}", nerd_font::categories::Fa::Exclamation),
-                    TaskPriority::Low => format!("{}", nerd_font::categories::Fa::Circle),
-                };
-
-                let status_str = match t.status {
-                    TaskStatus::Pending => "PENDING",
-                    TaskStatus::InProgress => "IN_PROGRESS",
-                    TaskStatus::Completed => "COMPLETED",
-                    TaskStatus::Cancelled => "CANCELLED",
-                };
-
-                let due_info = t
-                    .due_date
-                    .as_ref()
-                    .map(|d| format!(" (due: {})", d))
-                    .unwrap_or_default();
-
-                format!(
-                    "{} [{}] {}{}",
-                    priority_emoji, status_str, t.title, due_info
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let total = active.len();
-        if total > 10 {
-            Ok(format!("{}\n... and {} more", summary, total - 10))
-        } else {
-            Ok(summary)
-        }
-    }
 }

@@ -215,42 +215,6 @@ impl IpcClient {
         Ok(rx)
     }
 
-    /// Subscribe to server pushes and wait for next push notification
-    pub async fn subscribe_and_wait(&self) -> Result<ritsu_common::protocol::ServerPush> {
-        let mut stream = UnixStream::connect(&self.socket_path).await?;
-
-        // Send subscribe request
-        let request = ClientRequest::Subscribe;
-        let request_data = postcard::to_allocvec(&request)?;
-        let request_len = (request_data.len() as u32).to_be_bytes();
-
-        stream.write_all(&request_len).await?;
-        stream.write_all(&request_data).await?;
-        stream.flush().await?;
-
-        // Read subscription acknowledgment
-        let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).await?;
-        let len = u32::from_be_bytes(len_buf) as usize;
-
-        let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).await?;
-        let _response: ServerResponse = postcard::from_bytes(&data)?;
-
-        // Now wait for push notifications on this connection
-        // Read push length
-        let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).await?;
-        let len = u32::from_be_bytes(len_buf) as usize;
-
-        // Read push data
-        let mut data = vec![0u8; len];
-        stream.read_exact(&mut data).await?;
-
-        // Deserialize push
-        let push: ritsu_common::protocol::ServerPush = postcard::from_bytes(&data)?;
-        Ok(push)
-    }
 }
 
 #[cfg(test)]

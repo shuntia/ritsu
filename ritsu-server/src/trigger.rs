@@ -8,7 +8,7 @@
 #![allow(clippy::uninlined_format_args)]
 
 use anyhow::Result;
-use chrono::{Datelike, Days, Local, NaiveTime, TimeZone, Timelike, Utc};
+use chrono::{Datelike, Local, NaiveTime, TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -67,24 +67,25 @@ impl TriggerRegistry {
                 let metadata_json: String = row.get(6)?;
 
                 // Map legacy types to cron where possible
+                let schedule_str = schedule.as_str();
                 let cron_expr = match trigger_type_str.as_str() {
-                    "cron" => schedule.clone(),
+                    "cron" => schedule_str.to_string(),
                     "time" => {
                         // Convert HH:MM to a five-field cron "m H * * *" (minute hour day month day-of-week).
                         // Note: the code accepts both five-field and six-field cron expressions; canonical one-shot cron strings include a leading seconds field ("s m H D M *").
-                        let parts: Vec<&str> = schedule.split(':').collect();
+                        let parts: Vec<&str> = schedule_str.split(':').collect();
                         if parts.len() == 2 {
                             let hour = parts[0].parse::<u32>().unwrap_or(0);
                             let minute = parts[1].parse::<u32>().unwrap_or(0);
                             // Use six-field cron expressions with leading seconds field for compatibility with the cron crate
                             format!("0 {minute} {hour} * * *")
                         } else {
-                            schedule.clone()
+                            schedule_str.to_string()
                         }
                     }
                     "interval" => {
                         // Convert interval seconds to minute-based cron where possible
-                        if let Ok(secs) = schedule.parse::<u64>() {
+                        if let Ok(secs) = schedule_str.parse::<u64>() {
                             if secs >= 60 && secs % 60 == 0 {
                                 let mins = secs / 60;
                                 // Use six-field cron expressions with leading seconds
@@ -94,7 +95,7 @@ impl TriggerRegistry {
                                 "0 */1 * * * *".to_string()
                             }
                         } else {
-                            schedule.clone()
+                            schedule_str.to_string()
                         }
                     }
                     "dynamic" => {
@@ -105,7 +106,7 @@ impl TriggerRegistry {
                         format!("0 {} {} * * *", next.minute(), next.hour())
                     }
                     // inactivity and unknown types - fallback to the stored schedule as cron
-                    _ => schedule.clone(),
+                    _ => schedule_str.to_string(),
                 };
 
                 let mut metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
@@ -143,38 +144,36 @@ impl TriggerRegistry {
         let enable_compactions = config.triggers.enable_compactions;
 
         crate::database::Database::execute_blocking(db_path, move |conn| {
-            if enable_builtin {
-                if enable_compactions {
-                    // Daily conversation compaction at 2:00 AM
-                    Self::insert_trigger_if_not_exists(
-                        conn,
-                        "daily_compaction",
-                        "time",
-                        "02:00",
-                        "system",
-                        r#"{"analysis_type":"conversation"}"#,
-                    )?;
+            if enable_builtin && enable_compactions {
+                // Daily conversation compaction at 2:00 AM
+                Self::insert_trigger_if_not_exists(
+                    conn,
+                    "daily_compaction",
+                    "time",
+                    "02:00",
+                    "system",
+                    r#"{"analysis_type":"conversation"}"#,
+                )?;
 
-                    // Weekly pattern recognition on Sunday at 3:00 AM
-                    Self::insert_trigger_if_not_exists(
-                        conn,
-                        "weekly_pattern",
-                        "time",
-                        "03:00",
-                        "system",
-                        r#"{"analysis_type":"pattern","day":"sunday"}"#,
-                    )?;
+                // Weekly pattern recognition on Sunday at 3:00 AM
+                Self::insert_trigger_if_not_exists(
+                    conn,
+                    "weekly_pattern",
+                    "time",
+                    "03:00",
+                    "system",
+                    r#"{"analysis_type":"pattern","day":"sunday"}"#,
+                )?;
 
-                    // Monthly self-reflection on last day at 5:00 AM
-                    Self::insert_trigger_if_not_exists(
-                        conn,
-                        "monthly_reflection",
-                        "time",
-                        "05:00",
-                        "system",
-                        r#"{"analysis_type":"reflection","day":"last"}"#,
-                    )?;
-                }
+                // Monthly self-reflection on last day at 5:00 AM
+                Self::insert_trigger_if_not_exists(
+                    conn,
+                    "monthly_reflection",
+                    "time",
+                    "05:00",
+                    "system",
+                    r#"{"analysis_type":"reflection","day":"last"}"#,
+                )?;
             }
 
             Ok(())
@@ -414,7 +413,7 @@ impl TriggerRegistry {
             let new_name = updates_owned.get("new_name").cloned().unwrap_or(old_name);
             let new_type = updates_owned.get("type").cloned().unwrap_or(old_type);
             let new_schedule = updates_owned.get("schedule").cloned().unwrap_or(old_schedule);
-            let new_enabled = updates_owned.get("enabled").map(|s| matches!(s.as_str(), "true" | "1")).unwrap_or(old_enabled_int != 0);
+            let new_enabled = updates_owned.get("enabled").map_or(old_enabled_int != 0, |s| matches!(s.as_str(), "true" | "1"));
 
             if let Some(tag) = updates_owned.get("tag") {
                 metadata_map.insert("tag".to_string(), tag.clone());
@@ -424,7 +423,7 @@ impl TriggerRegistry {
             }
 
             // Merge any other provided metadata fields
-            for (k, v) in updates_owned.iter() {
+            for (k, v) in &updates_owned {
                 if ["new_name", "type", "schedule", "enabled", "tag", "description"].contains(&k.as_str()) {
                     continue;
                 }
@@ -432,7 +431,7 @@ impl TriggerRegistry {
             }
 
             let metadata_json = serde_json::to_string(&metadata_map)?;
-            let enabled_int = if new_enabled { 1 } else { 0 };
+            let enabled_int = i32::from(new_enabled);
 
             conn.execute(
                 "UPDATE triggers SET name = ?1, trigger_type = ?2, schedule = ?3, enabled = ?4, metadata = ?5 WHERE id = ?6",
@@ -487,7 +486,7 @@ impl TriggerRegistry {
     }
 
     /// Cancel a specific cron occurrence by trigger name and ISO8601 datetime.
-    /// Stores the cancelled occurrence in the cron_exceptions table and notifies the trigger loop.
+    /// Stores the cancelled occurrence in the `cron_exceptions` table and notifies the trigger loop.
     pub async fn cancel_cron(&self, name: &str, occurrence_iso: &str) -> Result<()> {
 
         // Parse occurrence datetime (accept any offset and convert to UTC)
@@ -511,11 +510,11 @@ impl TriggerRegistry {
 
         // Only cron triggers supported
         let cron_expr = match &trigger.trigger_type {
-            TriggerType::Cron(s) => s.clone(),
+            TriggerType::Cron(s) => s.as_str(),
         };
 
         // Validate that cron produces the requested occurrence (tolerant parse)
-        let schedule = parse_cron_schedule(&cron_expr)
+        let schedule = parse_cron_schedule(cron_expr)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse cron expression: {}", cron_expr))?;
 
         let before = desired_minute - chrono::Duration::seconds(1);
@@ -630,33 +629,6 @@ fn calculate_next_cron_time(cron_expr: &str) -> Option<Instant> {
     Some(Instant::now() + duration)
 }
 
-/// Calculate next trigger time for time-based triggers
-fn calculate_next_trigger_time(time_str: &str) -> Option<Instant> {
-    let parts: Vec<&str> = time_str.split(':').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let hour: u32 = parts[0].parse().ok()?;
-    let minute: u32 = parts[1].parse().ok()?;
-
-    let now = Local::now();
-    let target_time = NaiveTime::from_hms_opt(hour, minute, 0)?;
-
-    let mut target_datetime = now.date_naive().and_time(target_time);
-    let target_datetime_with_tz = Local.from_local_datetime(&target_datetime).single()?;
-
-    if target_datetime_with_tz <= now {
-        // If time has passed today, schedule for tomorrow
-        target_datetime = target_datetime.checked_add_days(Days::new(1))?;
-        let target_datetime_with_tz = Local.from_local_datetime(&target_datetime).single()?;
-        let duration = (target_datetime_with_tz - now).to_std().ok()?;
-        Some(Instant::now() + duration)
-    } else {
-        let duration = (target_datetime_with_tz - now).to_std().ok()?;
-        Some(Instant::now() + duration)
-    }
-}
 
 /// Check if trigger should run today based on metadata
 fn should_run_today(trigger: &Trigger) -> bool {
@@ -797,7 +769,7 @@ pub async fn execute_idle_analysis(
 
             let (mut system_prompt, messages) =
                 match crate::prompt::PromptBuilder::build_background(
-                    &memory,
+                    memory,
                     task_manager,
                     Some("pattern"),
                     Some(&prompt_text),
@@ -933,7 +905,7 @@ pub async fn execute_idle_analysis(
 
             let (mut system_prompt, messages) =
                 match crate::prompt::PromptBuilder::build_background(
-                    &memory,
+                    memory,
                     task_manager,
                     Some("morning_briefing"),
                     Some(&prompt_text),
@@ -1019,7 +991,7 @@ pub async fn execute_idle_analysis(
             // Build a background system prompt for the LLM and invoke it with the note as instructions.
             let (mut system_prompt, messages) =
                 match crate::prompt::PromptBuilder::build_background(
-                    &memory,
+                    memory,
                     task_manager,
                     Some("background"),
                     Some(&note),
@@ -1148,8 +1120,7 @@ pub async fn run_trigger_loop(
                             }
                         };
 
-                        let mut is_cancelled = false;
-                        if let Some(next_min) = next_dt {
+                        let is_cancelled = if let Some(next_min) = next_dt {
                             // check cron_exceptions table for this trigger and occurrence
                             let trig_name = trigger.name.clone();
                             let occ_str = next_min.to_rfc3339();
@@ -1157,7 +1128,7 @@ pub async fn run_trigger_loop(
                             let db_path_clone = registry.db_path.clone();
                             let trig_name_check = trig_name.clone();
                             let occ_check = occ_str.clone();
-                            let cancelled = match crate::database::Database::execute_blocking(db_path_clone, move |conn| {
+                            match crate::database::Database::execute_blocking(db_path_clone, move |conn| {
                                 let mut stmt = conn.prepare("SELECT COUNT(1) FROM cron_exceptions WHERE trigger_name = ?1 AND occurrence = ?2")?;
                                 let count: i64 = stmt.query_row((&trig_name_check, &occ_check), |r| r.get(0))?;
                                 Ok(count > 0)
@@ -1167,9 +1138,8 @@ pub async fn run_trigger_loop(
                                     warn!("Failed to check cron_exceptions: {}", e);
                                     false
                                 }
-                            };
-                            is_cancelled = cancelled;
-                        }
+                            }
+                        } else { false };
 
                         if is_cancelled {
                             // Skip this occurrence and look for the next one (we'll let reschedule logic handle future runs)
@@ -1210,12 +1180,12 @@ pub async fn run_trigger_loop(
                 () = sleep_until(instant) => {
                     // Trigger time reached - execute it
                     info!("Executing trigger: {}", trigger.name);
-                    if let Err(e) = execute_idle_analysis(&trigger, &memory, &task_manager, &llm_client, state.clone()).await {
+                    if let Err(e) = execute_idle_analysis(&trigger, memory.as_ref(), task_manager.as_ref(), llm_client.as_ref(), state.clone()).await {
                         error!("Failed to execute trigger {}: {}", trigger.name, e);
                     }
 
                     // Remove one-shot triggers after execution if requested
-                    if trigger.metadata.get("one_shot").map(|v| v == "true").unwrap_or(false) {
+                    if trigger.metadata.get("one_shot").is_some_and(|v| v == "true") {
                         if let Err(e) = registry.remove_trigger(&trigger.name).await {
                             error!("Failed to remove one-shot trigger {}: {}", trigger.name, e);
                         }

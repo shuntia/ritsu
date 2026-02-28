@@ -140,8 +140,7 @@ async fn main() -> Result<()> {
         .iter()
         .find(|b| b.name == config.llm.default_backend)
         .or_else(|| config.llm.backends.first())
-        .map(|b| b.model.as_str())
-        .unwrap_or("llama3.2:3b");
+        .map_or("llama3.2:3b", |b| b.model.as_str());
     start_ollama_if_needed(model_name).await;
 
     // Initialize database
@@ -223,7 +222,7 @@ async fn main() -> Result<()> {
             let fut = async move {
                 match task_manager.get_task_summary().await {
                     Ok(s) if !s.is_empty() => {
-                        Ok(Some(format!("[lucide:clipboard] Current Tasks:\n{}", s)))
+                        Ok(Some(format!("[lucide:clipboard] Current Tasks:\n{s}")))
                     }
                     _ => Ok(None),
                 }

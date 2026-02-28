@@ -55,9 +55,16 @@ impl ToolRegistry {
 
     pub async fn register(&self, tool: Tool) {
         let name = tool.name.clone();
+        let tag_count = tool.tags.len();
         self.tools.write().await.insert(name.clone(), tool);
-        info!("Registered tool: {name}");
+        info!("Registered tool: {name} ({tag_count} tags)");
     }
+
+    #[cfg(test)]
+    pub async fn tool_count(&self) -> usize {
+        self.tools.read().await.len()
+    }
+
 
     pub async fn execute(&self, name: &str, args: HashMap<String, String>) -> Result<ToolResult> {
         let start = std::time::Instant::now();
@@ -153,7 +160,6 @@ impl ToolRegistry {
             .map(|tool| ToolInfo {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
-                tags: tool.tags.clone(),
                 parameters: tool
                     .parameters
                     .iter()
@@ -175,7 +181,6 @@ impl ToolRegistry {
 pub struct ToolInfo {
     pub name: String,
     pub description: String,
-    pub tags: Vec<String>,
     pub parameters: Vec<ToolParameterInfo>,
 }
 
@@ -435,13 +440,11 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                 Box::pin(async move {
                     let id_str = match args.get("id") {
                         Some(i) if !i.trim().is_empty() => i.clone(),
-                        _ => {
-                            return ToolResult::error("Missing required parameter: id".to_string())
-                        }
+                        _ => return ToolResult::error("Missing required parameter: id".to_string()),
                     };
-                    let id = match id_str.parse::<i64>() {
-                        Ok(v) => v,
-                        Err(_) => return ToolResult::error(format!("Invalid id: {id_str}")),
+
+                    let Ok(id) = id_str.parse::<i64>() else {
+                        return ToolResult::error(format!("Invalid id: {id_str}"));
                     };
 
                     match memory.delete_note(id).await {
@@ -794,10 +797,10 @@ Parses the provided datetime, builds a cron expression including day and month, 
                     let description = args.get("description").cloned();
 
                     match trigger_registry.create_one_shot_trigger(&name, &datetime, tags, description.as_deref()).await {
-                        Ok(()) => ToolResult::success(format!("One-shot trigger '{}' created for {}", name, datetime)),
+                        Ok(()) => ToolResult::success(format!("One-shot trigger '{name}' created for {datetime}")),
                         Err(e) => {
                             tracing::error!("Failed to create one-shot trigger: {}", e);
-                            ToolResult::error(format!("Failed to create one-shot trigger: {}", e))
+                            ToolResult::error(format!("Failed to create one-shot trigger: {e}"))
                         }
                     }
                 })
@@ -885,7 +888,7 @@ ToolResult::success or ToolResult::error."
 
                     // Build updates map excluding the 'name' key
                     let mut updates: HashMap<String, String> = HashMap::new();
-                    for (k, v) in args.iter() {
+                    for (k, v) in &args {
                         if k == "name" {
                             continue;
                         }
@@ -897,7 +900,7 @@ ToolResult::success or ToolResult::error."
                     }
 
                     match trigger_registry.update_trigger(&name, updates).await {
-                        Ok(()) => ToolResult::success(format!("Trigger '{}' updated", name)),
+                        Ok(()) => ToolResult::success(format!("Trigger '{name}' updated")),
                         Err(e) => {
                             tracing::error!("Failed to update trigger: {}", e);
                             ToolResult::error(format!("Failed to update trigger: {e}"))
@@ -925,7 +928,7 @@ ToolResult::success or ToolResult::error."
                         .iter()
                         .map(|t| {
                             let ttype = match &t.trigger_type {
-                                crate::trigger::TriggerType::Cron(s) => format!("cron({})", s),
+                                crate::trigger::TriggerType::Cron(s) => format!("cron({s})"),
                             };
                             format!("#{}: {} ({}) [enabled: {}]", t.id, t.name, ttype, t.enabled)
                         })
@@ -960,7 +963,7 @@ ToolResult::success or ToolResult::error."
                         }
                     };
                     match trigger_registry.delete_trigger(&name).await {
-                        Ok(()) => ToolResult::success(format!("Trigger '{}' deleted", name)),
+                        Ok(()) => ToolResult::success(format!("Trigger '{name}' deleted")),
                         Err(e) => {
                             tracing::error!("Failed to delete trigger: {}", e);
                             ToolResult::error(format!("Failed to delete trigger: {e}"))
@@ -1001,8 +1004,8 @@ Validates that the trigger exists and that its cron expression would fire at the
                     };
 
                     match trigger_registry.cancel_cron(&name, &occurrence).await {
-                        Ok(()) => ToolResult::success(format!("Cancelled occurrence {} for trigger {}", occurrence, name)),
-                        Err(e) => { tracing::error!("Failed to cancel cron occurrence: {}", e); ToolResult::error(format!("Failed to cancel cron occurrence: {}", e)) }
+                        Ok(()) => ToolResult::success(format!("Cancelled occurrence {occurrence} for trigger {name}")),
+                        Err(e) => { tracing::error!("Failed to cancel cron occurrence: {}", e); ToolResult::error(format!("Failed to cancel cron occurrence: {e}")) }
                     }
                 })
             }),
@@ -1034,7 +1037,7 @@ Validates that the trigger exists and that its cron expression would fire at the
                     let mut updates = std::collections::HashMap::new();
                     updates.insert("enabled".to_string(), "true".to_string());
                     match trigger_registry.update_trigger(&name, updates).await {
-                        Ok(()) => ToolResult::success(format!("Trigger '{}' enabled", name)),
+                        Ok(()) => ToolResult::success(format!("Trigger '{name}' enabled")),
                         Err(e) => {
                             tracing::error!("Failed to enable trigger: {}", e);
                             ToolResult::error(format!("Failed to enable trigger: {e}"))
@@ -1068,7 +1071,7 @@ Validates that the trigger exists and that its cron expression would fire at the
                         }
                     };
                     match trigger_registry.disable_trigger(&name).await {
-                        Ok(()) => ToolResult::success(format!("Trigger '{}' disabled", name)),
+                        Ok(()) => ToolResult::success(format!("Trigger '{name}' disabled")),
                         Err(e) => {
                             tracing::error!("Failed to disable trigger: {}", e);
                             ToolResult::error(format!("Failed to disable trigger: {e}"))
@@ -1202,7 +1205,7 @@ Example args: { "message": "Time to review PRs", "session_id": "abcd" }"#.to_str
                             if let Some(msg) = &message {
                                 info!("With message: {msg}");
                             }
-                            ToolResult::success(format!("Chat window opened (session {})", session_id))
+                            ToolResult::success(format!("Chat window opened (session {session_id})"))
                         }
                         Err(e) => {
                             warn!("Failed to open chat via client daemon: {}", e);
@@ -1271,10 +1274,7 @@ ToolResult::success on success or ToolResult::error on failure."
                     match conversation_manager.set_title(&session_id, &title).await {
                         Ok(()) => {
                             info!("Set title for session {}: {}", session_id, title);
-                            ToolResult::success(format!(
-                                "Title set for session {}: {}",
-                                session_id, title
-                            ))
+                            ToolResult::success(format!("Title set for session {session_id}: {title}"))
                         }
                         Err(e) => {
                             tracing::error!("Failed to set title: {}", e);
@@ -1568,18 +1568,13 @@ Example args: { "status": "pending" }"#.to_string(),
                 Box::pin(async move {
                     let id_str = match args.get("id") {
                         Some(i) if !i.trim().is_empty() => i.clone(),
-                        _ => {
-                            return ToolResult::error("Missing required parameter: id".to_string())
-                        }
+                        _ => return ToolResult::error("Missing required parameter: id".to_string()),
                     };
-                    let id = match id_str.parse::<i64>() {
-                        Ok(v) => v,
-                        Err(_) => return ToolResult::error(format!("Invalid task ID: {id_str}")),
-                    };
+                    let Ok(id) = id_str.parse::<i64>() else { return ToolResult::error(format!("Invalid task ID: {id_str}")); };
                     match tm.delete_task(id).await {
-                        Ok(()) => ToolResult::success(format!("Deleted task {}", id)),
+                        Ok(()) => ToolResult::success(format!("Deleted task {id}")),
                         Err(e) => {
-                            tracing::error!("Failed to delete task: {}", e);
+                            tracing::error!("Failed to delete task: {e}");
                             ToolResult::error(format!("Failed to delete task: {e}"))
                         }
                     }
@@ -1697,7 +1692,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                         Some(s) if !s.trim().is_empty() => s.clone(),
                         _ => return ToolResult::error("Missing required parameter: new".to_string()),
                     };
-                    let apply_override = args.get("apply").map(|v| v == "true" || v == "1").unwrap_or(false);
+                    let apply_override = args.get("apply").is_some_and(|v| v == "true" || v == "1");
 
                     // Read tool config (optional)
                     let mut require_user_approval = true;
@@ -1707,39 +1702,40 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
 
                     if let Ok(cfg_contents) = crate::database::read_file_async(crate::config::Config::config_file_path()).await {
                         if let Ok(cfg_val) = toml::from_str::<toml::Value>(&cfg_contents) {
-                            if let Some(tools_tbl) = cfg_val.get("tools").and_then(|v| v.as_table()) {
-                                if let Some(usp) = tools_tbl.get("update_system_prompt").and_then(|v| v.as_table()) {
-                                    if let Some(b) = usp.get("require_user_approval").and_then(|v| v.as_bool()) { require_user_approval = b; }
-                                    if let Some(i) = usp.get("max_prompt_length").and_then(|v| v.as_integer()) { max_prompt_length = i as usize; }
-                                    if let Some(s) = usp.get("audit_log").and_then(|v| v.as_str()) { audit_log_path = Some(s.to_string()); }
-                                    if let Some(b) = usp.get("allow_background_updates").and_then(|v| v.as_bool()) { _allow_background_updates = b; }
+                            if let Some(tools_tbl) = cfg_val.get("tools").and_then(toml::Value::as_table) {
+                                if let Some(usp) = tools_tbl.get("update_system_prompt").and_then(toml::Value::as_table) {
+                                    if let Some(b) = usp.get("require_user_approval").and_then(toml::Value::as_bool) { require_user_approval = b; }
+                                    if let Some(i) = usp.get("max_prompt_length").and_then(toml::Value::as_integer) { max_prompt_length = i as usize; }
+                                    if let Some(s) = usp.get("audit_log").and_then(toml::Value::as_str) { audit_log_path = Some(s.to_string()); }
+                                    if let Some(b) = usp.get("allow_background_updates").and_then(toml::Value::as_bool) { _allow_background_updates = b; }
                                 }
                             }
                         }
                     }
 
-                    if new.len() > max_prompt_length {
-                        return ToolResult::error(format!("New prompt exceeds max length ({} > {})", new.len(), max_prompt_length));
+                    let new_len = new.len();
+                    if new_len > max_prompt_length {
+                        return ToolResult::error(format!("New prompt exceeds max length ({new_len} > {max_prompt_length})"));
                     }
 
                     // Helper: replace first occurrence only
                     let replace_first = |text: &str, needle: &str, replacement: &str| -> Option<String> {
-                        if let Some(pos) = text.find(needle) {
+                        text.find(needle).map(|pos| {
                             let mut s = String::with_capacity(text.len() - needle.len() + replacement.len());
                             s.push_str(&text[..pos]);
                             s.push_str(replacement);
                             s.push_str(&text[pos + needle.len()..]);
-                            Some(s)
-                        } else { None }
+                            s
+                        })
                     };
 
                     // Helper: append audit log (best-effort)
                     let append_audit = |path_opt: Option<String>, location: &str, applied: bool, old_snip: &str, new_snip: &str| {
                         let mut path = path_opt.unwrap_or_else(|| {
-                            if let Some(h) = dirs::home_dir() { h.join(".local/share/ritsu/ai_prompt_changes.log").to_string_lossy().to_string() } else { "/tmp/ritsu_ai_prompt_changes.log".to_string() }
+                            dirs::home_dir().map_or_else(|| "/tmp/ritsu_ai_prompt_changes.log".to_string(), |h| h.join(".local/share/ritsu/ai_prompt_changes.log").to_string_lossy().to_string())
                         });
                         if path.starts_with("~/") {
-                            if let Some(h) = dirs::home_dir() { path = path.replacen("~", &h.to_string_lossy(), 1); }
+                            if let Some(h) = dirs::home_dir() { path = path.replacen('~', &h.to_string_lossy(), 1); }
                         }
                         let entry = format!("{} | update_system_prompt | location={} | applied={}\nOLD:\n{}\n---\nNEW:\n{}\n\n", chrono::Utc::now().to_rfc3339(), location, applied, old_snip, new_snip);
                         let _ = std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()));
@@ -1764,7 +1760,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                                     let updated_clone = updated.clone();
                                     let res = tokio::task::spawn_blocking(move || std::fs::write(write_path, updated_clone)).await;
                                     if let Err(e) = res {
-                                        return ToolResult::error(format!("Failed to write updated prompt file: {}", e));
+                                        return ToolResult::error(format!("Failed to write updated prompt file: {e}"));
                                     }
                                     let _ = memory.store_idle_analysis("prompt_update", &std::collections::HashMap::from([("applied".to_string(), "true".to_string())]), Some(&new)).await;
                                     append_audit(audit_log_path.clone(), "file:system_base.md", true, &old, &new);
@@ -1787,7 +1783,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                             }
                             if let Some(updated) = replace_first(&base, &old, &new) {
                                 if let Err(e) = memory.store_system_prompt("base", &updated).await {
-                                    return ToolResult::error(format!("Failed to store updated base prompt: {}", e));
+                                    return ToolResult::error(format!("Failed to store updated base prompt: {e}"));
                                 }
                                 append_audit(audit_log_path.clone(), "db:base", true, &old, &new);
                                 return ToolResult::success("DB base prompt updated".to_string());
@@ -1808,7 +1804,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                             }
                             if let Some(updated) = replace_first(&ai, &old, &new) {
                                 if let Err(e) = memory.store_system_prompt("ai_generated", &updated).await {
-                                    return ToolResult::error(format!("Failed to store updated ai_generated prompt: {}", e));
+                                    return ToolResult::error(format!("Failed to store updated ai_generated prompt: {e}"));
                                 }
                                 append_audit(audit_log_path.clone(), "db:ai_generated", true, &old, &new);
                                 return ToolResult::success("AI-generated prompt updated".to_string());
@@ -1819,7 +1815,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                     // Not found - if apply_override and approval not required, insert as new ai_generated prompt
                     if apply_override && !require_user_approval {
                         if let Err(e) = memory.store_system_prompt("ai_generated", &new).await {
-                            return ToolResult::error(format!("Failed to store new ai_generated prompt: {}", e));
+                            return ToolResult::error(format!("Failed to store new ai_generated prompt: {e}"));
                         }
                         append_audit(audit_log_path.clone(), "db:ai_generated:new", true, "", &new);
                         return ToolResult::success("New ai_generated prompt stored".to_string());
@@ -1873,16 +1869,13 @@ Example args: { "seconds": "1.5" }"#
                     let secs = match secs_str.parse::<f64>() {
                         Ok(v) if v >= 0.0 => v,
                         _ => {
-                            return ToolResult::error(format!(
-                                "Invalid seconds value: {}",
-                                secs_str
-                            ))
+                            return ToolResult::error(format!("Invalid seconds value: {secs_str}"))
                         }
                     };
                     let dur = std::time::Duration::from_secs_f64(secs);
                     info!("Tool 'wait' sleeping for {}s", secs);
                     tokio::time::sleep(dur).await;
-                    ToolResult::success(format!("Waited {} seconds", secs))
+                    ToolResult::success(format!("Waited {secs} seconds"))
                 })
             }),
         }
@@ -1920,56 +1913,45 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
                     // Parse URL
                     let url = match reqwest::Url::parse(&url_str) {
                         Ok(u) => u,
-                        Err(e) => return ToolResult::error(format!("Invalid URL: {}", e)),
+                        Err(e) => return ToolResult::error(format!("Invalid URL: {e}")),
                     };
                     if url.scheme() != "https" {
                         return ToolResult::error("Only https:// URLs are allowed".to_string());
                     }
-                    let host = match url.host_str() {
-                        Some(h) => h,
-                        None => return ToolResult::error("URL missing host".to_string()),
-                    };
+                    let Some(host) = url.host_str() else { return ToolResult::error("URL missing host".to_string()) };
                     let allowed_entries = &cfg.network.allowed_http_hosts;
                     if allowed_entries.is_empty() {
                         return ToolResult::error("No allowed hosts configured for 'get' tool".to_string());
                     }
                     // Each entry may be "host" or "host/path" and may optionally be a full URL with scheme.
                     let mut permitted = false;
-                    for entry in allowed_entries.iter() {
+                    for entry in allowed_entries {
                         // Parse entry into host and optional path prefix
-                        let (entry_host, entry_path_opt) = if entry.starts_with("http://") || entry.starts_with("https://") {
-                            match reqwest::Url::parse(entry) {
-                                Ok(u) => (u.host_str().map(|s| s.to_string()), Some(u.path().to_string())),
-                                Err(_) => {
-                                    // fallback: treat entire entry as host-like
-                                    let h = entry.split('/').next().map(|s| s.split(':').next().unwrap_or(s).to_string());
-                                    (h, None)
-                                }
-                            }
+                        let (entry_host_opt, entry_path_opt) = if entry.starts_with("http://") || entry.starts_with("https://") {
+                            reqwest::Url::parse(entry).map_or_else(|_| {
+                                // fallback: treat entire entry as host-like
+                                let h = entry.split('/').next().map(|s| s.split(':').next().unwrap_or(s).to_string());
+                                (h, None)
+                            }, |u| (u.host_str().map(ToString::to_string), Some(u.path().to_string())))
                         } else {
-                            if let Some(pos) = entry.find('/') {
+                            entry.find('/').map_or_else(|| (Some(entry.split(':').next().unwrap_or(entry).to_string()), None), |pos| {
                                 let host_part = &entry[..pos];
                                 let path_part = &entry[pos..]; // includes '/'
                                 (Some(host_part.split(':').next().unwrap_or(host_part).to_string()), Some(path_part.to_string()))
-                            } else {
-                                (Some(entry.split(':').next().unwrap_or(entry).to_string()), None)
-                            }
+                            })
                         };
 
-                        let entry_host = match entry_host {
-                            Some(h) => h,
-                            None => continue,
-                        };
+                        let Some(entry_host) = entry_host_opt else { continue };
 
                         // Host match: exact or subdomain
-                        if !(host == entry_host || host.ends_with(&format!(".{}", entry_host))) {
+                        if !(host == entry_host || host.ends_with(&format!(".{entry_host}"))) {
                             continue;
                         }
 
                         // Path match if provided
-                        if let Some(ref prefix) = entry_path_opt {
+                        if let Some(prefix) = entry_path_opt {
                             let target_path = url.path();
-                            if target_path.starts_with(prefix) {
+                            if target_path.starts_with(&prefix) {
                                 permitted = true;
                                 break;
                             }
@@ -1980,27 +1962,28 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
                     }
 
                     if !permitted {
-                        return ToolResult::error(format!("Host or path not allowed: {}{}", host, url.path()));
+                        let path = url.path();
+                        return ToolResult::error(format!("Host or path not allowed: {host}{path}"));
                     }
 
                     let timeout_secs = args.get("timeout_seconds").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
                     let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs)).build() {
                         Ok(c) => c,
-                        Err(e) => return ToolResult::error(format!("Failed to build HTTP client: {}", e)),
+                        Err(e) => return ToolResult::error(format!("Failed to build HTTP client: {e}")),
                     };
                     // Perform GET
                     let resp = match client.get(url.clone()).send().await {
                         Ok(r) => r,
-                        Err(e) => return ToolResult::error(format!("HTTP request failed: {}", e)),
+                        Err(e) => return ToolResult::error(format!("HTTP request failed: {e}")),
                     };
                     let status = resp.status();
                     let body = match resp.text().await {
                         Ok(t) => t,
-                        Err(e) => return ToolResult::error(format!("Failed to read response body: {}", e)),
+                        Err(e) => return ToolResult::error(format!("Failed to read response body: {e}")),
                     };
                     let max = 8192usize;
-                    let truncated = if body.len() > max { format!("{}...[truncated {} bytes]", &body[..max], body.len() - max) } else { body.clone() };
-                    ToolResult::success(format!("Status: {}\\n\\n{}", status, truncated))
+                    let truncated = if body.len() > max { format!("{}...[truncated {} bytes]", &body[..max], body.len() - max) } else { body };
+                    ToolResult::success(format!("Status: {status}\\n\\n{truncated}"))
                 })
             }),
         }
@@ -2009,7 +1992,7 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
     pub fn parallel(registry: std::sync::Arc<super::ToolRegistry>) -> Tool {
         Tool {
             name: "parallel".to_string(),
-            description: r#"Execute multiple registered tools in parallel.
+            description: r#"Execute multiple registered tools in parallel. Use this as much as possible, when you need to execute tasks at the same time.
 
 Parameters:
 - calls (string, required): JSON array of calls. Each call may be either a string (tool name) or an object {"name":"tool_name", "args": {"k":"v"}}.
@@ -2028,7 +2011,7 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
 
                     let calls_val: serde_json::Value = match serde_json::from_str(&calls_str) {
                         Ok(v) => v,
-                        Err(e) => return ToolResult::error(format!("Invalid JSON for 'calls': {}", e)),
+                        Err(e) => return ToolResult::error(format!("Invalid JSON for 'calls': {e}")),
                     };
 
                     let calls_arr = match calls_val.as_array() {
@@ -2038,7 +2021,7 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
 
                     let mut handles = Vec::new();
 
-                    for item in calls_arr.into_iter() {
+                    for item in calls_arr {
                         // Normalize to (name, args_map)
                         let (name, arg_map) = if item.is_string() {
                             match item.as_str() {
@@ -2052,8 +2035,8 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
                             };
                             let mut hm = std::collections::HashMap::new();
                             if let Some(a) = obj.get("args").and_then(|v| v.as_object()) {
-                                for (k, v) in a.iter() {
-                                    let val_str = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
+                                for (k, v) in a {
+                                    let val_str = v.as_str().map_or_else(|| v.to_string(), ToString::to_string);
                                     hm.insert(k.clone(), val_str);
                                 }
                             }
@@ -2101,7 +2084,7 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
 
                     let out = match serde_json::to_string(&results) {
                         Ok(s) => s,
-                        Err(e) => format!("Failed to serialize results: {}", e),
+                        Err(e) => format!("Failed to serialize results: {e}"),
                     };
 
                     ToolResult::success(out)
@@ -2117,6 +2100,7 @@ use crate::state::ServerState;
 use crate::tasks::TaskManager;
 use crate::trigger::TriggerRegistry as TriggerReg;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn register_all_tools(
     registry: std::sync::Arc<ToolRegistry>,
     memory: Arc<MemoryManager>,
@@ -2201,7 +2185,7 @@ pub async fn register_all_tools(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::panic)]
+#[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::conversations::ConversationManager;
@@ -2293,18 +2277,12 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let db_path_str = db_path.to_string_lossy().to_string();
-
         let db = Database::new(&db_path).await.expect("DB init");
-        let memory = Arc::new(MemoryManager::new(
-            db.connection.clone(),
-            db_path_str.clone(),
-            false,
-        ));
+        let memory = Arc::new(MemoryManager::new(db.connection.clone(), false));
 
         // create a note
         let note_id = memory
-            .create_note("Test note content", &vec!["test".to_string()])
+            .create_note("Test note content", &["test".to_string()])
             .await
             .expect("create_note");
 
@@ -2439,11 +2417,7 @@ mod tests {
             dt.month()
         );
         let found = triggers.iter().any(|t| t.name == "oneshot_test" && matches!(t.trigger_type, crate::trigger::TriggerType::Cron(ref s) if s == &expected_cron));
-        assert!(
-            found,
-            "One-shot trigger not found with expected cron: {}",
-            expected_cron
-        );
+        assert!(found, "One-shot trigger not found with expected cron: {expected_cron}");
 
         let _ = std::fs::remove_file(&db_path);
     }
@@ -2513,7 +2487,6 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let db_path_str = db_path.to_string_lossy().to_string();
 
         let db = Database::new(&db_path).await.expect("DB init");
         let tm = Arc::new(TaskManager::new(db.connection.clone()));
@@ -2549,7 +2522,6 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let db_path_str = db_path.to_string_lossy().to_string();
 
         let db = Database::new(&db_path).await.expect("DB init");
         let conv = Arc::new(ConversationManager::new(db.connection.clone()));

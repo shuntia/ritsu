@@ -11,10 +11,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 /// Test configuration and paths
-
 struct TestFixture {
     test_dir: PathBuf,
-    db_path: PathBuf,
     server_socket: PathBuf,
     client_socket: PathBuf,
     config_path: PathBuf,
@@ -76,7 +74,6 @@ llm_request_seconds = 15
 
         Ok(Self {
             test_dir,
-            db_path,
             server_socket,
             client_socket,
             config_path,

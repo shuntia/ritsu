@@ -25,10 +25,7 @@ pub enum ViewState {
 pub enum Message {
     InputChanged(String),
     SendMessage,
-    MessageReceived(String),
     MessageChunk(String, bool), // content, is_final
-    StreamingStarted,
-    ServerResponse(Result<String, String>),
     Tick,
     SwitchView(ViewState),
     LoadSession(String),
@@ -66,7 +63,6 @@ pub enum Message {
 pub struct SessionInfo {
     session_id: String,
     started_at: String,
-    last_activity: String,
     turn_count: i64,
     title: Option<String>,
 }
@@ -367,15 +363,6 @@ impl RitsuGui {
                     Task::none()
                 }
             }
-            Message::StreamingStarted => {
-                // Streaming channel is now active via subscription
-                Task::none()
-            }
-            Message::MessageReceived(_content) => {
-                // Legacy handler - no longer used with streaming
-                self.is_loading = false;
-                Task::none()
-            }
             Message::MessageChunk(chunk, is_final) => {
                 // Append chunk to the streaming message
                 if let Some(idx) = self.streaming_message_index {
@@ -390,14 +377,6 @@ impl RitsuGui {
                     self.streaming_message_index = None;
                 }
 
-                Task::none()
-            }
-            Message::ServerResponse(result) => {
-                match result {
-                    Ok(msg) => println!("{} {msg}", nerd_font::categories::Fa::Check),
-                    Err(e) => tracing::error!("{} Error: {}", nerd_font::categories::Fa::Cross, e),
-                }
-                self.is_loading = false;
                 Task::none()
             }
             Message::SwitchView(view) => {
@@ -426,7 +405,6 @@ impl RitsuGui {
                                         .map(|s| SessionInfo {
                                             session_id: s.session_id,
                                             started_at: s.started_at,
-                                            last_activity: s.last_activity,
                                             turn_count: s.turn_count,
                                             title: s.title,
                                         })

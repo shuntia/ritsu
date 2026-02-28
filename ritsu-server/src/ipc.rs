@@ -113,9 +113,9 @@ async fn handle_client(
     state: Arc<ServerState>,
     config: Arc<Config>,
 ) -> Result<()> {
-    // Register this client for push notifications (bounded channel with backpressure)
+    // Create a push channel for this client; register only if the client explicitly subscribes
     let (push_tx, mut push_rx) = mpsc::channel(crate::state::PUSH_CHANNEL_CAPACITY);
-    state.register_client(push_tx).await;
+    let mut subscribed = false;
 
     loop {
         tokio::select! {
@@ -124,6 +124,12 @@ async fn handle_client(
                 match result {
                     Ok(Some(request)) => {
                         state.mark_activity().await;
+
+                        // Register this client's push channel for server push notifications on first request
+                        if !subscribed {
+                            state.register_client(push_tx.clone()).await;
+                            subscribed = true;
+                        }
 
                         // Special handling for SendMessage to support streaming
                         if let ClientRequest::SendMessage { content, session_id } = request {
@@ -304,14 +310,14 @@ async fn handle_send_message_streaming(
 
         // For non-streaming mode, if tools are enabled, run the tool execution loop which will
         // call tools and synthesize a follow-up response. Otherwise, just do a simple request.
-        let response_result = if !disable_tools {
+        let response_result = if disable_tools {
+            llm_client
+                .generate_with_tools(&messages, system_prompt.as_deref(), false)
+                .await
+        } else {
             // Run up to 3 iterations of tool execution
             llm_client
                 .generate_with_tool_execution(&messages, system_prompt.as_deref(), 3)
-                .await
-        } else {
-            llm_client
-                .generate_with_tools(&messages, system_prompt.as_deref(), false)
                 .await
         };
 
@@ -491,6 +497,7 @@ async fn send_push(stream: &mut UnixStream, push: ServerPush) -> Result<()> {
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 async fn handle_request(
     request: ClientRequest,
     memory: &MemoryManager,
@@ -659,7 +666,7 @@ async fn handle_request(
             {
                 Ok(()) => {
                     // Notify connected clients about the new trigger
-                    let _ = state
+                    let () = state
                         .broadcast_push(ServerPush::Notification {
                             title: "Trigger Created".to_string(),
                             message: format!("Trigger '{}' created", name),
@@ -677,7 +684,7 @@ async fn handle_request(
         ClientRequest::DeleteTrigger { name } => {
             match trigger_registry.delete_trigger(&name).await {
                 Ok(()) => {
-                    let _ = state
+                    let () = state
                         .broadcast_push(ServerPush::Notification {
                             title: "Trigger Deleted".to_string(),
                             message: format!("Trigger '{}' deleted", name),
@@ -695,7 +702,7 @@ async fn handle_request(
         ClientRequest::DisableTrigger { name } => {
             match trigger_registry.disable_trigger(&name).await {
                 Ok(()) => {
-                    let _ = state
+                    let () = state
                         .broadcast_push(ServerPush::Notification {
                             title: "Trigger Disabled".to_string(),
                             message: format!("Trigger '{}' disabled", name),
@@ -770,7 +777,7 @@ async fn handle_request(
                 .await
             {
                 Ok(id) => {
-                    let _ = state
+                    let () = state
                         .broadcast_push(ServerPush::Notification {
                             title: "Task Created".to_string(),
                             message: format!("Task '{}' created (id: {})", title, id),
@@ -813,7 +820,7 @@ async fn handle_request(
             }
 
             // Notify clients about task update
-            let _ = state
+            let () = state
                 .broadcast_push(ServerPush::Notification {
                     title: "Task Updated".to_string(),
                     message: format!("Task #{} updated", id),
@@ -826,7 +833,7 @@ async fn handle_request(
 
         ClientRequest::DeleteTask { id } => match task_manager.delete_task(id).await {
             Ok(()) => {
-                let _ = state
+                let () = state
                     .broadcast_push(ServerPush::Notification {
                         title: "Task Deleted".to_string(),
                         message: format!("Task #{} deleted", id),
@@ -916,7 +923,7 @@ async fn handle_request(
         ClientRequest::CreateNote { content, tags } => {
             match memory.create_note(&content, &tags).await {
                 Ok(id) => {
-                    let _ = state
+                    let () = state
                         .broadcast_push(ServerPush::Notification {
                             title: "Note Created".to_string(),
                             message: format!("Note #{} created", id),
@@ -1010,7 +1017,7 @@ async fn handle_request(
             }
 
             info!("All memory cleared successfully");
-            let _ = state
+            let () = state
                 .broadcast_push(ServerPush::Notification {
                     title: "Memory Cleared".to_string(),
                     message: "All memory has been cleared by client request".to_string(),
@@ -1037,7 +1044,7 @@ async fn handle_request(
         ClientRequest::SetSystemPrompt { content } => {
             match memory.store_system_prompt("base", &content).await {
                 Ok(()) => {
-                    let _ = state
+                    let () = state
                         .broadcast_push(ServerPush::Notification {
                             title: "System Prompt Updated".to_string(),
                             message: "Base system prompt updated".to_string(),
@@ -1087,7 +1094,7 @@ async fn handle_request(
         }
 
         ClientRequest::GetDatabaseStats => match memory.get_database_stats().await {
-            Ok(stats) => ServerResponse::Success { message: stats },
+            Ok(db_stats) => ServerResponse::Success { message: db_stats },
             Err(e) => ServerResponse::Error {
                 message: format!("Failed to get database stats: {}", e),
             },
@@ -1126,7 +1133,7 @@ async fn handle_request(
 
         ClientRequest::ForceCompact => match memory.force_compact().await {
             Ok(()) => {
-                let _ = state
+                let () = state
                     .broadcast_push(ServerPush::Notification {
                         title: "Memory Compaction".to_string(),
                         message: "Memory compaction completed successfully".to_string(),
@@ -1144,7 +1151,7 @@ async fn handle_request(
 
         ClientRequest::ReindexDatabase => match memory.reindex_database().await {
             Ok(()) => {
-                let _ = state
+                let () = state
                     .broadcast_push(ServerPush::Notification {
                         title: "Database Reindexed".to_string(),
                         message: "Database reindexed successfully".to_string(),
@@ -1214,7 +1221,7 @@ async fn handle_request(
                 warn!("Failed to reindex database after reset: {}", e);
             }
 
-            let _ = state
+            let () = state
                 .broadcast_push(ServerPush::Notification {
                     title: "Database Reset".to_string(),
                     message: "Database was reset by client request".to_string(),
