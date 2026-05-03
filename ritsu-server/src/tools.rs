@@ -21,6 +21,7 @@ pub struct Tool {
     pub tags: Vec<String>,
     pub parameters: Vec<ToolParameter>,
     pub handler: ToolFunction,
+    pub interactive_only: bool,
 }
 
 /// Tool parameter definition
@@ -152,11 +153,13 @@ impl ToolRegistry {
         Ok(())
     }
 
-    /// Get tool information for AI context
-    pub async fn get_tools_for_ai(&self) -> Vec<ToolInfo> {
+    /// Get tool information for AI context.
+    /// When `interactive` is false, interactive-only tools (e.g. `set_title`) are excluded.
+    pub async fn get_tools_for_ai(&self, interactive: bool) -> Vec<ToolInfo> {
         let tools = self.tools.read().await;
         tools
             .values()
+            .filter(|tool| interactive || !tool.interactive_only)
             .map(|tool| ToolInfo {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
@@ -246,6 +249,7 @@ Example args: { "title": "Reminder", "message": "Stand up break", "urgency": "lo
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let state = state.clone();
                 Box::pin(async move {
@@ -324,6 +328,7 @@ Example args: { "content": "Met with Alice about roadmap", "tags": "meeting,road
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 Box::pin(async move {
@@ -392,6 +397,7 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 Box::pin(async move {
@@ -435,6 +441,7 @@ ToolResult::success("Note <id> updated") or ToolResult::error on failure."#.to_s
                 required: true,
                 param_type: "string".to_string(),
             }],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 Box::pin(async move {
@@ -497,6 +504,7 @@ Example args: { "type": "notes", "query": "roadmap", "limit": "5" }"#.to_string(
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 Box::pin(async move {
@@ -507,7 +515,8 @@ Example args: { "type": "notes", "query": "roadmap", "limit": "5" }"#.to_string(
                     let query = args.get("query").cloned().unwrap_or_default();
                     let limit = args.get("limit")
                         .and_then(|s| s.parse::<i64>().ok())
-                        .unwrap_or(10);
+                        .unwrap_or(10)
+                        .min(1000);
 
                     info!("Querying memory: type={}, query={}, limit={}", query_type, query, limit);
 
@@ -682,6 +691,7 @@ Example args: { "name": "standup_reminder", "schedule": "09:00", "type": "time",
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -781,6 +791,7 @@ Parses the provided datetime, builds a cron expression including day and month, 
                 ToolParameter { name: "tags".to_string(), description: "Comma-separated tags".to_string(), required: false, param_type: "string".to_string() },
                 ToolParameter { name: "description".to_string(), description: "Description".to_string(), required: false, param_type: "string".to_string() },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -874,6 +885,7 @@ ToolResult::success or ToolResult::error."
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -917,6 +929,7 @@ ToolResult::success or ToolResult::error."
             description: r"List all registered triggers with basic metadata.".to_string(),
             tags: vec!["trigger".to_string(), "automation".to_string()],
             parameters: vec![],
+            interactive_only: false,
             handler: Arc::new(move |_args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -951,6 +964,7 @@ ToolResult::success or ToolResult::error."
                 required: true,
                 param_type: "string".to_string(),
             }],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -991,6 +1005,7 @@ Validates that the trigger exists and that its cron expression would fire at the
                 ToolParameter { name: "name".to_string(), description: "Trigger name".to_string(), required: true, param_type: "string".to_string() },
                 ToolParameter { name: "occurrence".to_string(), description: "ISO8601 datetime of occurrence to cancel".to_string(), required: true, param_type: "string".to_string() },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -1023,6 +1038,7 @@ Validates that the trigger exists and that its cron expression would fire at the
                 required: true,
                 param_type: "string".to_string(),
             }],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -1059,6 +1075,7 @@ Validates that the trigger exists and that its cron expression would fire at the
                 required: true,
                 param_type: "string".to_string(),
             }],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -1106,6 +1123,7 @@ Example args: { "type": "conversation" }"#.to_string(),
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let trigger_registry = trigger_registry.clone();
                 Box::pin(async move {
@@ -1171,6 +1189,7 @@ Example args: { "message": "Time to review PRs", "session_id": "abcd" }"#.to_str
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: true,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let state = state.clone();
                 let conv = conversation_manager.clone();
@@ -1184,7 +1203,7 @@ Example args: { "message": "Time to review PRs", "session_id": "abcd" }"#.to_str
                     } else {
                         match conv.get_active_sessions().await {
                             Ok(sessions) if !sessions.is_empty() => sessions[0].session_id.clone(),
-                            _ => format!("auto-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+                            _ => format!("auto-{}", chrono::Utc::now().timestamp_millis()),
                         }
                     };
 
@@ -1252,6 +1271,7 @@ ToolResult::success on success or ToolResult::error on failure."
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: true,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let conversation_manager = conversation_manager.clone();
                 Box::pin(async move {
@@ -1331,6 +1351,7 @@ Example args: { "title": "Write release notes", "priority": "high", "due_date": 
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let task_manager = task_manager.clone();
                 Box::pin(async move {
@@ -1339,8 +1360,13 @@ Example args: { "title": "Write release notes", "priority": "high", "due_date": 
                         _ => return ToolResult::error("Missing required parameter: title".to_string()),
                     };
                     let priority_str = args.get("priority").cloned().unwrap_or_else(|| "medium".to_string());
-                    let due_date = args.get("due_date").cloned();
-                    let description = args.get("description").cloned();
+                    let due_date = args.get("due_date").filter(|s| !s.trim().is_empty()).cloned();
+                    if let Some(ref date_str) = due_date {
+                        if chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_err() {
+                            return ToolResult::error(format!("Invalid due_date '{date_str}': expected YYYY-MM-DD"));
+                        }
+                    }
+                    let description = args.get("description").filter(|s| !s.trim().is_empty()).cloned();
 
                     // Parse priority
                     #[allow(clippy::match_same_arms)]
@@ -1413,6 +1439,7 @@ Example args: { "id": "42", "status": "completed" }"#.to_string(),
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let task_manager = task_manager.clone();
                 Box::pin(async move {
@@ -1515,6 +1542,7 @@ Example args: { "status": "pending" }"#.to_string(),
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let task_manager = task_manager.clone();
                 Box::pin(async move {
@@ -1563,6 +1591,7 @@ Example args: { "status": "pending" }"#.to_string(),
                 required: true,
                 param_type: "string".to_string(),
             }],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let tm = task_manager.clone();
                 Box::pin(async move {
@@ -1623,6 +1652,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                     param_type: "string".to_string(),
                 },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let preferences = preferences.clone();
                 Box::pin(async move {
@@ -1679,6 +1709,7 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                 ToolParameter { name: "new".to_string(), description: "New replacement text".to_string(), required: true, param_type: "string".to_string() },
                 ToolParameter { name: "apply".to_string(), description: "Set to 'true' to force apply immediately".to_string(), required: false, param_type: "string".to_string() },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let memory = memory.clone();
                 let _config = config.clone();
@@ -1738,7 +1769,9 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                             if let Some(h) = dirs::home_dir() { path = path.replacen('~', &h.to_string_lossy(), 1); }
                         }
                         let entry = format!("{} | update_system_prompt | location={} | applied={}\nOLD:\n{}\n---\nNEW:\n{}\n\n", chrono::Utc::now().to_rfc3339(), location, applied, old_snip, new_snip);
-                        let _ = std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes()));
+                        if let Err(e) = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| std::io::Write::write_all(&mut f, entry.as_bytes())) {
+                            warn!("Failed to write prompt audit log to {path}: {e}");
+                        }
                     };
 
                     // 1) Try user's base prompt file
@@ -1750,7 +1783,9 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                                     let mut findings = std::collections::HashMap::new();
                                     findings.insert("old_snippet".to_string(), old.clone());
                                     findings.insert("new_snippet".to_string(), new.clone());
-                                    let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                                    if let Err(e) = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await {
+                            warn!("Failed to store prompt update analysis: {e}");
+                        }
                                     append_audit(audit_log_path.clone(), "file:system_base.md", false, &old, &new);
                                     return ToolResult::success("Proposed prompt update recorded; requires user approval".to_string());
                                 }
@@ -1762,7 +1797,9 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                                     if let Err(e) = res {
                                         return ToolResult::error(format!("Failed to write updated prompt file: {e}"));
                                     }
-                                    let _ = memory.store_idle_analysis("prompt_update", &std::collections::HashMap::from([("applied".to_string(), "true".to_string())]), Some(&new)).await;
+                                    if let Err(e) = memory.store_idle_analysis("prompt_update", &std::collections::HashMap::from([("applied".to_string(), "true".to_string())]), Some(&new)).await {
+                                        warn!("Failed to store prompt update analysis: {e}");
+                                    }
                                     append_audit(audit_log_path.clone(), "file:system_base.md", true, &old, &new);
                                     return ToolResult::success("System base prompt updated".to_string());
                                 }
@@ -1777,7 +1814,9 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                                 let mut findings = std::collections::HashMap::new();
                                 findings.insert("old_snippet".to_string(), old.clone());
                                 findings.insert("new_snippet".to_string(), new.clone());
-                                let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                                if let Err(e) = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await {
+                            warn!("Failed to store prompt update analysis: {e}");
+                        }
                                 append_audit(audit_log_path.clone(), "db:base", false, &old, &new);
                                 return ToolResult::success("Proposed prompt update recorded; requires user approval".to_string());
                             }
@@ -1798,7 +1837,9 @@ Example args: { "category": "schedule", "key": "wake_time", "value": "07:00" }"#
                                 let mut findings = std::collections::HashMap::new();
                                 findings.insert("old_snippet".to_string(), old.clone());
                                 findings.insert("new_snippet".to_string(), new.clone());
-                                let _ = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await;
+                                if let Err(e) = memory.store_idle_analysis("prompt_update", &findings, Some(&new)).await {
+                            warn!("Failed to store prompt update analysis: {e}");
+                        }
                                 append_audit(audit_log_path.clone(), "db:ai_generated", false, &old, &new);
                                 return ToolResult::success("Proposed prompt update recorded; requires user approval".to_string());
                             }
@@ -1856,6 +1897,7 @@ Example args: { "seconds": "1.5" }"#
                 required: true,
                 param_type: "string".to_string(),
             }],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 Box::pin(async move {
                     let secs_str = match args.get("seconds") {
@@ -1903,6 +1945,7 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
                 ToolParameter { name: "url".to_string(), description: "URL to fetch (must be whitelisted)".to_string(), required: true, param_type: "string".to_string() },
                 ToolParameter { name: "timeout_seconds".to_string(), description: "Request timeout in seconds (default: 10)".to_string(), required: false, param_type: "string".to_string() },
             ],
+            interactive_only: false,
             handler: Arc::new(move |args: HashMap<String, String>| {
                 let cfg = config.clone();
                 Box::pin(async move {
@@ -1966,7 +2009,10 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
                         return ToolResult::error(format!("Host or path not allowed: {host}{path}"));
                     }
 
-                    let timeout_secs = args.get("timeout_seconds").and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
+                    let timeout_secs = args.get("timeout_seconds")
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(10)
+                        .clamp(1, 60);
                     let client = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs)).build() {
                         Ok(c) => c,
                         Err(e) => return ToolResult::error(format!("Failed to build HTTP client: {e}")),
@@ -1983,7 +2029,7 @@ Example args: { "url": "https://api.ipify.org?format=json" }"#.to_string(),
                     };
                     let max = 8192usize;
                     let truncated = if body.len() > max { format!("{}...[truncated {} bytes]", &body[..max], body.len() - max) } else { body };
-                    ToolResult::success(format!("Status: {status}\\n\\n{truncated}"))
+                    ToolResult::success(format!("Status: {status}\n\n{truncated}"))
                 })
             }),
         }
@@ -2001,6 +2047,7 @@ Return:
 A JSON array string with per-call results: [{"name": "tool", "success": bool, "output": "...", "error": null}, ...]."#.to_string(),
             tags: vec!["parallel".to_string(), "utility".to_string()],
             parameters: vec![ToolParameter { name: "calls".to_string(), description: "JSON array of tool calls (string or {name,args})".to_string(), required: true, param_type: "string".to_string() }],
+            interactive_only: false,
             handler: std::sync::Arc::new(move |args: std::collections::HashMap<String, String>| {
                 let registry = registry.clone();
                 Box::pin(async move {
@@ -2009,6 +2056,10 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
                         _ => return ToolResult::error("Missing required parameter: calls".to_string()),
                     };
 
+                    const MAX_CALLS_JSON_BYTES: usize = 64 * 1024;
+                    if calls_str.len() > MAX_CALLS_JSON_BYTES {
+                        return ToolResult::error(format!("'calls' JSON exceeds maximum size of {MAX_CALLS_JSON_BYTES} bytes"));
+                    }
                     let calls_val: serde_json::Value = match serde_json::from_str(&calls_str) {
                         Ok(v) => v,
                         Err(e) => return ToolResult::error(format!("Invalid JSON for 'calls': {e}")),
@@ -2088,6 +2139,131 @@ A JSON array string with per-call results: [{"name": "tool", "success": bool, "o
                     };
 
                     ToolResult::success(out)
+                })
+            }),
+        }
+    }
+
+    /// Tool that spawns a new interactive chat session from a background context.
+    /// Requires a Weak<LlmClient> to avoid a reference cycle with `ToolRegistry`.
+    pub fn start_chat(
+        llm_client: std::sync::Weak<super::super::llm::LlmClient>,
+        memory: Arc<super::super::memory::MemoryManager>,
+        task_manager: Arc<super::super::tasks::TaskManager>,
+        conversation_manager: Arc<super::super::conversations::ConversationManager>,
+        state: Arc<super::super::state::ServerState>,
+    ) -> Tool {
+        Tool {
+            name: "start_chat".to_string(),
+            description: r#"Create a new interactive chat session and open the chat window for the user.
+The AI generates an initial response to the given prompt in interactive mode (with all chat tools available),
+then presents it to the user who can continue the conversation.
+
+Parameters:
+- prompt (string, required): The initial message/instruction for the new chat session.
+- title (string, optional): Optional title for the new session.
+
+Return:
+ToolResult::success("Chat session started: <session_id>") on success; ToolResult::error on failure."#.to_string(),
+            tags: vec!["ui".to_string(), "interaction".to_string()],
+            parameters: vec![
+                ToolParameter {
+                    name: "prompt".to_string(),
+                    description: "Initial message or instruction for the new chat session".to_string(),
+                    required: true,
+                    param_type: "string".to_string(),
+                },
+                ToolParameter {
+                    name: "title".to_string(),
+                    description: "Optional title for the new session".to_string(),
+                    required: false,
+                    param_type: "string".to_string(),
+                },
+            ],
+            interactive_only: false,
+            handler: Arc::new(move |args: HashMap<String, String>| {
+                let llm_weak = llm_client.clone();
+                let memory = memory.clone();
+                let task_manager = task_manager.clone();
+                let conv = conversation_manager.clone();
+                let state = state.clone();
+                Box::pin(async move {
+                    let prompt = match args.get("prompt") {
+                        Some(p) if !p.trim().is_empty() => p.clone(),
+                        _ => return ToolResult::error("Missing required parameter: prompt".to_string()),
+                    };
+                    let title = args.get("title").cloned().filter(|t| !t.trim().is_empty());
+
+                    let Some(llm) = llm_weak.upgrade() else {
+                        return ToolResult::error("LLM client unavailable".to_string());
+                    };
+
+                    // Create a new session
+                    let session_id = format!("chat-{}", chrono::Utc::now().timestamp_millis());
+                    if let Err(e) = conv.get_or_create_session(&session_id).await {
+                        return ToolResult::error(format!("Failed to create session: {e}"));
+                    }
+
+                    // Set title if provided
+                    if let Some(ref t) = title {
+                        if let Err(e) = conv.set_title(&session_id, t).await {
+                            warn!("Failed to set session title: {}", e);
+                        }
+                    }
+
+                    // Store the user prompt as the first turn
+                    if let Err(e) = conv.add_turn(&session_id, "user", &prompt, None, None, None).await {
+                        warn!("Failed to store user turn: {}", e);
+                    }
+
+                    // Build chat prompt and generate response with interactive tools
+                    let (system_prompt, messages) = match super::super::prompt::PromptBuilder::build_chat(
+                        &memory, &task_manager, Vec::new(), &prompt, Some(&session_id),
+                    ).await {
+                        Ok(pair) => pair,
+                        Err(e) => {
+                            warn!("Failed to build chat prompt for start_chat: {}", e);
+                            (
+                                Some("You are Ritsu, a helpful AI assistant.".to_string()),
+                                vec![super::super::llm::Message { role: "user".to_string(), content: prompt.clone() }],
+                            )
+                        }
+                    };
+
+                    let response = match llm.generate_with_tool_execution(
+                        &messages,
+                        system_prompt.as_deref(),
+                        3,
+                        true,
+                    ).await {
+                        Ok(r) => r,
+                        Err(e) => return ToolResult::error(format!("LLM call failed: {e}")),
+                    };
+
+                    // Store the assistant turn
+                    if let Err(e) = conv.add_turn(&session_id, "assistant", &response.content, None, None, None).await {
+                        warn!("Failed to store assistant turn: {}", e);
+                    }
+
+                    // Open the chat window for the user
+                    let open_request = ritsu_common::protocol::ServerToClientRequest::OpenChat {
+                        message: Some(response.content.clone()),
+                        session_id: Some(session_id.clone()),
+                    };
+                    match state.send_to_client_daemon(open_request).await {
+                        Ok(()) => {
+                            info!("New chat session opened: {}", session_id);
+                        }
+                        Err(e) => {
+                            warn!("Failed to open chat via daemon, falling back: {}", e);
+                            state.broadcast_push(ritsu_common::protocol::ServerPush::OpenChat {
+                                message: Some(response.content),
+                                urgency: ritsu_common::protocol::NotificationUrgency::Normal,
+                            }).await;
+                        }
+                    }
+
+                    ToolResult::success(format!("Chat session started: {session_id}"))
                 })
             }),
         }
@@ -2184,6 +2360,27 @@ pub async fn register_all_tools(
     info!("Registered {} tools", 22);
 }
 
+/// Register tools that require a reference to `LlmClient` (called after `LlmClient` creation).
+pub async fn register_llm_tools(
+    registry: std::sync::Arc<ToolRegistry>,
+    llm_client: std::sync::Weak<crate::llm::LlmClient>,
+    memory: Arc<MemoryManager>,
+    task_manager: Arc<TaskManager>,
+    conversation_manager: Arc<crate::conversations::ConversationManager>,
+    state: Arc<ServerState>,
+) {
+    registry
+        .register(tool_impls::start_chat(
+            llm_client,
+            memory,
+            task_manager,
+            conversation_manager,
+            state,
+        ))
+        .await;
+    info!("Registered LLM-dependent tools (start_chat)");
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, clippy::expect_used)]
 mod tests {
@@ -2207,6 +2404,7 @@ mod tests {
             description: "A test tool".to_string(),
             tags: vec!["test".to_string()],
             parameters: vec![],
+            interactive_only: false,
             handler: Arc::new(|_args| Box::pin(async { ToolResult::success("test".to_string()) })),
         };
 
@@ -2225,6 +2423,7 @@ mod tests {
             description: "Echo tool".to_string(),
             tags: vec![],
             parameters: vec![],
+            interactive_only: false,
             handler: Arc::new(|args| {
                 Box::pin(async move {
                     let msg = args.get("message").cloned().unwrap_or_default();

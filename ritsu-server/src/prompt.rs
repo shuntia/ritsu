@@ -69,6 +69,7 @@ impl PromptBuilder {
         task_manager: &TaskManager,
         mut history: Vec<LlmMessage>,
         user_content: &str,
+        session_id: Option<&str>,
     ) -> Result<(Option<String>, Vec<LlmMessage>)> {
         // Try to get chat-specific system prompt, fall back to a minimal default
         let system_prompt = match memory.build_chat_prompt().await {
@@ -100,7 +101,10 @@ impl PromptBuilder {
         let now = Local::now();
         let time_str = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
 
-        let enhanced_content = format!("[Current Time: {time_str}]\n[{context_block}]\n\n{user_content}");
+        let session_line = session_id
+            .map(|id| format!("\n[Session ID: {id}]"))
+            .unwrap_or_default();
+        let enhanced_content = format!("[Current Time: {time_str}]{session_line}\n[{context_block}]\n\n{user_content}");
 
         history.push(LlmMessage {
             role: "user".to_string(),

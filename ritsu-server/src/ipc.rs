@@ -131,9 +131,9 @@ async fn handle_client(
                             subscribed = true;
                         }
 
-                        // Special handling for SendMessage to support streaming
+                        // Special handling for SendMessage
                         if let ClientRequest::SendMessage { content, session_id } = request {
-                            match handle_send_message_streaming(
+                            match handle_send_message(
                                 &mut stream,
                                 content,
                                 session_id,
@@ -141,7 +141,6 @@ async fn handle_client(
                                 &conversation_manager,
                                 &task_manager,
                                 llm_client.clone(),
-                                config.llm.disable_streaming,
                                 config.llm.disable_tools,
                             ).await {
                                 Ok(()) => {
@@ -223,7 +222,7 @@ async fn read_request(stream: &mut UnixStream) -> Result<Option<ClientRequest>> 
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn handle_send_message_streaming(
+async fn handle_send_message(
     stream: &mut UnixStream,
     content: String,
     session_id: Option<String>,
@@ -231,10 +230,8 @@ async fn handle_send_message_streaming(
     conversation_manager: &ConversationManager,
     task_manager: &TaskManager,
     llm_client: Arc<LlmClient>,
-    disable_streaming: bool,
     disable_tools: bool,
 ) -> Result<()> {
-    // Get or create conversation session
     let session_id =
         session_id.unwrap_or_else(|| format!("session_{}", chrono::Utc::now().timestamp()));
     let session = conversation_manager
@@ -247,235 +244,87 @@ async fn handle_send_message_streaming(
         .await
     {
         error!("Failed to store user turn: {}", e);
-        let push = ServerPush::MessageChunk {
-            content: format!(
-                "{} Failed to store user message: {}\n",
-                nerd_font::categories::Fa::Cross,
-                e
-            ),
+        send_push(stream, ServerPush::MessageChunk {
+            content: format!("{} Failed to store user message: {}\n", nerd_font::categories::Fa::Cross, e),
             is_final: true,
-        };
-        // Inform client and stop processing
-        send_push(stream, push).await?;
+        }).await?;
         return Ok(());
     }
     if let Err(e) = memory.store_conversation("user", &content).await {
         error!("Failed to store in conversations: {}", e);
-        let push = ServerPush::MessageChunk {
-            content: format!(
-                "{} Failed to store message in memory: {}\n",
-                nerd_font::categories::Fa::Cross,
-                e
-            ),
+        send_push(stream, ServerPush::MessageChunk {
+            content: format!("{} Failed to store message in memory: {}\n", nerd_font::categories::Fa::Cross, e),
             is_final: true,
-        };
-        send_push(stream, push).await?;
+        }).await?;
         return Ok(());
     }
 
-    // Build system prompt and messages via PromptBuilder
+    // Build system prompt and messages
     let history = conversation_manager
         .get_history(&session_id, 20)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(|turn| turn.turn_number < session.turn_count)
-        .map(|turn| crate::llm::Message {
-            role: turn.role,
-            content: turn.content,
-        })
+        .map(|turn| crate::llm::Message { role: turn.role, content: turn.content })
         .collect::<Vec<_>>();
 
     let (system_prompt, messages) = match crate::prompt::PromptBuilder::build_chat(
-        memory,
-        task_manager,
-        history,
-        &content,
-    )
-    .await
-    {
+        memory, task_manager, history, &content, Some(&session_id),
+    ).await {
         Ok((sp, msgs)) => (sp, msgs),
         Err(e) => {
             warn!("Failed to build chat prompt: {}", e);
-            (Some("You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string()), vec![crate::llm::Message { role: "user".to_string(), content }])
+            (
+                Some("You are Ritsu, a helpful AI assistant. You are in chat mode - respond directly to the user.".to_string()),
+                vec![crate::llm::Message { role: "user".to_string(), content }],
+            )
         }
     };
 
-    // Check if streaming is disabled in config
-    if disable_streaming {
-        info!(
-            "Streaming disabled in config, using non-streaming mode (tools: {})",
-            !disable_tools
-        );
+    let response_result = if disable_tools {
+        llm_client.generate_with_tools(&messages, system_prompt.as_deref(), false, true).await
+    } else {
+        llm_client.generate_with_tool_execution(&messages, system_prompt.as_deref(), 3, true).await
+    };
 
-        // For non-streaming mode, if tools are enabled, run the tool execution loop which will
-        // call tools and synthesize a follow-up response. Otherwise, just do a simple request.
-        let response_result = if disable_tools {
-            llm_client
-                .generate_with_tools(&messages, system_prompt.as_deref(), false)
-                .await
-        } else {
-            // Run up to 3 iterations of tool execution
-            llm_client
-                .generate_with_tool_execution(&messages, system_prompt.as_deref(), 3)
-                .await
-        };
-
-        match response_result {
-            Ok(response) => {
-                debug!(
-                    "Non-streaming response ready (tool_calls: {})",
-                    response.tool_calls.len()
-                );
-                if !response.tool_calls.is_empty() {
-                    debug!(tool_calls = ?response.tool_calls.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), "Tool calls executed in non-streaming flow");
-                }
-
-                info!("Non-streaming request succeeded");
-                let push = ServerPush::MessageChunk {
-                    content: response.content.clone(),
-                    is_final: true,
-                };
-                send_push(stream, push).await?;
-
-                // Store assistant response
-                if let Err(e) = conversation_manager
-                    .add_turn(
-                        &session_id,
-                        "assistant",
-                        &response.content,
-                        None,
-                        None,
-                        None,
-                    )
-                    .await
-                {
-                    warn!("Failed to store assistant turn: {}", e);
-                }
-                if let Err(e) = memory
-                    .store_conversation("assistant", &response.content)
-                    .await
-                {
-                    warn!("Failed to store in conversations: {}", e);
-                }
-
-                return Ok(());
-            }
-            Err(e) => {
-                error!("Non-streaming request failed: {}", e);
-                let push = ServerPush::MessageChunk {
-                    content: format!("\n\n{} Error: {}\n\nPlease check if Ollama is running and the model is available.", nerd_font::categories::Fa::Cross, e),
-                    is_final: true,
-                };
-                send_push(stream, push).await?;
-                return Err(e);
-            }
-        }
-    }
-
-    // Start streaming
-    info!("Starting streaming response");
-    let stream_rx_result =
-        LlmClient::generate_streaming(Arc::clone(&llm_client), &messages, system_prompt.as_deref())
-            .await;
-
-    let mut stream_rx = match stream_rx_result {
-        Ok(rx) => rx,
-        Err(e) => {
-            error!("Failed to start streaming: {}", e);
-            // Send error as a message chunk so GUI knows what happened
-            let push = ServerPush::MessageChunk {
-                content: format!("{} Failed to connect to LLM: {}\n\nPlease check that Ollama is running and the model is available.", nerd_font::categories::Fa::Cross, e),
+    match response_result {
+        Ok(response) => {
+            debug!(tool_calls = response.tool_calls.len(), "Response ready");
+            send_push(stream, ServerPush::MessageChunk {
+                content: response.content.clone(),
                 is_final: true,
-            };
-            send_push(stream, push).await?;
-            return Err(e);
-        }
-    };
+            }).await?;
 
-    let mut full_response = String::new();
-    let mut chunk_count = 0;
-
-    // Stream chunks to client
-    while let Some(chunk_result) = stream_rx.recv().await {
-        match chunk_result {
-            Ok(chunk) => {
-                chunk_count += 1;
-                debug!("Received chunk #{}: {} bytes", chunk_count, chunk.len());
-
-                if chunk.is_empty() {
-                    debug!("Skipping empty chunk");
-                } else {
-                    full_response.push_str(&chunk);
-
-                    // Send chunk as push notification
-                    let push = ServerPush::MessageChunk {
-                        content: chunk,
-                        is_final: false,
-                    };
-                    send_push(stream, push).await?;
-                }
-            }
-            Err(e) => {
-                error!("Streaming error during LLM response: {}", e);
-                let push = ServerPush::MessageChunk {
-                    content: format!("\n\n{} Error during streaming: {}\n\nThe connection to the LLM may have been interrupted.", nerd_font::categories::Fa::Cross, e),
-                    is_final: true,
-                };
-                send_push(stream, push).await?;
-                // Don't propagate error to caller; we've already informed the client
-                return Ok(());
-            }
-        }
-    }
-
-    info!(
-        "Streaming complete: {} chunks received, {} bytes total",
-        chunk_count,
-        full_response.len()
-    );
-
-    // Send final marker
-    let push = ServerPush::MessageChunk {
-        content: String::new(),
-        is_final: true,
-    };
-    send_push(stream, push).await?;
-
-    info!(
-        "Streaming complete: {} chunks received, {} bytes total",
-        chunk_count,
-        full_response.len()
-    );
-
-    // Store assistant response
-    if let Err(e) = conversation_manager
-        .add_turn(&session_id, "assistant", &full_response, None, None, None)
-        .await
-    {
-        warn!("Failed to store assistant turn: {}", e);
-    }
-    if let Err(e) = memory.store_conversation("assistant", &full_response).await {
-        warn!("Failed to store assistant response: {}", e);
-    }
-
-    // Check if we need to generate a title for this session
-    if let Ok(needs_title) = conversation_manager
-        .needs_title_generation(&session_id)
-        .await
-    {
-        if needs_title {
-            info!("Generating title for session {}", session_id);
             if let Err(e) = conversation_manager
-                .generate_title(&session_id, &llm_client)
+                .add_turn(&session_id, "assistant", &response.content, None, None, None)
                 .await
             {
-                warn!("Failed to generate session title: {}", e);
+                warn!("Failed to store assistant turn: {}", e);
             }
+            if let Err(e) = memory.store_conversation("assistant", &response.content).await {
+                warn!("Failed to store assistant response: {}", e);
+            }
+
+            if let Ok(needs_title) = conversation_manager.needs_title_generation(&session_id).await {
+                if needs_title {
+                    if let Err(e) = conversation_manager.generate_title(&session_id, &llm_client).await {
+                        warn!("Failed to generate session title: {}", e);
+                    }
+                }
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            error!("LLM request failed: {}", e);
+            send_push(stream, ServerPush::MessageChunk {
+                content: format!("\n\n{} Error: {}\n\nPlease check if the LLM backend is running and the model is available.", nerd_font::categories::Fa::Cross, e),
+                is_final: true,
+            }).await?;
+            Err(e)
         }
     }
-
-    Ok(())
 }
 
 async fn send_response(stream: &mut UnixStream, response: ServerResponse) -> Result<()> {
@@ -564,6 +413,7 @@ async fn handle_request(
                 task_manager,
                 history,
                 &content,
+                Some(&session_id),
             )
             .await
             {
@@ -580,6 +430,7 @@ async fn handle_request(
                     &messages,
                     system_prompt.as_deref(),
                     5, // max 5 iterations
+                    true,
                 )
                 .await
             {
@@ -1078,12 +929,10 @@ async fn handle_request(
                      Backend: {}\n\
                      Endpoint: {}\n\
                      Model: {}\n\
-                     Streaming: {}\n\
                      Tools: {}",
                         b.name,
                         b.endpoint,
                         b.model,
-                        !config.llm.disable_streaming,
                         !config.llm.disable_tools,
                     )
                 },

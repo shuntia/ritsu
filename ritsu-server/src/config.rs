@@ -28,10 +28,6 @@ pub struct LlmConfig {
     pub default_backend: String,
     #[serde(default)]
     pub backends: Vec<LlmBackend>,
-    /// Disable streaming responses (use non-streaming mode for all requests)
-    /// Useful for models that struggle with tool calls in streaming mode
-    #[serde(default)]
-    pub disable_streaming: bool,
     /// Disable tool calls entirely (faster for simple queries)
     /// When true, the LLM won't be told about available tools
     #[serde(default)]
@@ -116,7 +112,6 @@ impl Default for LlmConfig {
                 api_key: None,
                 api_key_env: None,
             }],
-            disable_streaming: false,
             disable_tools: false,
         }
     }
@@ -210,7 +205,6 @@ impl Config {
         let example = format!(
             r#"[llm]
 default_backend = "ollama"
-disable_streaming = false
 disable_tools = false
 
 # Ollama (local)

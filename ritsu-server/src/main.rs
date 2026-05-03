@@ -207,12 +207,23 @@ async fn main() -> Result<()> {
 
     // Initialize LLM client (needs tool registry for tool calling)
     let llm_client = std::sync::Arc::new(
-        llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone()).await?,
+        llm::LlmClient::new(&config.llm, &config.timeouts, tool_registry.clone())?,
     );
     info!(
         "LLM client initialized with {} backend(s)",
         config.llm.backends.len()
     );
+
+    // Register tools that require a reference back to LlmClient (two-phase to avoid Arc cycle)
+    tools::register_llm_tools(
+        tool_registry.clone(),
+        Arc::downgrade(&llm_client),
+        memory.clone(),
+        task_manager.clone(),
+        conversation_manager.clone(),
+        server_state.clone(),
+    )
+    .await;
 
     // Register default pre-LLM prompt hooks (inject task summaries into prompts)
     {
@@ -458,7 +469,7 @@ async fn start_ollama_if_needed(model_name: &str) {
                 r#"{{"model":"{model_name}","messages":[{{"role":"user","content":"hi"}}],"stream":false}}"#
             );
             let warmup = tokio::time::timeout(
-                tokio::time::Duration::from_secs(60),
+                tokio::time::Duration::from_mins(1),
                 tokio::process::Command::new("curl")
                     .args([
                         "-s",

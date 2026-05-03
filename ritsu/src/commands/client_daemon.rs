@@ -667,15 +667,13 @@ async fn handle_open_chat(message: Option<&str>, session_id: Option<&str>) -> Re
                 if let Ok(xout) = std::process::Command::new("xdotool").args(["search", "--name", "Ritsu", "windowactivate"]).output() {
                     if xout.status.success() {
                         info!("Focused existing chat window via xdotool");
-                        return Ok(());
                     } else {
                         warn!("xdotool failed to focus existing window");
-                        return Ok(());
                     }
-                } else {
-                    info!("xdotool not available; not spawning new chat since one is already running");
                     return Ok(());
                 }
+                info!("xdotool not available; not spawning new chat since one is already running");
+                return Ok(());
             }
         }
     }

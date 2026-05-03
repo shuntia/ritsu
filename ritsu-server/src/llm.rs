@@ -1,14 +1,12 @@
 //! LLM client with tool calling support using the `llm` crate
 
 use anyhow::{Context, Result};
-use futures::StreamExt;
 use llm::builder::{FunctionBuilder, LLMBackend, LLMBuilder, ParamBuilder};
 use llm::chat::ChatMessage;
 use llm::LLMProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::config::{LlmBackend, LlmConfig, TimeoutConfig};
@@ -37,13 +35,14 @@ pub struct ToolCallInfo {
 
 /// Unified LLM client supporting multiple backends
 pub struct LlmClient {
-    provider: Box<dyn LLMProvider>,
+    backend: LlmBackend,
+    timeout_config: TimeoutConfig,
     tool_registry: Arc<ToolRegistry>,
     timeout_seconds: u64,
 }
 
 impl LlmClient {
-    pub async fn new(
+    pub fn new(
         config: &LlmConfig,
         timeout_config: &TimeoutConfig,
         tool_registry: Arc<ToolRegistry>,
@@ -54,21 +53,31 @@ impl LlmClient {
             .iter()
             .find(|b| b.name == config.default_backend)
             .or_else(|| config.backends.first())
-            .context("No LLM backends configured")?;
-
-        let provider = Self::create_provider(backend, timeout_config, &tool_registry).await?;
+            .context("No LLM backends configured")?
+            .clone();
 
         Ok(Self {
-            provider,
+            backend,
+            timeout_config: timeout_config.clone(),
             tool_registry,
             timeout_seconds: timeout_config.llm_request_seconds,
         })
+    }
+
+    async fn build_provider(
+        &self,
+        system_prompt: Option<&str>,
+        for_chat: bool,
+    ) -> Result<Box<dyn LLMProvider>> {
+        Self::create_provider(&self.backend, &self.timeout_config, &self.tool_registry, system_prompt, for_chat).await
     }
 
     async fn create_provider(
         backend: &LlmBackend,
         timeout_config: &TimeoutConfig,
         tool_registry: &Arc<ToolRegistry>,
+        system_prompt: Option<&str>,
+        for_chat: bool,
     ) -> Result<Box<dyn LLMProvider>> {
         // Detect provider from endpoint
         let provider_type = if backend.endpoint.contains("openai.com")
@@ -116,8 +125,8 @@ impl LlmClient {
             );
         }
 
-        // Build LLM with all tools registered
-        let tools_info = tool_registry.get_tools_for_ai().await;
+        // Build LLM with tools appropriate for this context
+        let tools_info = tool_registry.get_tools_for_ai(for_chat).await;
 
         let mut builder = LLMBuilder::new()
             .backend(provider_type)
@@ -129,6 +138,10 @@ impl LlmClient {
 
         if let Some(key) = api_key {
             builder = builder.api_key(key);
+        }
+
+        if let Some(prompt) = system_prompt {
+            builder = builder.system(prompt);
         }
 
         // Add all tools from registry
@@ -160,85 +173,41 @@ impl LlmClient {
         Ok(provider)
     }
 
-    /// Get tools in llm crate format
-    async fn get_llm_tools(&self) -> Vec<llm::chat::Tool> {
-        let tools_info = self.tool_registry.get_tools_for_ai().await;
-
-        tools_info
-            .iter()
-            .map(|tool_info| {
-                // Convert parameters to JSON schema
-                let mut properties = serde_json::Map::new();
-                let mut required = Vec::new();
-
-                for param in &tool_info.parameters {
-                    // Build property schema
-                    let mut prop = serde_json::Map::new();
-                    prop.insert("type".to_string(), serde_json::json!(param.param_type));
-                    prop.insert(
-                        "description".to_string(),
-                        serde_json::json!(param.description),
-                    );
-                    properties.insert(param.name.clone(), serde_json::Value::Object(prop));
-
-                    if param.required {
-                        required.push(param.name.clone());
-                    }
-                }
-
-                let parameters = serde_json::json!({
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                });
-
-                llm::chat::Tool {
-                    tool_type: "function".to_string(),
-                    function: llm::chat::FunctionTool {
-                        name: tool_info.name.clone(),
-                        description: tool_info.description.clone(),
-                        parameters,
-                    },
-                }
-            })
-            .collect()
-    }
-
-    /// Generate response with optional tool calling support
+    /// Generate response for background (non-interactive) context.
     pub async fn generate(
         &self,
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<LlmResponse> {
-        self.generate_with_tools(messages, system_prompt, true)
+        self.generate_with_tools(messages, system_prompt, true, false)
             .await
     }
 
-    /// Generate response with control over tool usage
+    /// Generate response with control over tool usage.
+    /// `for_chat` controls whether interactive-only tools (e.g. `set_title`) are included.
+    /// The system prompt is injected via the provider builder on each call so
+    /// that dynamic per-request prompts are supported with the upstream API.
     pub async fn generate_with_tools(
         &self,
         messages: &[Message],
         system_prompt: Option<&str>,
         enable_tools: bool,
+        for_chat: bool,
     ) -> Result<LlmResponse> {
-        // Convert our messages to llm crate format
-        let mut chat_messages = Vec::new();
+        let provider = self.build_provider(system_prompt, for_chat).await?;
 
-        // If a system prompt is provided, send it as a distinct system message
-        if let Some(prompt) = system_prompt {
-            chat_messages.push(ChatMessage::system().content(prompt).build());
-        }
-
-        // Add conversation messages
-        for msg in messages {
-            let message_builder = match msg.role.as_str() {
-                "assistant" => ChatMessage::assistant(),
-                "system" => ChatMessage::system(),
-                _ => ChatMessage::user(),
-            };
-
-            chat_messages.push(message_builder.content(&msg.content).build());
-        }
+        // Convert our messages to llm crate format (user/assistant only; system
+        // messages are handled by the provider via the builder system prompt)
+        let chat_messages: Vec<ChatMessage> = messages
+            .iter()
+            .map(|msg| {
+                let builder = match msg.role.as_str() {
+                    "assistant" => ChatMessage::assistant(),
+                    _ => ChatMessage::user(),
+                };
+                builder.content(&msg.content).build()
+            })
+            .collect();
 
         debug!(
             "Sending {} messages to LLM (tools: {})",
@@ -248,9 +217,8 @@ impl LlmClient {
 
         // Make the chat request - try with tools first, fallback to without tools if it fails
         let response = if enable_tools {
-            match self
-                .provider
-                .chat_with_tools(&chat_messages, self.provider.tools())
+            match provider
+                .chat_with_tools(&chat_messages, provider.tools())
                 .await
             {
                 Ok(resp) => resp,
@@ -273,44 +241,41 @@ impl LlmClient {
                                     .filter(|c| c.is_ascii_digit() || *c == '.')
                                     .collect();
 
-                                if !num_clean.is_empty() {
-                                    if let Ok(parsed) = num_clean.parse::<f64>() {
-                                        let wait_secs = parsed.ceil() as u64;
-                                        info!("Detected Groq rate limit, waiting {}s before retrying tool call", wait_secs);
-                                        tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                                if num_clean.is_empty() {
+                                    warn!("Tool calling failed ({}), retrying without tools", err_str);
+                                    provider
+                                        .chat(&chat_messages)
+                                        .await
+                                        .with_context(|| {
+                                            format!(
+                                                "Failed to send chat request without tools (timeout: {}s)",
+                                                self.timeout_seconds
+                                            )
+                                        })?
+                                } else if let Ok(parsed) = num_clean.parse::<f64>() {
+                                    let wait_secs = parsed.ceil() as u64;
+                                    info!("Detected Groq rate limit, waiting {}s before retrying tool call", wait_secs);
+                                    tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
 
-                                        // Retry the tool call once after waiting
-                                        match self
-                                            .provider
-                                            .chat_with_tools(&chat_messages, self.provider.tools())
-                                            .await
-                                        {
-                                            Ok(resp2) => resp2,
-                                            Err(e2) => {
-                                                warn!("Tool calling failed after waiting ({}), retrying without tools", e2);
-                                                self.provider.chat(&chat_messages).await.with_context(|| {
-                                                    format!(
-                                                        "Failed to send chat request without tools (timeout: {}s)",
-                                                        self.timeout_seconds
-                                                    )
-                                                })?
-                                            }
-                                        }
-                                    } else {
-                                        warn!("Tool calling failed ({}), retrying without tools", err_str);
-                                        self.provider
-                                            .chat(&chat_messages)
-                                            .await
-                                            .with_context(|| {
+                                    // Retry the tool call once after waiting
+                                    match provider
+                                        .chat_with_tools(&chat_messages, provider.tools())
+                                        .await
+                                    {
+                                        Ok(resp2) => resp2,
+                                        Err(e2) => {
+                                            warn!("Tool calling failed after waiting ({}), retrying without tools", e2);
+                                            provider.chat(&chat_messages).await.with_context(|| {
                                                 format!(
                                                     "Failed to send chat request without tools (timeout: {}s)",
                                                     self.timeout_seconds
                                                 )
                                             })?
+                                        }
                                     }
                                 } else {
                                     warn!("Tool calling failed ({}), retrying without tools", err_str);
-                                    self.provider
+                                    provider
                                         .chat(&chat_messages)
                                         .await
                                         .with_context(|| {
@@ -322,7 +287,7 @@ impl LlmClient {
                                 }
                             } else {
                                 warn!("Tool calling failed ({}), retrying without tools", err_str);
-                                self.provider
+                                provider
                                     .chat(&chat_messages)
                                     .await
                                     .with_context(|| {
@@ -335,7 +300,7 @@ impl LlmClient {
                         } else {
                             // No suggested wait, fall back to retrying without tools
                             warn!("Tool calling failed ({}), retrying without tools", err_str);
-                            self.provider
+                            provider
                                 .chat(&chat_messages)
                                 .await
                                 .with_context(|| {
@@ -347,7 +312,7 @@ impl LlmClient {
                         }
                     } else {
                         warn!("Tool calling failed ({}), retrying without tools", err_str);
-                        self.provider
+                        provider
                             .chat(&chat_messages)
                             .await
                             .with_context(|| {
@@ -360,7 +325,7 @@ impl LlmClient {
                 }
             }
         } else {
-            self.provider.chat(&chat_messages).await.with_context(|| {
+            provider.chat(&chat_messages).await.with_context(|| {
                 format!(
                     "Failed to send chat request to LLM (timeout: {}s)",
                     self.timeout_seconds
@@ -454,12 +419,14 @@ impl LlmClient {
         results
     }
 
-    /// Generate response with automatic tool execution loop
+    /// Generate response with automatic tool execution loop.
+    /// `for_chat` determines whether interactive-only tools are available.
     pub async fn generate_with_tool_execution(
         &self,
         messages: &[Message],
         system_prompt: Option<&str>,
         max_iterations: usize,
+        for_chat: bool,
     ) -> Result<LlmResponse> {
         let mut current_messages = messages.to_vec();
         let mut iteration = 0;
@@ -480,13 +447,13 @@ impl LlmClient {
 
                 // Otherwise generate one final response without tools
                 return self
-                    .generate_with_tools(&current_messages, system_prompt, false)
+                    .generate_with_tools(&current_messages, system_prompt, false, for_chat)
                     .await;
             }
 
             // Generate response with tools
             let response = self
-                .generate_with_tools(&current_messages, system_prompt, true)
+                .generate_with_tools(&current_messages, system_prompt, true, for_chat)
                 .await?;
 
             // Store this response in case we need it
@@ -518,7 +485,7 @@ impl LlmClient {
                             .to_string(),
                 });
                 return self
-                    .generate_with_tools(&current_messages, system_prompt, false)
+                    .generate_with_tools(&current_messages, system_prompt, false, for_chat)
                     .await;
             }
 
@@ -543,272 +510,6 @@ impl LlmClient {
                 iteration
             );
         }
-    }
-
-    /// Generate streaming response and perform post-stream tool execution + synthesis
-    ///
-    /// Collects tool calls that appear in the stream, executes them after the
-    /// stream completes, and synthesizes a follow-up assistant message using a
-    /// non-streaming LLM request. The synthesized follow-up is sent as an
-    /// additional chunk on the same channel.
-    pub async fn generate_streaming(
-        self: Arc<Self>,
-        messages: &[Message],
-        system_prompt: Option<&str>,
-    ) -> Result<mpsc::Receiver<Result<String>>> {
-        // Convert our messages to llm crate format
-        let mut chat_messages = Vec::new();
-
-        // If a system prompt is provided, send it as a distinct system message
-        if let Some(prompt) = system_prompt {
-            chat_messages.push(ChatMessage::system().content(prompt).build());
-        }
-
-        // Add conversation messages
-        for msg in messages {
-            let message_builder = match msg.role.as_str() {
-                "assistant" => ChatMessage::assistant(),
-                "system" => ChatMessage::system(),
-                _ => ChatMessage::user(),
-            };
-
-            chat_messages.push(message_builder.content(&msg.content).build());
-        }
-
-        debug!(
-            "Starting streaming response for {} messages",
-            chat_messages.len()
-        );
-
-        // Create a channel for streaming chunks
-        let (tx, rx) = mpsc::channel(32);
-
-        // Get tools in llm crate format
-        let mut tools = self.get_llm_tools().await;
-        let tool_count = tools.len();
-        debug!("Streaming with {} tools available", tool_count);
-
-        // Limit tools sent during streaming to avoid very large payloads that can
-        // slow down or break streaming in some LLM servers (e.g., Ollama).
-        const STREAM_TOOL_LIMIT: usize = 10;
-        if tool_count > STREAM_TOOL_LIMIT {
-            debug!(
-                "Tool count {} exceeds streaming threshold; limiting to first {} tools",
-                tool_count, STREAM_TOOL_LIMIT
-            );
-            tools.truncate(STREAM_TOOL_LIMIT);
-        }
-
-        // Get the provider's streaming response with tools
-        let mut stream = self
-            .provider
-            .chat_stream_with_tools(&chat_messages, Some(&tools))
-            .await
-            .context("Failed to start streaming chat with LLM provider")?;
-
-        // Clone tool registry for post-processing
-        let tool_registry = self.tool_registry.clone();
-
-        // Spawn a task to forward stream items to the channel and collect tool calls
-        debug!("Spawning streaming forward task for LLM stream");
-        tokio::spawn(async move {
-            use llm::chat::StreamChunk;
-
-            let mut full_response = String::new();
-            // Collect raw tool calls (name, raw_arguments) during streaming and defer parsing until after stream completes
-            let mut collected_raw_calls: Vec<(String, String)> = Vec::new();
-
-            while let Some(chunk_result) = stream.next().await {
-                debug!("Received stream chunk result");
-                match chunk_result {
-                    Ok(chunk) => {
-                        match chunk {
-                            StreamChunk::Text(text) => {
-                                // Accumulate textual output for later synthesis
-                                let text_preview: String = text.chars().take(120).collect();
-                                let text_len = text.len();
-                                debug!(len = %text_len, preview = %text_preview, "StreamChunk::Text received");
-                                full_response.push_str(&text);
-
-                                // Send chunk to receiver
-                                if tx.send(Ok(text)).await.is_err() {
-                                    // Receiver dropped, stop streaming
-                                    debug!("Receiver dropped while sending text chunk");
-                                    break;
-                                }
-                            }
-
-                            StreamChunk::ToolUseComplete {
-                                index: _,
-                                tool_call,
-                            } => {
-                                // Collect raw tool call data for post-stream parsing/execution
-                                tracing::debug!(
-                                    "Collected raw tool call in stream: {} (args_len={})",
-                                    tool_call.function.name,
-                                    tool_call.function.arguments.len()
-                                );
-                                debug!(tool = %tool_call.function.name, args_len = %tool_call.function.arguments.len(), "Collected raw tool call details");
-
-                                // Store raw arguments; parse only once the stream completes
-                                collected_raw_calls.push((
-                                    tool_call.function.name.clone(),
-                                    tool_call.function.arguments.clone(),
-                                ));
-                            }
-
-                            StreamChunk::ToolUseStart {
-                                index: _,
-                                id: _,
-                                name,
-                            } => {
-                                tracing::debug!("Tool use started in stream: {}", name);
-                            }
-
-                            StreamChunk::ToolUseInputDelta {
-                                index: _,
-                                partial_json,
-                            } => {
-                                tracing::debug!("Tool input delta in stream: {}", partial_json);
-                            }
-
-                            StreamChunk::Done { stop_reason } => {
-                                tracing::debug!("Stream done: {}", stop_reason);
-                                break;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        debug!("Streaming error encountered: {:?}", e);
-                        let _ = tx.send(Err(anyhow::anyhow!("Streaming error: {e}"))).await;
-                        break;
-                    }
-                }
-            }
-
-            debug!(full_response_len = %full_response.len(), "Streaming complete");
-            debug!(tool_calls = ?collected_raw_calls.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), "Collected raw tool call names");
-
-            // Parse raw tool calls once the stream has completed to avoid partial/fragmented JSON during streaming
-            let mut collected_calls: Vec<ToolCallInfo> = Vec::new();
-            if !collected_raw_calls.is_empty() {
-                for (name, raw_args) in collected_raw_calls {
-                    let args_map: HashMap<String, serde_json::Value> = match serde_json::from_str(
-                        &raw_args,
-                    ) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            warn!(tool=%name, "Failed to parse tool call arguments JSON at stream end: {}", e);
-                            HashMap::new()
-                        }
-                    };
-
-                    let mut args: HashMap<String, String> = HashMap::new();
-                    for (k, v) in args_map {
-                        let val_str = match v {
-                            serde_json::Value::String(s) => s,
-                            other => other.to_string(),
-                        };
-                        args.insert(k, val_str);
-                    }
-
-                    collected_calls.push(ToolCallInfo {
-                        name,
-                        arguments: args,
-                    });
-                }
-            }
-
-            // If tool calls were collected, execute them now using a bounded worker pool with per-tool timeouts
-            if !collected_calls.is_empty() {
-                tracing::info!(
-                    "Executing {} collected tool call(s) after stream completion",
-                    collected_calls.len()
-                );
-
-                // Bounded concurrency for tool execution to avoid resource exhaustion
-                let max_concurrent_tools = 4usize;
-                let tool_timeout = std::time::Duration::from_secs(30);
-                let semaphore =
-                    std::sync::Arc::new(tokio::sync::Semaphore::new(max_concurrent_tools));
-
-                // Spawn each tool execution into its own task, limited by the semaphore
-                let mut handles = Vec::new();
-                for call in collected_calls {
-                    let permit_sem = semaphore.clone();
-                    let tool_registry = tool_registry.clone();
-                    let tx_clone = tx.clone();
-                    let call_name = call.name.clone();
-                    let call_args = call.arguments.clone();
-
-                    debug!(tool=%call_name, "Spawning tool executor task");
-                    let handle = tokio::spawn(async move {
-                        // Acquire a permit (await inside spawned task so we don't block the outer task)
-                        let _permit = match permit_sem.acquire_owned().await {
-                            Ok(permit) => permit,
-                            Err(e) => {
-                                tracing::warn!(tool=%call_name, "Semaphore closed before executing tool: {:?}", e);
-                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' execution failed: internal semaphore closed\n");
-                                let _ = tx_clone.send(Ok(msg)).await;
-                                return;
-                            }
-                        };
-
-                        // Log start
-                        let start = std::time::Instant::now();
-                        info!(tool=%call_name, args=?call_args, "Starting tool execution");
-
-                        // Execute with timeout to prevent a single tool from blocking forever
-                        match tokio::time::timeout(
-                            tool_timeout,
-                            tool_registry.execute(&call_name, call_args.clone()),
-                        )
-                        .await
-                        {
-                            Ok(Ok(res)) => {
-                                let duration = start.elapsed();
-                                let result_text = if res.success {
-                                    res.output.clone()
-                                } else {
-                                    res.error.clone().unwrap_or_else(|| res.output.clone())
-                                };
-                                info!(tool=%call_name, duration_ms = %duration.as_millis(), success = res.success, "Tool execution completed");
-                                debug!(tool=%call_name, result_len = %result_text.len(), "Tool result length");
-
-                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' result:\n{result_text}\n");
-                                let _ = tx_clone.send(Ok(msg)).await;
-                            }
-                            Ok(Err(e)) => {
-                                let duration = start.elapsed();
-                                warn!(tool=%call_name, duration_ms = %duration.as_millis(), error=%e, "Tool execution failed");
-
-                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' execution failed: {e}\n");
-                                let _ = tx_clone.send(Ok(msg)).await;
-                            }
-                            Err(_) => {
-                                let duration = start.elapsed();
-                                warn!(tool=%call_name, duration_ms = %duration.as_millis(), "Tool execution timed out after {}s", tool_timeout.as_secs());
-
-                                let msg = format!("\n\n[lucide:wrench] Tool '{call_name}' execution timed out after {secs}s\n", call_name = call_name, secs = tool_timeout.as_secs());
-                                let _ = tx_clone.send(Ok(msg)).await;
-                            }
-                        }
-                        // _permit dropped here
-                    });
-
-                    handles.push(handle);
-                }
-
-                // Wait for all spawned tool tasks to finish and then close the sender
-                let _ = futures::future::join_all(handles).await;
-                debug!("All tool worker tasks completed, joined");
-            }
-
-            // Drop the sender to close the channel
-            drop(tx);
-        });
-
-        Ok(rx)
     }
 }
 
@@ -846,7 +547,6 @@ mod tests {
                     api_key_env: None,
                 },
             ],
-            disable_streaming: false,
             disable_tools: false,
         };
         assert_eq!(select_backend(&cfg).map(|b| b.name.clone()), Some("openai".to_string()));
@@ -863,7 +563,6 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
             }],
-            disable_streaming: false,
             disable_tools: false,
         };
         assert_eq!(select_backend(&cfg).map(|b| b.name.clone()), Some("ollama".to_string()));

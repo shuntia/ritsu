@@ -1024,7 +1024,7 @@ pub async fn execute_idle_analysis(
             );
 
             match llm_client
-                .generate_with_tool_execution(&messages, system_prompt.as_deref(), 3)
+                .generate_with_tool_execution(&messages, system_prompt.as_deref(), 3, false)
                 .await
             {
                 Ok(resp) => {
@@ -1080,7 +1080,7 @@ pub async fn run_trigger_loop(
         if triggers.is_empty() {
             info!("No triggers registered, waiting for changes or 60 seconds");
             tokio::select! {
-                () = sleep(Duration::from_secs(60)) => {},
+                () = sleep(Duration::from_mins(1)) => {},
                 () = notifier.notified() => {
                     info!("Trigger registry changed, reloading");
                 }
@@ -1199,7 +1199,7 @@ pub async fn run_trigger_loop(
         } else {
             // No triggers ready, wait for registry change or check again in 60 seconds
             tokio::select! {
-                () = sleep(Duration::from_secs(60)) => {},
+                () = sleep(Duration::from_mins(1)) => {},
                 () = notifier.notified() => {
                     info!("Trigger registry changed, rescheduling");
                 }
